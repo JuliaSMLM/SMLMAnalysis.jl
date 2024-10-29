@@ -1,0 +1,13 @@
+name = "SMLMAnalysis"
+uuid = "5ba66956-a7ba-489c-b260-90fb8f3af39c"
+authors = ["klidke@unm.edu"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
