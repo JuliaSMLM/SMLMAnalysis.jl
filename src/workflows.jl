@@ -12,6 +12,7 @@ using SMLMBoxer
 using GaussMLE
 using MicroscopePSFs
 using SMLMRender
+using SMLMDriftCorrection
 using CairoMakie
 using Statistics
 using TOML
@@ -62,14 +63,20 @@ Base.@kwdef struct AnalysisConfig
     iterations::Int = 20
     fit_device::Symbol = :auto      # :cpu, :gpu, :auto
 
-    # === Filtering (runs before frame connection) ===
+    # === Filtering (runs before drift correction) ===
     filter::Bool = true
     min_photons::Union{Float64, Nothing} = 500.0
     max_sigma::Union{Float64, Nothing} = 0.015    # 15nm precision threshold
     min_pvalue::Union{Float64, Nothing} = 1e-3    # p-value threshold
 
-    # === Frame Connection (runs on filtered data) ===
-    frameconnect::Bool = true
+    # === Drift Correction (runs on filtered data) ===
+    drift::Bool = true              # ON by default for DNA-PAINT
+    drift_degree::Int = 2           # Polynomial degree (2 usually sufficient)
+    drift_cost_fun::String = "Kdtree"  # "Kdtree" (fast) or "Entropy"
+    drift_model::String = "Polynomial" # "Polynomial" or "LegendrePoly"
+
+    # === Frame Connection (runs on drift-corrected data) ===
+    frameconnect::Bool = false      # OFF by default (skip for most workflows)
     fc_max_distance::Float64 = 0.1  # microns
     fc_max_gap::Int = 1             # frames
     fc_max_blinks::Int = 1
@@ -331,7 +338,55 @@ function analyze(data::AbstractArray{<:Real, 3}, camera::SMLMData.AbstractCamera
     end
 
     # =========================================================================
-    # Step 4: Frame Connection (optional) - operates on filtered data
+    # Step 4: Drift Correction (optional) - operates on filtered data
+    # =========================================================================
+    if config.drift
+        print("  Drift correction... ")
+
+        # Store original coordinates for drift visualization
+        x_orig = [e.x for e in smld.emitters]
+        y_orig = [e.y for e in smld.emitters]
+        frames_orig = [e.frame for e in smld.emitters]
+
+        t = @elapsed smld_corrected = driftcorrect(smld;
+            degree = config.drift_degree,
+            cost_fun = config.drift_cost_fun,
+            intramodel = config.drift_model,
+            verbose = 0
+        )
+        timings["drift"] = t
+
+        # Compute drift trajectory (original - corrected)
+        x_corr = [e.x for e in smld_corrected.emitters]
+        y_corr = [e.y for e in smld_corrected.emitters]
+        dx = x_orig .- x_corr
+        dy = y_orig .- y_corr
+
+        # Bin by frame to get trajectory
+        unique_frames = sort(unique(frames_orig))
+        drift_x = [mean(dx[frames_orig .== f]) for f in unique_frames]
+        drift_y = [mean(dy[frames_orig .== f]) for f in unique_frames]
+
+        max_drift_x = maximum(abs.(drift_x)) * 1000  # nm
+        max_drift_y = maximum(abs.(drift_y)) * 1000  # nm
+        println("max $(round(max_drift_x, digits=1))nm X, $(round(max_drift_y, digits=1))nm Y ($(round(t, digits=2))s)")
+
+        add_step!(workflow, "Drift Correction", :driftcorrect,
+            Dict{Symbol,Any}(:degree => config.drift_degree, :cost_fun => config.drift_cost_fun),
+            :SMLMDriftCorrection, "max $(round(max(max_drift_x, max_drift_y), digits=0))nm")
+
+        # Save drift figures and stats
+        if config.outdir !== nothing
+            mkpath(joinpath(config.outdir, "04_drift"))
+            _save_drift_figures(unique_frames, drift_x, drift_y, config)
+            _write_drift_stats(unique_frames, drift_x, drift_y, config, t)
+        end
+
+        smld = smld_corrected
+    end
+
+    # =========================================================================
+    # Step 5: Frame Connection (optional) - operates on drift-corrected data
     # =========================================================================
     if config.frameconnect
         print("  Frame connection... ")
@@ -347,7 +402,7 @@ function analyze(data::AbstractArray{<:Real, 3}, camera::SMLMData.AbstractCamera
     end
 
     # =========================================================================
-    # Step 5: Rendering (optional)
+    # Step 6: Rendering (optional)
     # =========================================================================
     if config.render
         print("  Rendering... ")
@@ -811,6 +866,69 @@ function _write_filter_stats(smld_raw, smld_filtered, config, elapsed_time)
     end
 end
 
+"""Save drift correction figures."""
+function _save_drift_figures(frames, drift_x, drift_y, config)
+    # Convert to nm
+    drift_x_nm = drift_x .* 1000
+    drift_y_nm = drift_y .* 1000
+
+    fig = Figure(size=(1400, 400))
+
+    # X drift vs frame
+    ax1 = Axis(fig[1, 1], xlabel="Frame", ylabel="X Drift (nm)", title="X Drift vs Frame")
+    lines!(ax1, frames, drift_x_nm, color=:blue, linewidth=1.5)
+    hlines!(ax1, [0], color=:gray, linestyle=:dash)
+
+    # Y drift vs frame
+    ax2 = Axis(fig[1, 2], xlabel="Frame", ylabel="Y Drift (nm)", title="Y Drift vs Frame")
+    lines!(ax2, frames, drift_y_nm, color=:red, linewidth=1.5)
+    hlines!(ax2, [0], color=:gray, linestyle=:dash)
+
+    # XY drift path
+    ax3 = Axis(fig[1, 3], xlabel="X Drift (nm)", ylabel="Y Drift (nm)",
+               title="XY Drift Path", aspect=DataAspect())
+    lines!(ax3, drift_x_nm, drift_y_nm, color=:black, linewidth=1.5)
+    scatter!(ax3, [drift_x_nm[1]], [drift_y_nm[1]], color=:green, markersize=12, label="Start")
+    scatter!(ax3, [drift_x_nm[end]], [drift_y_nm[end]], color=:red, markersize=12, label="End")
+    axislegend(ax3, position=:lt)
+
+    save(joinpath(config.outdir, "04_drift", "drift_trajectory.png"), fig)
+end
+
+"""Write drift correction statistics markdown file."""
+function _write_drift_stats(frames, drift_x, drift_y, config, elapsed_time)
+    # Convert to nm
+    drift_x_nm = drift_x .* 1000
+    drift_y_nm = drift_y .* 1000
+
+    max_x = maximum(abs.(drift_x_nm))
+    max_y = maximum(abs.(drift_y_nm))
+    total_x = drift_x_nm[end] - drift_x_nm[1]
+    total_y = drift_y_nm[end] - drift_y_nm[1]
+    total_dist = sqrt(total_x^2 + total_y^2)
+
+    filepath = joinpath(config.outdir, "04_drift", "drift_stats.md")
+    open(filepath, "w") do io
+        println(io, "# Drift Correction Statistics\n")
+        println(io, "## Summary")
+        println(io, "- **Time**: $(round(elapsed_time, digits=2))s")
+        println(io, "- **Frames**: $(length(frames))")
+        println(io, "- **Max X drift**: $(round(max_x, digits=1)) nm")
+        println(io, "- **Max Y drift**: $(round(max_y, digits=1)) nm")
+        println(io, "- **Total displacement**: $(round(total_dist, digits=1)) nm")
+        println(io, "")
+        println(io, "## Parameters")
+        println(io, "- Model: $(config.drift_model)")
+        println(io, "- Degree: $(config.drift_degree)")
+        println(io, "- Cost function: $(config.drift_cost_fun)")
+        println(io, "")
+        println(io, "## Health Check")
+        println(io, "- Max drift: $(round(max(max_x, max_y), digits=0)) nm ",
+                max(max_x, max_y) < 500 ? "✓" : "⚠ (large drift)")
+        println(io, "- Drift rate: $(round(total_dist / length(frames) * 1000, digits=2)) nm/kframe")
+    end
+end
+
 """Write render statistics markdown file."""
 function _write_render_stats(smld, config, elapsed_time)
     emitters = smld.emitters
@@ -902,6 +1020,9 @@ function _write_summary(roi_batch, smld_raw, smld_filtered, data, config, timing
         println(io, "| Detection | $(n_rois) ROIs | $(round(get(timings, "detection", 0.0), digits=1))s |")
         println(io, "| Fitting | $(n_raw) fits | $(round(get(timings, "fitting", 0.0), digits=1))s |")
         println(io, "| Filtering | $(n_filtered) kept ($(round(100*acceptance_rate, digits=1))%) | $(round(get(timings, "filtering", 0.0), digits=1))s |")
+        if config.drift
+            println(io, "| Drift Correction | - | $(round(get(timings, "drift", 0.0), digits=1))s |")
+        end
         if config.render
             println(io, "| Rendering | - | $(round(get(timings, "rendering", 0.0), digits=1))s |")
         end
@@ -919,6 +1040,10 @@ function _write_summary(roi_batch, smld_raw, smld_filtered, data, config, timing
         println(io, "- `02_fitting/fit_acceptance.png` - Acceptance visualization")
         println(io, "- `02_fitting/fitting_stats.md` - Fitting statistics")
         println(io, "- `03_filtered/filter_stats.md` - Filter statistics")
+        if config.drift
+            println(io, "- `04_drift/drift_trajectory.png` - Drift trajectory plots")
+            println(io, "- `04_drift/drift_stats.md` - Drift correction statistics")
+        end
         if config.render
             println(io, "- `05_superres/superres_gaussian.png` - Super-resolution image")
             println(io, "- `05_superres/render_stats.md` - Render statistics")
