@@ -343,12 +343,7 @@ function analyze(data::AbstractArray{<:Real, 3}, camera::SMLMData.AbstractCamera
     if config.drift
         print("  Drift correction... ")
 
-        # Store original coordinates for drift visualization
-        x_orig = [e.x for e in smld.emitters]
-        y_orig = [e.y for e in smld.emitters]
-        frames_orig = [e.frame for e in smld.emitters]
-
-        t = @elapsed smld_corrected = driftcorrect(smld;
+        t = @elapsed drift_result = driftcorrect(smld;
             degree = config.drift_degree,
             cost_fun = config.drift_cost_fun,
             intramodel = config.drift_model,
@@ -356,16 +351,15 @@ function analyze(data::AbstractArray{<:Real, 3}, camera::SMLMData.AbstractCamera
         )
         timings["drift"] = t
 
-        # Compute drift trajectory (original - corrected)
-        x_corr = [e.x for e in smld_corrected.emitters]
-        y_corr = [e.y for e in smld_corrected.emitters]
-        dx = x_orig .- x_corr
-        dy = y_orig .- y_corr
+        smld_corrected = drift_result.smld
+        drift_model = drift_result.model
 
-        # Bin by frame to get trajectory
-        unique_frames = sort(unique(frames_orig))
-        drift_x = [mean(dx[frames_orig .== f]) for f in unique_frames]
-        drift_y = [mean(dy[frames_orig .== f]) for f in unique_frames]
+        # Extract drift curves from model (more accurate than coord differencing)
+        n_frames = smld.n_frames
+        frames = collect(1:n_frames)
+        DC = SMLMDriftCorrection
+        drift_x = [DC.applydrift(0.0, f, drift_model.intra[1].dm[1]) for f in frames]
+        drift_y = [DC.applydrift(0.0, f, drift_model.intra[1].dm[2]) for f in frames]
 
         max_drift_x = maximum(abs.(drift_x)) * 1000  # nm
         max_drift_y = maximum(abs.(drift_y)) * 1000  # nm
@@ -378,8 +372,8 @@ function analyze(data::AbstractArray{<:Real, 3}, camera::SMLMData.AbstractCamera
         # Save drift figures and stats
         if config.outdir !== nothing
             mkpath(joinpath(config.outdir, "04_drift"))
-            _save_drift_figures(unique_frames, drift_x, drift_y, config)
-            _write_drift_stats(unique_frames, drift_x, drift_y, config, t)
+            _save_drift_figures(frames, drift_x, drift_y, config)
+            _write_drift_stats(frames, drift_x, drift_y, config, t)
         end
 
         smld = smld_corrected
