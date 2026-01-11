@@ -435,6 +435,10 @@ function analyze(data::AbstractArray{<:Real, 3}, camera::SMLMData.AbstractCamera
 
             # 3. Circles render @ 50x + time coloring (individual loc inspection)
             if config.render_circles
+                n_locs = length(smld.emitters)
+                if n_locs > 100_000 && config.render_circles_zoom > 30
+                    @warn "Large circles render: $(n_locs) locs @ $(config.render_circles_zoom)x may produce large image"
+                end
                 t = @elapsed render(smld;
                     strategy = CircleRender(),
                     zoom = config.render_circles_zoom,
