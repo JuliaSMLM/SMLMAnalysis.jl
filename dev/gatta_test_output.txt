@@ -1,0 +1,149 @@
+================================================================================
+DNA-PAINT Ruler Analysis - SMART Microscope Data
+================================================================================
+
+📂 STEP 1: Loading H5 data...
+   File: 20R-ruler-0.1exp-TIRF-onlyZFocusLockDT1-1ch--2025-10-23_11-29-25.h5
+   Full sensor: 2304 x 2304 pixels
+   ROI dimensions: 860 x 256 pixels
+   Total frames: 20000
+   Exposure time: 100 ms
+   Frame rate: 10 fps
+   File size: 8.81 GB
+
+   Loading first 1000 frames...
+   Data shape: (256, 860, 1000)
+   Memory usage: 440.3 MB
+
+📷 STEP 2: Setting up camera model...
+   Camera: Hamamatsu ORCA-Fusion (C14440-20UP)
+   Physical pixel size: 6.5 µm
+   Assumed effective pixel size: 100.0 nm
+   Note: Verify magnification calibration!
+   Camera model created:
+     - Dimensions: 860 x 256 pixels
+     - Pixel size: 0.1 µm
+     - Read noise: 0.7 e-
+     - QE: 80%
+     - Gain: 1.0 e-/ADU
+     - Offset: 150.0 ADU
+
+🔍 STEP 3: Detecting particles with SMLMBoxer...
+   SMLMBoxer parameters:
+     - boxsize: 7 pixels
+     - DoG sigmas: 1.0, 2.0 pixels
+     - minval threshold: 200.0 ADU
+     - overlap: 2.0 pixels
+
+   Running detection...
+ERROR: LoadError: MethodError: no method matching convolve_variance_weighted(::Array{Float32, 4}, ::Matrix{Float64}, ::Float32, ::Bool)
+The function `convolve_variance_weighted` exists, but no method is defined for this combination of argument types.
+
+Closest candidates are:
+  convolve_variance_weighted(::AbstractArray{T}, !Matched::AbstractMatrix{T}, ::Float32, ::Bool) where T<:Real
+   @ SMLMBoxer ~/julia_shared_dev/SMLMBoxer/src/filter.jl:213
+
+Stacktrace:
+ [1] dog_filter_variance_weighted(imagestack::Array{Float32, 4}, sigma_small::Float32, sigma_large::Float32, args::SMLMBoxer.GetBoxesArgs)
+   @ SMLMBoxer ~/julia_shared_dev/SMLMBoxer/src/filter.jl:132
+ [2] dog_filter(imagestack::Array{Float32, 4}, args::SMLMBoxer.GetBoxesArgs)
+   @ SMLMBoxer ~/julia_shared_dev/SMLMBoxer/src/filter.jl:96
+ [3] _getboxes_impl(args::SMLMBoxer.GetBoxesArgs)
+   @ SMLMBoxer ~/julia_shared_dev/SMLMBoxer/src/interface.jl:151
+ [4] getboxes(imagestack::Array{UInt16, 3}, camera::SCMOSCamera{Float64}; kwargs::@Kwargs{boxsize::Int64, overlap::Float64, sigma_small::Float64, sigma_large::Float64, minval::Float64})
+   @ SMLMBoxer ~/julia_shared_dev/SMLMBoxer/src/interface.jl:111
+ [5] top-level scope
+   @ ~/julia_shared_dev/SMLMAnalysis/dev/gatta_rulers_test.jl:119
+ [6] include(mod::Module, _path::String)
+   @ Base ./Base.jl:306
+ [7] exec_options(opts::Base.JLOptions)
+   @ Base ./client.jl:317
+ [8] _start()
+   @ Base ./client.jl:550
+in expression starting at /home/kalidke/julia_shared_dev/SMLMAnalysis/dev/gatta_rulers_test.jl:119
+================================================================================
+DNA-PAINT Ruler Analysis - SMART Microscope Data
+================================================================================
+
+📂 STEP 1: Loading H5 data...
+   File: 20R-ruler-0.1exp-TIRF-onlyZFocusLockDT1-1ch--2025-10-23_11-29-25.h5
+   Full sensor: 2304 x 2304 pixels
+   ROI dimensions: 860 x 256 pixels
+   Total frames: 20000
+   Exposure time: 100 ms
+   Frame rate: 10 fps
+   File size: 8.81 GB
+
+   Loading first 1000 frames...
+   Data shape: (256, 860, 1000)
+   Memory usage: 440.3 MB
+
+📷 STEP 2: Setting up camera model...
+   Camera: Hamamatsu ORCA-Fusion (C14440-20UP)
+   Physical pixel size: 6.5 µm
+   Assumed effective pixel size: 100.0 nm
+   Note: Verify magnification calibration!
+   Camera model created:
+     - Dimensions: 860 x 256 pixels
+     - Pixel size: 0.1 µm
+     - Read noise: 0.7 e-
+     - QE: 80%
+     - Gain: 1.0 e-/ADU
+     - Offset: 150.0 ADU
+
+🔍 STEP 3: Detecting particles with SMLMBoxer...
+   SMLMBoxer parameters:
+     - boxsize: 7 pixels
+     - DoG sigmas: 1.0, 2.0 pixels
+     - minval threshold: 200.0 ADU
+     - overlap: 2.0 pixels
+
+   Running detection...
+
+   Detection Results:
+     - ROIs detected: 201387
+     - Detections per frame (avg): 201.39
+
+📊 STEP 4: Fitting Gaussians with GaussMLE...
+   Fitting model: GaussianXYNB (2D + photons + background)
+   ROI batch size: 201387 ROIs
+   ROI dimensions: 7 x 7
+
+   Running maximum likelihood estimation...
+ERROR: LoadError: MethodError: no method matching compute_likelihood_terms(::Float32, ::Float32, ::Float32, ::Int64, ::Int64)
+The function `compute_likelihood_terms` exists, but no method is defined for this combination of argument types.
+
+Closest candidates are:
+  compute_likelihood_terms(::T, ::T, !Matched::AbstractArray, ::Any, ::Any) where T
+   @ GaussMLE ~/julia_shared_dev/GaussMLE/src/camera_models.jl:36
+  compute_likelihood_terms(::T, ::T, !Matched::GaussMLE.SCMOSCameraInternal, ::Any, ::Any) where T
+   @ GaussMLE ~/julia_shared_dev/GaussMLE/src/camera_models.jl:45
+  compute_likelihood_terms(::T, ::T, !Matched::GaussMLE.IdealCamera) where T
+   @ GaussMLE ~/julia_shared_dev/GaussMLE/src/camera_models.jl:19
+
+Stacktrace:
+  [1] _dispatch_likelihood
+    @ ~/julia_shared_dev/GaussMLE/src/unified_kernel.jl:278 [inlined]
+  [2] macro expansion
+    @ ~/julia_shared_dev/GaussMLE/src/unified_kernel.jl:318 [inlined]
+  [3] macro expansion
+    @ ~/.julia_kitt/packages/KernelAbstractions/X5fk1/src/macros.jl:314 [inlined]
+  [4] cpu_unified_gaussian_mle_kernel!(__ctx__::KernelAbstractions.CompilerMetadata{KernelAbstractions.NDIteration.DynamicSize, KernelAbstractions.NDIteration.DynamicCheck, CartesianIndex{1}, CartesianIndices{1, Tuple{Base.OneTo{Int64}}}, KernelAbstractions.NDIteration.NDRange{1, KernelAbstractions.NDIteration.DynamicSize, KernelAbstractions.NDIteration.DynamicSize, CartesianIndices{1, Tuple{Base.OneTo{Int64}}}, CartesianIndices{1, Tuple{Base.OneTo{Int64}}}}}, results::Matrix{Float32}, uncertainties::Matrix{Float32}, log_likelihoods::Vector{Float32}, data::Array{Float32, 3}, psf_model::GaussianXYNB{Float32}, camera_model::Val{true}, variance_map::Float32, constraints::GaussMLE.ParameterConstraints{4}, iterations::Int64)
+    @ GaussMLE ./none:0
+  [5] __thread_run(tid::Int64, len::Int64, rem::Int64, obj::KernelAbstractions.Kernel{KernelAbstractions.CPU, KernelAbstractions.NDIteration.DynamicSize, KernelAbstractions.NDIteration.DynamicSize, typeof(GaussMLE.cpu_unified_gaussian_mle_kernel!)}, ndrange::Tuple{Int64}, iterspace::KernelAbstractions.NDIteration.NDRange{1, KernelAbstractions.NDIteration.DynamicSize, KernelAbstractions.NDIteration.DynamicSize, CartesianIndices{1, Tuple{Base.OneTo{Int64}}}, CartesianIndices{1, Tuple{Base.OneTo{Int64}}}}, args::Tuple{Matrix{Float32}, Matrix{Float32}, Vector{Float32}, Array{Float32, 3}, GaussianXYNB{Float32}, Val{true}, Float32, GaussMLE.ParameterConstraints{4}, Int64}, dynamic::KernelAbstractions.NDIteration.DynamicCheck)
+    @ KernelAbstractions ~/.julia_kitt/packages/KernelAbstractions/X5fk1/src/cpu.jl:145
+  [6] __run(obj::KernelAbstractions.Kernel{KernelAbstractions.CPU, KernelAbstractions.NDIteration.DynamicSize, KernelAbstractions.NDIteration.DynamicSize, typeof(GaussMLE.cpu_unified_gaussian_mle_kernel!)}, ndrange::Tuple{Int64}, iterspace::KernelAbstractions.NDIteration.NDRange{1, KernelAbstractions.NDIteration.DynamicSize, KernelAbstractions.NDIteration.DynamicSize, CartesianIndices{1, Tuple{Base.OneTo{Int64}}}, CartesianIndices{1, Tuple{Base.OneTo{Int64}}}}, args::Tuple{Matrix{Float32}, Matrix{Float32}, Vector{Float32}, Array{Float32, 3}, GaussianXYNB{Float32}, Val{true}, Float32, GaussMLE.ParameterConstraints{4}, Int64}, dynamic::KernelAbstractions.NDIteration.DynamicCheck, static_threads::Bool)
+    @ KernelAbstractions ~/.julia_kitt/packages/KernelAbstractions/X5fk1/src/cpu.jl:112
+  [7] (::KernelAbstractions.Kernel{KernelAbstractions.CPU, KernelAbstractions.NDIteration.DynamicSize, KernelAbstractions.NDIteration.DynamicSize, typeof(GaussMLE.cpu_unified_gaussian_mle_kernel!)})(::Matrix{Float32}, ::Vararg{Any}; ndrange::Int64, workgroupsize::Nothing)
+    @ KernelAbstractions ~/.julia_kitt/packages/KernelAbstractions/X5fk1/src/cpu.jl:46
+  [8] fit(fitter::GaussMLEFitter{GaussMLE.CPU, GaussianXYNB{Float32}, GaussMLE.ParameterConstraints{4}}, roi_batch::ROIBatch{Float32, 3, Array{Float32, 3}, SCMOSCamera{Float64}})
+    @ GaussMLE ~/julia_shared_dev/GaussMLE/src/interface.jl:389
+  [9] top-level scope
+    @ ~/julia_shared_dev/SMLMAnalysis/dev/gatta_rulers_test.jl:158
+ [10] include(mod::Module, _path::String)
+    @ Base ./Base.jl:306
+ [11] exec_options(opts::Base.JLOptions)
+    @ Base ./client.jl:317
+ [12] _start()
+    @ Base ./client.jl:550
+in expression starting at /home/kalidke/julia_shared_dev/SMLMAnalysis/dev/gatta_rulers_test.jl:158
