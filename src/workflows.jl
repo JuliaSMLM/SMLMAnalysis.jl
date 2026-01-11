@@ -83,9 +83,13 @@ Base.@kwdef struct AnalysisConfig
 
     # === Rendering ===
     render::Bool = true             # ON by default - primary output
-    render_zoom::Int = 20
-    render_colormap::Symbol = :inferno
-    render_strategy::Symbol = :gaussian  # :gaussian or :histogram
+    render_gaussian::Bool = true    # Gaussian blur @ 20x + inferno
+    render_histogram::Bool = true   # Histogram @ 10x + time coloring
+    render_circles::Bool = true     # Circles @ 50x + time coloring
+    render_gaussian_zoom::Int = 20
+    render_histogram_zoom::Int = 10
+    render_circles_zoom::Int = 50
+    render_time_colormap::Symbol = :turbo  # colormap for time-colored renders
 
     # === BAGOL (Deep Learning) ===
     bagol::Bool = false             # OFF by default
@@ -396,38 +400,72 @@ function analyze(data::AbstractArray{<:Real, 3}, camera::SMLMData.AbstractCamera
     end
 
     # =========================================================================
-    # Step 6: Rendering (optional)
+    # Step 6: Rendering (optional) - generates multiple render types
     # =========================================================================
     if config.render
         print("  Rendering... ")
-        strategy = config.render_strategy == :gaussian ? GaussianRender() : HistogramRender()
+        t_total = 0.0
+        render_count = 0
 
         if config.outdir !== nothing
-            t = @elapsed render(smld;
-                strategy = strategy,
-                zoom = config.render_zoom,
-                colormap = config.render_colormap,
-                filename = joinpath(config.outdir, "05_superres", "superres_$(config.render_strategy).png")
-            )
-            timings["rendering"] = t
-            println("saved ($(round(t, digits=2))s)")
+            # 1. Gaussian render @ 20x + inferno (primary super-res image)
+            if config.render_gaussian
+                t = @elapsed render(smld;
+                    strategy = GaussianRender(),
+                    zoom = config.render_gaussian_zoom,
+                    colormap = :inferno,
+                    filename = joinpath(config.outdir, "05_superres", "gaussian_inferno.png")
+                )
+                t_total += t
+                render_count += 1
+            end
+
+            # 2. Histogram render @ 10x + time coloring (temporal coverage)
+            if config.render_histogram
+                t = @elapsed render(smld;
+                    strategy = HistogramRender(),
+                    zoom = config.render_histogram_zoom,
+                    color_by = :frame,
+                    colormap = config.render_time_colormap,
+                    filename = joinpath(config.outdir, "05_superres", "histogram_time.png")
+                )
+                t_total += t
+                render_count += 1
+            end
+
+            # 3. Circles render @ 50x + time coloring (individual loc inspection)
+            if config.render_circles
+                t = @elapsed render(smld;
+                    strategy = CircleRender(),
+                    zoom = config.render_circles_zoom,
+                    color_by = :frame,
+                    colormap = config.render_time_colormap,
+                    filename = joinpath(config.outdir, "05_superres", "circles_time.png")
+                )
+                t_total += t
+                render_count += 1
+            end
+
+            timings["rendering"] = t_total
+            println("$render_count images ($(round(t_total, digits=2))s)")
         else
+            # No output directory - just render gaussian to display
             t = @elapsed render(smld;
-                strategy = strategy,
-                zoom = config.render_zoom,
-                colormap = config.render_colormap
+                strategy = GaussianRender(),
+                zoom = config.render_gaussian_zoom,
+                colormap = :inferno
             )
             timings["rendering"] = t
             println("($(round(t, digits=2))s)")
         end
 
         add_step!(workflow, "Rendering", :render,
-            Dict{Symbol,Any}(:zoom => config.render_zoom, :strategy => config.render_strategy),
-            :SMLMRender, "$(config.render_zoom)x zoom")
+            Dict{Symbol,Any}(:gaussian => config.render_gaussian, :histogram => config.render_histogram, :circles => config.render_circles),
+            :SMLMRender, "$render_count renders")
 
         # Save render stats
         if config.outdir !== nothing
-            _write_render_stats(smld, config, t)
+            _write_render_stats(smld, config, t_total)
         end
     end
 
@@ -951,11 +989,21 @@ function _write_render_stats(smld, config, elapsed_time)
         println(io, "- **Area**: $(round(area_um2, digits=1)) μm²")
         println(io, "- **Localization density**: $(round(density, digits=1)) /μm²")
         println(io, "")
-        println(io, "## Render Parameters")
-        println(io, "- Zoom: $(config.render_zoom)x")
-        println(io, "- Strategy: $(config.render_strategy)")
-        println(io, "- Colormap: $(config.render_colormap)")
-        println(io, "- Pixel size: $(round(1000/config.render_zoom * 0.078, digits=1)) nm (at 78nm camera pixel)")
+        println(io, "## Renders Generated\n")
+        println(io, "| Render | Zoom | Pixel Size | Purpose |")
+        println(io, "|--------|------|------------|---------|")
+        if config.render_gaussian
+            ps = round(1000 / config.render_gaussian_zoom * 0.078, digits=1)
+            println(io, "| Gaussian (inferno) | $(config.render_gaussian_zoom)x | $(ps) nm | Primary super-res |")
+        end
+        if config.render_histogram
+            ps = round(1000 / config.render_histogram_zoom * 0.078, digits=1)
+            println(io, "| Histogram (time) | $(config.render_histogram_zoom)x | $(ps) nm | Temporal coverage |")
+        end
+        if config.render_circles
+            ps = round(1000 / config.render_circles_zoom * 0.078, digits=1)
+            println(io, "| Circles (time) | $(config.render_circles_zoom)x | $(ps) nm | Individual locs |")
+        end
         println(io, "")
         println(io, "## Resolution Estimate")
         println(io, "- Mean precision: $(round(mean_precision, digits=1)) nm")
@@ -1039,7 +1087,15 @@ function _write_summary(roi_batch, smld_raw, smld_filtered, data, config, timing
             println(io, "- `04_drift/drift_stats.md` - Drift correction statistics")
         end
         if config.render
-            println(io, "- `05_superres/superres_gaussian.png` - Super-resolution image")
+            if config.render_gaussian
+                println(io, "- `05_superres/gaussian_inferno.png` - Gaussian render ($(config.render_gaussian_zoom)x)")
+            end
+            if config.render_histogram
+                println(io, "- `05_superres/histogram_time.png` - Histogram by time ($(config.render_histogram_zoom)x)")
+            end
+            if config.render_circles
+                println(io, "- `05_superres/circles_time.png` - Circles by time ($(config.render_circles_zoom)x)")
+            end
             println(io, "- `05_superres/render_stats.md` - Render statistics")
         end
         println(io, "- `config.toml` - Analysis configuration")
