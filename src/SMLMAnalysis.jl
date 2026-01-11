@@ -71,6 +71,8 @@ export save_smld, load_smld, smld_info
 # Include high-level workflows
 include("workflows.jl")
 export simulate_detect_fit_workflow, standard_localization_workflow
+export AnalysisConfig, AnalysisResult, analyze
+export save_config, load_config
 
 # Re-export SMLMRender functions and types
 export render, save_image
