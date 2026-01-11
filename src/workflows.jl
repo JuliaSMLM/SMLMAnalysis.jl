@@ -267,7 +267,7 @@ function analyze(data::AbstractArray{<:Real, 3}, camera::SMLMData.AbstractCamera
     # Save detection figures and stats
     if config.outdir !== nothing && config.save_figures
         _save_detection_figures(data, roi_batch, camera, config)
-        _write_detection_stats(roi_batch, data, config)
+        _write_detection_stats(roi_batch, data, config, t)
     end
 
     # =========================================================================
@@ -305,7 +305,7 @@ function analyze(data::AbstractArray{<:Real, 3}, camera::SMLMData.AbstractCamera
     # Save fitting figures and stats
     if config.outdir !== nothing && config.save_figures
         _save_fitting_figures(smld_raw, roi_batch, data, camera, config)
-        _write_fitting_stats(smld_raw, config)
+        _write_fitting_stats(smld_raw, config, t)
     end
 
     # =========================================================================
@@ -326,7 +326,7 @@ function analyze(data::AbstractArray{<:Real, 3}, camera::SMLMData.AbstractCamera
 
         # Save filter stats
         if config.outdir !== nothing
-            _write_filter_stats(smld_raw, smld, config)
+            _write_filter_stats(smld_raw, smld, config, t)
         end
     end
 
@@ -378,7 +378,7 @@ function analyze(data::AbstractArray{<:Real, 3}, camera::SMLMData.AbstractCamera
 
         # Save render stats
         if config.outdir !== nothing
-            _write_render_stats(smld, config)
+            _write_render_stats(smld, config, t)
         end
     end
 
@@ -634,7 +634,7 @@ end
 # =============================================================================
 
 """Write detection statistics markdown file."""
-function _write_detection_stats(roi_batch, data, config)
+function _write_detection_stats(roi_batch, data, config, elapsed_time)
     nframes = size(data, 3)
     n_rois = length(roi_batch)
 
@@ -652,6 +652,7 @@ function _write_detection_stats(roi_batch, data, config)
         println(io, "## Summary")
         println(io, "- **Total ROIs detected**: $(n_rois)")
         println(io, "- **Frames analyzed**: $(nframes)")
+        println(io, "- **Time**: $(round(elapsed_time, digits=2))s ($(round(nframes/elapsed_time, digits=0)) frames/s)")
         println(io, "- **ROIs per frame**: mean=$(round(mean(rois_per_frame), digits=1)), std=$(round(std(rois_per_frame), digits=1))")
         println(io, "- **ROIs/frame range**: $(minimum(rois_per_frame)) - $(maximum(rois_per_frame))")
         println(io, "")
@@ -676,7 +677,7 @@ function _write_detection_stats(roi_batch, data, config)
 end
 
 """Write fitting statistics markdown file."""
-function _write_fitting_stats(smld_raw, config)
+function _write_fitting_stats(smld_raw, config, elapsed_time)
     emitters = smld_raw.emitters
     n = length(emitters)
 
@@ -695,6 +696,7 @@ function _write_fitting_stats(smld_raw, config)
         println(io, "# Fitting Statistics\n")
         println(io, "## Summary")
         println(io, "- **Total fits**: $(n)")
+        println(io, "- **Time**: $(round(elapsed_time, digits=2))s ($(round(n/elapsed_time/1000, digits=0))k fits/s)")
         println(io, "- **Model**: $(config.fit_model)")
         println(io, "- **Iterations**: $(config.iterations)")
         println(io, "")
@@ -747,7 +749,7 @@ function _write_fitting_stats(smld_raw, config)
 end
 
 """Write filter statistics markdown file."""
-function _write_filter_stats(smld_raw, smld_filtered, config)
+function _write_filter_stats(smld_raw, smld_filtered, config, elapsed_time)
     n_raw = length(smld_raw.emitters)
     n_filtered = length(smld_filtered.emitters)
 
@@ -774,6 +776,7 @@ function _write_filter_stats(smld_raw, smld_filtered, config)
         println(io, "- **Input**: $(n_raw) localizations")
         println(io, "- **Output**: $(n_filtered) localizations")
         println(io, "- **Acceptance rate**: $(round(100*n_filtered/n_raw, digits=1))%")
+        println(io, "- **Time**: $(round(elapsed_time*1000, digits=1))ms")
         println(io, "")
         println(io, "## Per-Filter Results\n")
         println(io, "| Filter | Threshold | Pass | Fail | % Pass |")
@@ -809,7 +812,7 @@ function _write_filter_stats(smld_raw, smld_filtered, config)
 end
 
 """Write render statistics markdown file."""
-function _write_render_stats(smld, config)
+function _write_render_stats(smld, config, elapsed_time)
     emitters = smld.emitters
     n = length(emitters)
 
@@ -831,6 +834,7 @@ function _write_render_stats(smld, config)
         println(io, "# Render Statistics\n")
         println(io, "## Summary")
         println(io, "- **Localizations rendered**: $(n)")
+        println(io, "- **Time**: $(round(elapsed_time, digits=2))s")
         println(io, "- **Field of view**: $(round(x_range, digits=1)) × $(round(y_range, digits=1)) μm")
         println(io, "- **Area**: $(round(area_um2, digits=1)) μm²")
         println(io, "- **Localization density**: $(round(density, digits=1)) /μm²")
