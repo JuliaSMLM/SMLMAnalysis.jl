@@ -24,7 +24,8 @@ camera = SCMOSCamera(size(data, 2), size(data, 1), 0.078f0, 0.7f0;
 # Analysis - Anisotropic PSF model
 # =============================================================================
 result = analyze(data, camera;
-    # Detection
+    # Detection - PSF sigma in microns (DoG uses σ and 2σ)
+    psf_sigma = 0.135f0,  # ~135nm typical for TIRF
     minval = 500.0,
 
     # Fitting - anisotropic sigma (σx, σy)
