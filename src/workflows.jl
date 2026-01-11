@@ -54,15 +54,17 @@ Base.@kwdef struct AnalysisConfig
     detect_gpu::Bool = true
 
     # === Fitting (always runs) ===
-    psf_sigma::Float32 = 1.3f0
+    # PSF model: :fixed (GaussianXYNB), :variable (GaussianXYNBS), :anisotropic (GaussianXYNBSXSY)
+    fit_model::Symbol = :variable   # Default to variable sigma for better pvalue
+    psf_sigma::Float32 = 0.17f0     # PSF sigma in MICRONS (only used if fit_model=:fixed)
     iterations::Int = 20
     fit_device::Symbol = :auto      # :cpu, :gpu, :auto
 
     # === Filtering (runs before frame connection) ===
     filter::Bool = true
     min_photons::Union{Float64, Nothing} = 500.0
-    max_sigma::Union{Float64, Nothing} = nothing  # microns, e.g., 0.03
-    min_pvalue::Union{Float64, Nothing} = nothing
+    max_sigma::Union{Float64, Nothing} = 0.015    # 15nm precision threshold
+    min_pvalue::Union{Float64, Nothing} = 1e-3    # p-value threshold
 
     # === Frame Connection (runs on filtered data) ===
     frameconnect::Bool = true
@@ -271,8 +273,20 @@ function analyze(data::AbstractArray{<:Real, 3}, camera::SMLMData.AbstractCamera
     # =========================================================================
     print("  Fitting... ")
     device = config.fit_device == :auto ? nothing : config.fit_device
+
+    # Select PSF model based on fit_model option
+    psf_model = if config.fit_model == :fixed
+        GaussianXYNB(config.psf_sigma)
+    elseif config.fit_model == :variable
+        GaussianXYNBS()  # Fits isotropic sigma
+    elseif config.fit_model == :anisotropic
+        GaussianXYNBSXSY()  # Fits sigma_x, sigma_y
+    else
+        error("Unknown fit_model: $(config.fit_model). Use :fixed, :variable, or :anisotropic")
+    end
+
     fitter = GaussMLEFitter(
-        psf_model = GaussianXYNB(config.psf_sigma),
+        psf_model = psf_model,
         iterations = config.iterations,
         device = device
     )
@@ -454,20 +468,57 @@ end
 function _save_fitting_figures(smld, roi_batch, data, camera, config)
     emitters = smld.emitters
     photons = [e.photons for e in emitters]
+    bg = [e.bg for e in emitters]
     σ_x = [e.σ_x for e in emitters]
     σ_y = [e.σ_y for e in emitters]
+    pvalue = [e.pvalue for e in emitters]
 
-    # Fit quality histograms
-    fig = Figure(size=(1200, 400))
+    # Fit quality histograms (6 panels, 3x2 grid)
+    fig = Figure(size=(1600, 1200))
 
+    # Photons histogram
     ax1 = Axis(fig[1, 1], xlabel="Photons", ylabel="Count", title="Photon Distribution")
     hist!(ax1, photons, bins=50)
+    vlines!(ax1, [median(photons)], color=:red, linestyle=:dash)
 
-    ax2 = Axis(fig[1, 2], xlabel="σ_x (μm)", ylabel="Count", title="PSF Width X")
-    hist!(ax2, σ_x, bins=50)
+    # Background histogram
+    ax2 = Axis(fig[1, 2], xlabel="Background (ADU)", ylabel="Count", title="Background Distribution")
+    hist!(ax2, bg, bins=50)
+    vlines!(ax2, [median(bg)], color=:red, linestyle=:dash)
 
-    ax3 = Axis(fig[1, 3], xlabel="σ_y (μm)", ylabel="Count", title="PSF Width Y")
-    hist!(ax3, σ_y, bins=50)
+    # σ_x histogram (in nm)
+    ax3 = Axis(fig[2, 1], xlabel="σ_x (nm)", ylabel="Count", title="X Precision Distribution")
+    hist!(ax3, σ_x .* 1000, bins=50)
+    vlines!(ax3, [median(σ_x)*1000], color=:red, linestyle=:dash)
+    if config.max_sigma !== nothing
+        vlines!(ax3, [config.max_sigma * 1000], color=:orange, linestyle=:solid, label="Threshold")
+    end
+
+    # σ_y histogram (in nm)
+    ax4 = Axis(fig[2, 2], xlabel="σ_y (nm)", ylabel="Count", title="Y Precision Distribution")
+    hist!(ax4, σ_y .* 1000, bins=50)
+    vlines!(ax4, [median(σ_y)*1000], color=:red, linestyle=:dash)
+    if config.max_sigma !== nothing
+        vlines!(ax4, [config.max_sigma * 1000], color=:orange, linestyle=:solid)
+    end
+
+    # p-value histogram
+    ax5 = Axis(fig[3, 1], xlabel="p-value", ylabel="Count", title="Fit Quality (p-value)")
+    if all(pvalue .== 0)
+        text!(ax5, 0.5, 0.5, text="All p-values = 0\n(check fitter)", align=(:center, :center))
+    else
+        pval_plot = pvalue[pvalue .> 0]
+        if !isempty(pval_plot)
+            hist!(ax5, pval_plot, bins=min(50, length(pval_plot)))
+        end
+    end
+    if config.min_pvalue !== nothing
+        vlines!(ax5, [config.min_pvalue], color=:orange, linestyle=:solid)
+    end
+
+    # Photons vs Background scatter
+    ax6 = Axis(fig[3, 2], xlabel="Photons", ylabel="Background (ADU)", title="Photons vs Background")
+    scatter!(ax6, photons, bg, markersize=2, alpha=0.3)
 
     save(joinpath(config.outdir, "02_fitting", "fit_quality.png"), fig)
 
@@ -477,7 +528,8 @@ function _save_fitting_figures(smld, roi_batch, data, camera, config)
     photon_ok = config.min_photons === nothing ? trues(length(emitters)) : photons .> config.min_photons
     sigma_ok = config.max_sigma === nothing ? trues(length(emitters)) :
                [max(e.σ_x, e.σ_y) < config.max_sigma for e in emitters]
-    accepted = photon_ok .& sigma_ok
+    pvalue_ok = config.min_pvalue === nothing ? trues(length(emitters)) : pvalue .> config.min_pvalue
+    accepted = photon_ok .& sigma_ok .& pvalue_ok
 
     n_total = length(emitters)
     n_accepted = sum(accepted)
@@ -490,7 +542,7 @@ function _save_fitting_figures(smld, roi_batch, data, camera, config)
 
     fig = Figure(size=(2400, 700))
     Label(fig[0, 1:4],
-        "Fit Acceptance: $n_accepted/$n_total ($accept_pct%) — Green=Accepted, Orange=σ, Red=Photons",
+        "Fit Acceptance: $n_accepted/$n_total ($accept_pct%) — Green=Accepted, Red=Photons, Orange=σ, Purple=pvalue",
         fontsize=14, tellwidth=false)
 
     box_size = roi_batch.roi_size
@@ -519,12 +571,22 @@ function _save_fitting_figures(smld, roi_batch, data, camera, config)
             frame_accepted = accepted[frame_mask]
             frame_photon_ok = photon_ok[frame_mask]
             frame_sigma_ok = sigma_ok[frame_mask]
+            frame_pvalue_ok = pvalue_ok[frame_mask]
 
             for pass in [false, true]
                 for j in eachindex(frame_locs)
                     if frame_accepted[j] == pass
                         bx, by = det_x[j], det_y[j]
-                        c = frame_accepted[j] ? :green : (!frame_photon_ok[j] ? :red : :orange)
+                        # Color: green=accepted, red=photons, orange=sigma, purple=pvalue
+                        c = if frame_accepted[j]
+                            :green
+                        elseif !frame_photon_ok[j]
+                            :red
+                        elseif !frame_sigma_ok[j]
+                            :orange
+                        else
+                            :purple  # pvalue failed
+                        end
                         lines!(ax, [bx, bx+box_size, bx+box_size, bx, bx],
                                   [by, by, by+box_size, by+box_size, by],
                             color = (c, pass ? 1.0 : 0.7), linewidth = 0.5)

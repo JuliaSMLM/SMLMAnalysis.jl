@@ -9,8 +9,10 @@ println("  Loaded $(size(data, 3)) frames ($(size(data, 1))×$(size(data, 2)))")
 
 # Create camera (ORCA-Fusion specs)
 # SCMOSCamera(width, height, pixelsize, readnoise; offset, gain, qe)
-camera = SCMOSCamera(size(data, 2), size(data, 1), 0.1f0, 0.7f0;
-    offset = 100.0f0, gain = 0.46f0, qe = 0.8f0)
+# Pixel size: 78nm effective (6.5μm sensor / ~83x magnification)
+# Gain: 0.24 e-/ADU (SMITE convention: 1/4.16 ADU/e-)
+camera = SCMOSCamera(size(data, 2), size(data, 1), 0.078f0, 0.7f0;
+    offset = 100.0f0, gain = 0.24f0, qe = 0.8f0)
 
 # Test 1: All defaults
 println("\n" * "="^60)

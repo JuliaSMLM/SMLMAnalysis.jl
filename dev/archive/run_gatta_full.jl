@@ -8,8 +8,9 @@ data, info = smart_h5_to_array(h5file)  # All frames
 println("  Loaded $(size(data, 3)) frames ($(size(data, 1))×$(size(data, 2)))")
 
 # Camera setup
-camera = SCMOSCamera(size(data, 2), size(data, 1), 0.1f0, 0.7f0;
-    offset = 100.0f0, gain = 0.46f0, qe = 0.8f0)
+# ORCA-Fusion camera: 78nm pixel, gain=0.24 e-/ADU (SMITE convention: 1/4.16)
+camera = SCMOSCamera(size(data, 2), size(data, 1), 0.078f0, 0.7f0;
+    offset = 100.0f0, gain = 0.24f0, qe = 0.8f0)
 
 # Run analysis - skip frame connection, enable render
 result = analyze(data, camera;

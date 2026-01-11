@@ -75,17 +75,17 @@ println("\n   Loaded: $nframes_load frames ($(size(data,1))×$(size(data,2)))")
 #   - QE: 80% at 642nm
 #   - Conversion gain: ~0.46 e⁻/ADU (typical for sCMOS)
 #   - Offset: ~100 ADU (typical baseline)
-pixel_size_um = 0.1f0  # Effective pixel size (needs magnification calibration)
+pixel_size_um = 0.078f0  # 78nm effective pixel size (6.5μm sensor / ~83x magnification)
 readnoise = 0.7f0      # e⁻ RMS (ultra quiet mode)
 offset_adu = 100.0f0   # ADU
-gain_val = 0.46f0      # e⁻/ADU
+gain_val = 0.24f0      # e⁻/ADU (SMITE convention: 1/4.16 ADU/e⁻)
 qe = 0.80f0            # QE at 642nm
 
 camera = SCMOSCamera(size(data,2), size(data,1), pixel_size_um, readnoise;
     offset=offset_adu, gain=gain_val, qe=qe)
 
 println("\n📷 Camera: SCMOSCamera (ORCA-Fusion specs, Float32)")
-println("   Pixel size: $pixel_size_um µm (100 nm)")
+println("   Pixel size: $pixel_size_um µm (78 nm)")
 println("   Readnoise: $readnoise e⁻ RMS, Offset: $offset_adu ADU")
 println("   Gain: $gain_val e⁻/ADU, QE: $qe")
 
