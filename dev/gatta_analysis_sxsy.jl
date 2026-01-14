@@ -26,15 +26,16 @@ camera = SCMOSCamera(size(data, 2), size(data, 1), 0.078f0, 0.7f0;
 result = analyze(data, camera;
     # Detection - PSF sigma in microns (DoG uses σ and 2σ)
     psf_sigma = 0.135f0,  # ~135nm typical for TIRF
-    minval = 500.0,
+    detect_min_photons = 500.0,  # Detection threshold in photons
 
     # Fitting - anisotropic sigma (σx, σy)
     fit_model = :anisotropic,
 
     # Filtering
     min_photons = 500.0,
+    max_precision = 0.015,        # 15nm precision threshold
+    psf_sigma_mode_tolerance = 0.10,  # Keep PSF sigma within ±10% of mode
     min_pvalue = 1e-3,
-    max_sigma = 0.015,  # 15nm precision threshold
 
     # Frame connection
     frameconnect = false,
@@ -44,7 +45,7 @@ result = analyze(data, camera;
     render_zoom = 20,
 
     # Output
-    outdir = "output/gatta_sxsy/"
+    outdir = joinpath(@__DIR__, "output", "gatta_sxsy")
 )
 
 # =============================================================================

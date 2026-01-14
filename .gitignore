@@ -6,6 +6,8 @@
 /docs/build/
 .vscode/
 examples/output/
+output/
 gatta_ruler/
 data/
 dev/output/
+*.log
