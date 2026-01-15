@@ -4,157 +4,86 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Package Overview
 
-SMLMAnalysis.jl is the high-level integration package for the JuliaSMLM ecosystem. It serves as a wrapper/orchestrator that brings together all the individual SMLM (Single Molecule Localization Microscopy) analysis packages into coherent workflows. While currently a stub, this package is intended to be the primary entry point for users to access the complete SMLM analysis pipeline.
-
-## JuliaSMLM Ecosystem
-
-The JuliaSMLM organization provides a comprehensive suite of packages for SMLM data analysis:
-
-### Core Data Infrastructure
-- **SMLMData.jl**: Core data types and utilities for SMLM coordinate data. Defines fundamental types like emitters, cameras, and SMLD containers. All other packages build on these types.
-
-### Detection & Fitting
-- **SMLMBoxer.jl**: Fast particle detection in multidimensional image stacks using Difference of Gaussians
-- **GaussMLE.jl**: Maximum likelihood Gaussian blob fitting with CPU/GPU support
-- **SMLMDeepFit.jl**: Deep learning-based high-density emitter fitting using U-Net architectures
-
-### PSF Modeling
-- **MicroscopePSFs.jl**: Microscope point spread function calculations including scalar and vector models
-
-### Post-Processing
-- **SMLMFrameConnection.jl**: Connects repeated localizations across frames into single higher-precision localizations
-
-### Analysis & Metrics
-- **SMLMMetrics.jl**: Performance metrics for SMLM including Jaccard Index, RMSE, and efficiency metrics
-
-### Simulation
-- **SMLMSim.jl**: Comprehensive simulation of SMLM datasets including photophysics, diffusion, and camera effects
-
-### Visualization
-- **SMLMVis.jl**: Visualization tools for SMLM data and analysis results
-
-### Infrastructure
-- **ModelContextProtocol.jl**: MCP server implementation for tool integration
+SMLMAnalysis.jl is the high-level integration package for the JuliaSMLM ecosystem. It orchestrates all SMLM (Single Molecule Localization Microscopy) analysis packages into unified workflows with provenance tracking.
 
 ## Development Commands
 
-### Testing
 ```bash
-# Run full test suite
+# Run tests
 julia --project=. -e 'using Pkg; Pkg.test()'
 
-# Run tests directly
-julia --project=. test/runtests.jl
-```
-
-### Documentation
-```bash
 # Build documentation
 julia --project=docs docs/make.jl
 
-# Serve documentation locally (if LiveServer is available)
-julia --project=docs -e 'using LiveServer; serve(dir="docs/build")'
-```
-
-### Package Management
-```bash
-# Install dependencies
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
-
-# Update dependencies
-julia --project=. -e 'using Pkg; Pkg.update()'
-
-# Add a JuliaSMLM package as dependency
-julia --project=. -e 'using Pkg; Pkg.add("SMLMData")'
-```
-
-### Development Setup
-```bash
-# Develop local packages simultaneously
+# Develop with local JuliaSMLM packages
 julia --project=. -e 'using Pkg; Pkg.develop(path="../SMLMData")'
 ```
 
 ## Architecture
 
-### Package Integration Strategy
+### Module Structure (`src/`)
 
-SMLMAnalysis.jl will integrate the ecosystem packages to provide:
-
-1. **Unified API**: Single import for common workflows
-2. **Pipeline Management**: Orchestrate multi-step analysis pipelines
-3. **Data Flow**: Handle data transformation between package formats
-4. **Configuration**: Centralized parameter management
-5. **Workflow Templates**: Pre-configured analysis pipelines
-
-### Typical Analysis Pipelines
-
-#### Standard Localization Pipeline
 ```
-Raw Images → SMLMBoxer (detection) → GaussMLE (fitting) → 
-SMLMFrameConnection (connection) → SMLMMetrics (validation)
-```
-
-#### Deep Learning Pipeline
-```
-Raw Images → SMLMDeepFit (detection + fitting) → 
-SMLMFrameConnection (connection) → SMLMVis (visualization)
+src/
+├── SMLMAnalysis.jl      # Main module, re-exports types from ecosystem packages
+├── analyze.jl           # Main analyze() pipeline function
+├── config.jl            # AnalysisConfig and AnalysisResult types
+├── provenance.jl        # SMLMWorkflow and ProcessingStep for tracking
+├── filtering.jl         # filter_smld(), filter_isolated()
+├── calibration.jl       # Uncertainty calibration from frame connection
+├── helpers.jl           # Data format converters between packages
+├── io/
+│   ├── smld_io.jl       # HDF5 serialization (save_smld, load_smld)
+│   └── smart_h5.jl      # SMART microscope HDF5 import
+├── figures/
+│   └── figures.jl       # All visualization functions
+└── stats/
+    └── writers.jl       # Markdown stats file writers
 ```
 
-#### Simulation-Based Validation
+### Main Workflow
+
+The `analyze()` function runs this pipeline:
+
 ```
-SMLMSim (generate data) → Analysis Pipeline → 
-SMLMMetrics (compare to ground truth)
+Images + Camera → Detection (SMLMBoxer) → Fitting (GaussMLE) → Filtering →
+Frame Connection → Uncertainty Calibration → Drift Correction → Rendering
+```
+
+Each step is configurable via `AnalysisConfig`:
+```julia
+config = AnalysisConfig(
+    fit_model = :variable,      # :fixed, :variable, :anisotropic
+    drift = true,
+    render = true,
+    outdir = "output/"
+)
+result = analyze(images, camera, config)
 ```
 
 ### Data Flow
-- All packages use SMLMData.jl types for interoperability
-- Coordinate system: microns for spatial coordinates
-- Standard containers: BasicSMLD, SmiteSMLD for compatibility
 
-## Implementation Roadmap
+- All packages use SMLMData.jl types (BasicSMLD, Emitter2DFit, etc.)
+- Coordinates are in microns
+- `SMLMWorkflow` tracks each processing step with parameters and timestamps
+- HDF5 format (v1.1) stores emitters, camera, drift model, provenance
 
-As SMLMAnalysis.jl develops, it should:
+### Key Files
 
-1. **Re-export Core Types**: Make SMLMData types available directly
-2. **Provide Workflow Functions**: High-level functions for common pipelines
-3. **Handle Package Dependencies**: Manage optional dependencies gracefully
-4. **Offer Configuration Management**: Centralized parameter handling
-5. **Include Example Notebooks**: Demonstrate complete workflows
+- **analyze.jl**: The main `analyze()` function (~300 lines) - start here for pipeline logic
+- **config.jl**: `AnalysisConfig` struct with all pipeline parameters
+- **filtering.jl**: Photon, precision, PSF sigma, and pvalue filtering
+- **calibration.jl**: Uncertainty calibration from frame-to-frame analysis
+- **figures/figures.jl**: Detection, fitting, drift, and frame connection visualizations
+- **stats/writers.jl**: Markdown file generation for diagnostics
 
-## Key Design Principles
+### Re-exported Types
 
-1. **Composability**: Each package works independently but integrates seamlessly
-2. **Performance**: Leverage Julia's speed with GPU support where available
-3. **Interoperability**: Maintain compatibility with MATLAB SMITE toolbox formats
-4. **Ease of Use**: High-level API hiding complexity while allowing low-level access
-
-## GitHub Resources
-
-- **Organization**: https://github.com/JuliaSMLM
-- **Main Repository**: https://github.com/JuliaSMLM/SMLMAnalysis.jl
-- **Related**: LidkeLab organization for MATLAB tools and broader microscopy software
-
-## Usage Examples
-
-Future implementation should support workflows like:
-
-```julia
-using SMLMAnalysis
-
-# Load and process data
-data = load_smlm_data("experiment.h5")
-detected = detect_particles(data, method=:boxer)
-fitted = fit_emitters(detected, method=:gaussmle)
-connected = connect_frames(fitted)
-results = calculate_metrics(connected, ground_truth)
-
-# Or use a pre-configured pipeline
-results = standard_smlm_pipeline(data)
-```
-
-## Testing Strategy
-
-- Unit tests for each integration point
-- Integration tests for complete pipelines
-- Performance benchmarks comparing different methods
-- Validation against established MATLAB implementations
+From ecosystem packages (available directly after `using SMLMAnalysis`):
+- **SMLMData**: `AbstractCamera`, `IdealCamera`, `SCMOSCamera`, `Emitter2D/3D`, `BasicSMLD`
+- **SMLMSim**: `StaticSMLMParams`, `simulate`, `gen_images`
+- **SMLMBoxer**: `getboxes`
+- **GaussMLE**: `GaussMLEFitter`, `fit`, `GaussianXYNB/S/SXSY`, `ROIBatch`
+- **SMLMRender**: `render`, `save_image`, `HistogramRender`, `GaussianRender`
+- **SMLMFrameConnection**: `frameconnect`
+- **SMLMDriftCorrection**: `driftcorrect`

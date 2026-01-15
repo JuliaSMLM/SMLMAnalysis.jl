@@ -1,5 +1,5 @@
 """
-    workflow.jl
+    provenance.jl
 
 Types and functions for tracking SMLM analysis workflows for reproducibility.
 """
