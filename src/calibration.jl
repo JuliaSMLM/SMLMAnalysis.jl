@@ -8,7 +8,7 @@ Analyzes frame-to-frame drift from linked emitters to calibrate localization unc
 using SMLMData
 using GaussMLE
 using Statistics
-using LinearAlgebra: det, inv
+using LinearAlgebra: det, inv, Diagonal
 
 """
     analyze_frameconnect_drift(smld_connected) -> NamedTuple
@@ -190,8 +190,8 @@ end
 
 Fit uncertainty calibration model: observed_variance = A + B * CRLB_variance
 
-Bins pairs by reported variance, computes mean observed variance per bin,
-fits linear model to determine if discrepancy is additive (A), multiplicative (B), or both.
+Uses weighted least squares on raw data points (weight = 1/reported_var²) since
+Var(Δ²) ∝ σ⁴. Binned data is computed separately for plotting only.
 
 Returns NamedTuple with:
 - A: additive term (nm²) - represents motion/vibration variance
@@ -203,67 +203,146 @@ Returns NamedTuple with:
 function _fit_uncertainty_calibration(pair_data)
     if length(pair_data) < 100
         return (A = NaN, B = NaN, A_σ = NaN, B_σ = NaN, r_squared = NaN,
-                bin_centers = Float64[], bin_observed = Float64[], bin_expected = Float64[], n_per_bin = Int[])
+                bin_centers = Float64[], bin_observed = Float64[], bin_expected = Float64[],
+                n_per_bin = Int[], bin_var = Float64[],
+                n_filtered = 0, n_total = length(pair_data), chi2_threshold = 6.0)
     end
 
     # Combine x and y data: use average of x and y for each pair
     reported_var = [(p[3] + p[4]) / 2 for p in pair_data]  # Average of var_x and var_y
     observed_var = [(p[1] + p[2]) / 2 for p in pair_data]   # Average of Δx² and Δy²
 
+    # Compute chi² for each pair to filter outliers
+    # High chi² pairs are likely double-emitter fits where position shifts between frames
+    chi2_per_pair = [p[1]/p[3] + p[2]/p[4] for p in pair_data]
+
+    # Filter out pairs with chi² > threshold (likely double-fits or mismatches)
+    chi2_threshold = 6.0  # ~99.7% of chi²(2) is below this
+    good_mask = chi2_per_pair .<= chi2_threshold
+
+    n_filtered = sum(.!good_mask)
+    n_total = length(pair_data)
+
+    # Apply filter
+    reported_var = reported_var[good_mask]
+    observed_var = observed_var[good_mask]
+
+    if length(reported_var) < 100
+        return (A = NaN, B = NaN, A_σ = NaN, B_σ = NaN, r_squared = NaN,
+                bin_centers = Float64[], bin_observed = Float64[], bin_expected = Float64[],
+                n_per_bin = Int[], bin_var = Float64[], n_filtered = n_filtered, n_total = n_total)
+    end
+
     # Convert to nm² for interpretability
     reported_var_nm2 = reported_var .* 1e6
     observed_var_nm2 = observed_var .* 1e6
 
-    # Bin by reported variance (use quantiles for equal-count bins)
+    # =========================================================================
+    # First compute bins, then fit the binned data
+    # Binning averages out chi-squared noise to reveal the underlying trend
+    # Weight by n_per_bin for proper statistical weighting of bin means
+    # =========================================================================
+    x_min, x_max = extrema(reported_var_nm2)
+    x_range = x_max - x_min
     n_bins = 20
-    sorted_idx = sortperm(reported_var_nm2)
-    bin_size = length(sorted_idx) ÷ n_bins
+    bin_width = x_range / n_bins
 
     bin_centers = Float64[]
     bin_observed = Float64[]
     bin_expected = Float64[]
+    bin_var = Float64[]  # Within-bin variance for weighting
     n_per_bin = Int[]
 
     for i in 1:n_bins
-        start_idx = (i - 1) * bin_size + 1
-        end_idx = i == n_bins ? length(sorted_idx) : i * bin_size
-        bin_indices = sorted_idx[start_idx:end_idx]
+        bin_lo = x_min + (i - 1) * bin_width
+        bin_hi = x_min + i * bin_width
 
-        push!(bin_centers, mean(reported_var_nm2[bin_indices]))
-        push!(bin_observed, mean(observed_var_nm2[bin_indices]))
-        push!(bin_expected, mean(reported_var_nm2[bin_indices]))  # Expected if perfectly calibrated
-        push!(n_per_bin, length(bin_indices))
+        # Include right edge in last bin
+        if i == n_bins
+            mask = (reported_var_nm2 .>= bin_lo) .& (reported_var_nm2 .<= bin_hi)
+        else
+            mask = (reported_var_nm2 .>= bin_lo) .& (reported_var_nm2 .< bin_hi)
+        end
+
+        bin_x = reported_var_nm2[mask]
+        bin_y = observed_var_nm2[mask]
+
+        if length(bin_x) >= 5  # Minimum points per bin
+            push!(bin_centers, mean(bin_x))
+            push!(bin_observed, mean(bin_y))
+            push!(bin_expected, mean(bin_x))  # Expected if perfectly calibrated
+            push!(bin_var, var(bin_y))  # Within-bin variance
+            push!(n_per_bin, length(bin_x))
+        end
     end
 
-    # Linear regression: observed = A + B * reported
-    # Using normal equations: [A; B] = (X'X)^-1 X'y
-    X = hcat(ones(n_bins), bin_centers)
-    y = bin_observed
-    XtX = X' * X
-    Xty = X' * y
-
-    if det(XtX) ≈ 0
+    # Need at least 3 bins for a meaningful fit
+    n_valid_bins = length(bin_centers)
+    if n_valid_bins < 3
         return (A = NaN, B = NaN, A_σ = NaN, B_σ = NaN, r_squared = NaN,
-                bin_centers = bin_centers, bin_observed = bin_observed, bin_expected = bin_expected, n_per_bin = n_per_bin)
+                bin_centers = bin_centers, bin_observed = bin_observed, bin_expected = bin_expected,
+                n_per_bin = n_per_bin, bin_var = bin_var,
+                n_filtered = n_filtered, n_total = n_total, chi2_threshold = chi2_threshold)
     end
 
-    coeffs = XtX \ Xty
+    # =========================================================================
+    # Weighted least squares on binned data
+    # Weight = n / var_within_bin (inverse variance of bin mean)
+    # This is proper statistical weighting for heteroscedastic data
+    # =========================================================================
+
+    # Variance of bin mean = var_within_bin / n
+    var_of_bin_mean = bin_var ./ n_per_bin
+
+    # Weights = 1 / variance_of_mean (inverse variance weighting)
+    # Avoid division by zero
+    weights = [v > 0 ? 1.0 / v : 0.0 for v in var_of_bin_mean]
+
+    # Check we have valid weights
+    if sum(weights) ≈ 0
+        return (A = NaN, B = NaN, A_σ = NaN, B_σ = NaN, r_squared = NaN,
+                bin_centers = bin_centers, bin_observed = bin_observed, bin_expected = bin_expected,
+                n_per_bin = n_per_bin, bin_var = bin_var,
+                n_filtered = n_filtered, n_total = n_total, chi2_threshold = chi2_threshold)
+    end
+
+    # Normalize weights
+    weights = weights ./ sum(weights) .* n_valid_bins
+
+    X = hcat(ones(n_valid_bins), bin_centers)
+    W = Diagonal(weights)
+
+    XtWX = X' * W * X
+    XtWy = X' * W * bin_observed
+
+    if det(XtWX) ≈ 0
+        return (A = NaN, B = NaN, A_σ = NaN, B_σ = NaN, r_squared = NaN,
+                bin_centers = bin_centers, bin_observed = bin_observed, bin_expected = bin_expected,
+                n_per_bin = n_per_bin, bin_var = bin_var,
+                n_filtered = n_filtered, n_total = n_total, chi2_threshold = chi2_threshold)
+    end
+
+    coeffs = XtWX \ XtWy
     A, B = coeffs[1], coeffs[2]
 
-    # Compute R² and parameter uncertainties
+    # Compute weighted R² and parameter uncertainties
     y_pred = X * coeffs
-    ss_res = sum((y .- y_pred).^2)
-    ss_tot = sum((y .- mean(y)).^2)
-    r_squared = 1 - ss_res / ss_tot
+    residuals = bin_observed .- y_pred
 
-    # Standard errors
-    mse = ss_res / (n_bins - 2)
-    var_coeffs = mse * inv(XtX)
-    A_σ = sqrt(var_coeffs[1, 1])
-    B_σ = sqrt(var_coeffs[2, 2])
+    ss_res = sum(weights .* residuals.^2)
+    ss_tot = sum(weights .* (bin_observed .- mean(bin_observed)).^2)
+    r_squared = ss_tot > 0 ? 1 - ss_res / ss_tot : NaN
+
+    # Standard errors for weighted regression
+    mse = ss_res / max(1, n_valid_bins - 2)
+    var_coeffs = mse * inv(XtWX)
+    A_σ = sqrt(max(0.0, var_coeffs[1, 1]))
+    B_σ = sqrt(max(0.0, var_coeffs[2, 2]))
 
     return (A = A, B = B, A_σ = A_σ, B_σ = B_σ, r_squared = r_squared,
-            bin_centers = bin_centers, bin_observed = bin_observed, bin_expected = bin_expected, n_per_bin = n_per_bin)
+            bin_centers = bin_centers, bin_observed = bin_observed, bin_expected = bin_expected,
+            n_per_bin = n_per_bin, bin_var = bin_var,
+            n_filtered = n_filtered, n_total = n_total, chi2_threshold = chi2_threshold)
 end
 
 """
