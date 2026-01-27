@@ -185,8 +185,8 @@ function _save_step_outputs!(dir::String, a::Analysis, cfg::FrameConnectConfig, 
     _save_config!(dir, cfg)
 
     if v >= Verbosity.STANDARD
-        _write_frameconnect_stats(dir, cfg, n_before, n_after, t, cal_result, summary)
-        _save_frameconnect_figures(dir, a.smld_connected, cal_result)
+        koff_stats = _save_frameconnect_figures(dir, a.smld_connected, cal_result)
+        _write_frameconnect_stats(dir, cfg, n_before, n_after, t, cal_result, summary, koff_stats)
         # Calibration and drift plots at STANDARD level
         if cal_result !== nothing
             _save_calibration_plot(dir, cal_result, summary)
@@ -199,7 +199,7 @@ function _save_step_outputs!(dir::String, a::Analysis, cfg::FrameConnectConfig, 
     end
 end
 
-function _write_frameconnect_stats(dir, cfg, n_before, n_after, t, cal_result, summary)
+function _write_frameconnect_stats(dir, cfg, n_before, n_after, t, cal_result, summary, koff_stats=nothing)
     compression = n_before / n_after
 
     filepath = joinpath(dir, "stats.md")
@@ -210,6 +210,14 @@ function _write_frameconnect_stats(dir, cfg, n_before, n_after, t, cal_result, s
         println(io, "- **Output tracks**: $n_after")
         println(io, "- **Compression**: $(round(compression, digits=1))x")
         println(io, "- **Time**: $(round(t, digits=2))s")
+
+        # k_off estimation from track lengths
+        if koff_stats !== nothing && !isnan(koff_stats.k_off)
+            println(io, "")
+            println(io, "## Blinking Kinetics (from track lengths)")
+            println(io, "- **Mean track length**: $(round(koff_stats.mean_length, digits=2)) frames")
+            println(io, "- **Estimated k_off**: $(round(koff_stats.k_off, digits=3)) /frame")
+        end
         println(io, "")
         println(io, "## Parameters")
         println(io, "- maxframegap: $(cfg.maxframegap)")
@@ -256,9 +264,24 @@ function _write_frameconnect_stats(dir, cfg, n_before, n_after, t, cal_result, s
     end
 end
 
+"""
+Estimate k_off from track length distribution.
+For geometric distribution: mean = 1/k_off, so k_off = 1/mean
+"""
+function _estimate_koff(locs_per_track::Vector{Int})
+    isempty(locs_per_track) && return (mean_length=NaN, k_off=NaN)
+
+    mean_length = mean(locs_per_track)
+    # k_off = probability of turning off per frame
+    # For geometric distribution: E[n] = 1/p, so p = 1/E[n]
+    k_off = 1.0 / mean_length
+
+    (mean_length=mean_length, k_off=k_off)
+end
+
 function _save_frameconnect_figures(dir, smld_connected, cal_result)
     emitters = smld_connected.emitters
-    isempty(emitters) && return
+    isempty(emitters) && return nothing
 
     # Track size histogram
     track_ids = [e.track_id for e in emitters]
@@ -268,12 +291,27 @@ function _save_frameconnect_figures(dir, smld_connected, cal_result)
     end
     locs_per_track = collect(values(counts))
 
+    # Estimate k_off from track lengths
+    koff_stats = _estimate_koff(locs_per_track)
+
     fig = Figure(size=(800, 500))
     ax = Axis(fig[1, 1], xlabel="Localizations per Track", ylabel="Count", title="Track Size Distribution")
     max_locs = min(maximum(locs_per_track), 50)
     hist!(ax, clamp.(locs_per_track, 1, max_locs), bins=max_locs)
-    vlines!(ax, [median(locs_per_track)], color=:red, linestyle=:dash)
+    vlines!(ax, [median(locs_per_track)], color=:red, linestyle=:dash, label="Median")
+    vlines!(ax, [koff_stats.mean_length], color=:blue, linestyle=:dot, label="Mean")
+
+    # Add k_off annotation
+    text!(ax, 0.95, 0.95,
+        text="Mean: $(round(koff_stats.mean_length, digits=2)) frames\nk_off: $(round(koff_stats.k_off, digits=3)) /frame",
+        align=(:right, :top),
+        space=:relative,
+        fontsize=12)
+
+    axislegend(ax, position=:rt)
     save(joinpath(dir, "track_histogram.png"), fig)
+
+    return koff_stats
 
     # Chi2 histogram if available
     if cal_result !== nothing && !isempty(cal_result.chi2_values)

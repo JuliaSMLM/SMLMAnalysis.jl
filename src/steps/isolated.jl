@@ -32,7 +32,7 @@ function run_step!(a::Analysis, cfg::IsolatedConfig)
         :threshold => threshold
     )
     _record!(a, cfg, t, summary)
-    _checkpoint!(a)
+    _checkpoint!(a; save=false)  # In-memory only; isolated is fast to recompute
 
     if dir !== nothing
         _save_step_outputs!(dir, a, cfg, v, t, neighbor_counts, threshold, n_before, n_after)

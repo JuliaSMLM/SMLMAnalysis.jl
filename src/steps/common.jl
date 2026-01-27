@@ -58,12 +58,19 @@ Save frame overlay with colored boxes around ROIs.
 - `box_colors`: Vector of colors, one per ROI (same order as roi_batch)
 - `title_prefix`: Prefix for frame titles (default "Frame")
 """
-function _save_box_overlay(dir, filename, images, roi_batch, box_colors; title_prefix="Frame")
+function _save_box_overlay(dir, filename, images, roi_batch, box_colors; title_prefix="Frame", frame_labels=nothing)
     n_frames = size(images, 3)
     frame_indices = [round(Int, x) for x in range(1, n_frames, length=min(12, n_frames))]
+    # Use provided frame_labels for display, or fall back to frame_indices
+    display_labels = frame_labels !== nothing ? frame_labels : frame_indices
 
-    pmin = Float64(quantile(vec(images[:,:,1]), 0.01))
-    pmax = Float64(quantile(vec(images[:,:,1]), 0.99))
+    # For SMLM data: high-contrast stretch with dark background
+    # Clip at background level for dark base, aggressive upper clip for bright spots
+    sample_frames = frame_indices[1:min(4, length(frame_indices))]
+    sample_data = vec(images[:, :, sample_frames])
+    bg_level = median(sample_data)
+    pmin = Float64(bg_level)  # Clip at background for dark base
+    pmax = Float64(quantile(sample_data, 0.995))  # Aggressive clip to brighten spots
 
     fig = Figure(size=_grid_figure_size(images))
     box_size = roi_batch.roi_size
@@ -71,8 +78,9 @@ function _save_box_overlay(dir, filename, images, roi_batch, box_colors; title_p
     for (idx, frame_num) in enumerate(frame_indices)
         row = div(idx - 1, 4) + 1
         col = mod(idx - 1, 4) + 1
+        display_frame = display_labels[idx]
 
-        ax = Axis(fig[row, col], title="$title_prefix $frame_num", aspect=DataAspect(), yreversed=true)
+        ax = Axis(fig[row, col], title="$title_prefix $display_frame", aspect=DataAspect(), yreversed=true)
         frame_data = images[:, :, frame_num]'
         heatmap!(ax, frame_data, colormap=:grays, colorrange=(pmin, pmax))
 
@@ -91,4 +99,36 @@ function _save_box_overlay(dir, filename, images, roi_batch, box_colors; title_p
     end
 
     save(joinpath(dir, filename), fig)
+end
+
+# ============================================================
+# Dataset assignment helpers
+# ============================================================
+
+"""Update emitter's dataset field using struct reconstruction"""
+function _with_dataset(e::Emitter2DFit{T}, ds::Int) where T
+    Emitter2DFit{T}(
+        e.x, e.y, e.photons, e.bg, e.σ_x, e.σ_y, e.σ_photons, e.σ_bg;
+        σ_xy=e.σ_xy, frame=e.frame, dataset=ds, track_id=e.track_id, id=e.id
+    )
+end
+
+function _with_dataset(e::Emitter2D{T}, ds::Int) where T
+    Emitter2D{T}(e.x, e.y, e.photons, e.σ_x, e.σ_y, e.frame, ds, e.track_id)
+end
+
+function _with_dataset(e::GaussMLE.Emitter2DFitSigma{T}, ds::Int) where T
+    GaussMLE.Emitter2DFitSigma{T}(
+        e.x, e.y, e.photons, e.bg, e.σ,
+        e.σ_x, e.σ_y, e.σ_xy, e.σ_photons, e.σ_bg, e.σ_σ,
+        e.pvalue, e.frame, ds, e.track_id, e.id
+    )
+end
+
+function _with_dataset(e::GaussMLE.Emitter2DFitSigmaXY{T}, ds::Int) where T
+    GaussMLE.Emitter2DFitSigmaXY{T}(
+        e.x, e.y, e.photons, e.bg, e.σx, e.σy,
+        e.σ_x, e.σ_y, e.σ_xy, e.σ_photons, e.σ_bg, e.σ_σx, e.σ_σy,
+        e.pvalue, e.frame, ds, e.track_id, e.id
+    )
 end

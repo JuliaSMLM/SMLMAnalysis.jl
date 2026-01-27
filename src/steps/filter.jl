@@ -32,7 +32,7 @@ function run_step!(a::Analysis, cfg::FilterConfig)
         :acceptance => round(n_after / n_before, digits=3)
     )
     _record!(a, cfg, t, summary)
-    _checkpoint!(a)
+    _checkpoint!(a; save=false)  # In-memory only; filter is fast to recompute
 
     if dir !== nothing
         _save_step_outputs!(dir, a, cfg, v, t, n_before, n_after)

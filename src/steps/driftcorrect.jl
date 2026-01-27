@@ -6,11 +6,13 @@ Drift correction step - wraps SMLMDriftCorrection.driftcorrect
     name::String = "driftcorrect"
     # SMLMDriftCorrection.driftcorrect kwargs
     degree::Int = 2
-    intramodel::String = "Polynomial"  # "Polynomial" or "LegendrePoly"
-    cost_fun::String = "Kdtree"        # "Kdtree" or "Entropy"
     # Acquisition type
     continuous::Bool = false  # true: TYPE 1 continuous acquisition (drift accumulates across datasets)
                               # false: TYPE 2 registered acquisition (each dataset starts near zero)
+    # Chunking for continuous datasets
+    n_chunks::Int = 0         # Split continuous data into N chunks (0 = no chunking)
+    chunk_frames::Int = 0     # Alternative: frames per chunk (0 = use n_chunks instead)
+    maxn::Int = 200           # Maximum neighbors for entropy calculation
     # Diagnostics
     warn_large_intershift::Bool = true  # Warn if TYPE 2 has large inter-dataset shifts
     intershift_threshold_nm::Float64 = 500.0  # nm threshold for warning
@@ -23,19 +25,30 @@ function run_step!(a::Analysis, cfg::DriftCorrectConfig)
     v = _get_verbose(a, cfg)
     dir = _stepdir(a, cfg)
 
-    v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(cfg.name)" degree=cfg.degree model=cfg.intramodel continuous=cfg.continuous
+    # Determine dataset mode
+    dataset_mode = cfg.continuous ? :continuous : :registered
+
+    # Log info
+    if cfg.n_chunks > 0 || cfg.chunk_frames > 0
+        chunks_info = cfg.n_chunks > 0 ? "$(cfg.n_chunks) chunks" : "$(cfg.chunk_frames) frames/chunk"
+        v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(cfg.name)" degree=cfg.degree continuous=cfg.continuous chunks=chunks_info
+    else
+        v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(cfg.name)" degree=cfg.degree continuous=cfg.continuous
+    end
 
     t = @elapsed drift_result = SMLMDriftCorrection.driftcorrect(a.smld;
         degree = cfg.degree,
-        intramodel = cfg.intramodel,
-        cost_fun = cfg.cost_fun,
+        dataset_mode = dataset_mode,
+        n_chunks = cfg.n_chunks,
+        chunk_frames = cfg.chunk_frames,
+        maxn = cfg.maxn,
         verbose = 0
     )
 
     a.smld = drift_result.smld
     a.drift_model = drift_result.model
 
-    n_datasets = length(a.drift_model.intra)
+    n_datasets = a.drift_model.ndatasets
     n_frames = a.smld.n_frames
 
     # Calculate inter-shift magnitudes (in nm)
@@ -43,7 +56,7 @@ function run_step!(a::Analysis, cfg::DriftCorrectConfig)
     max_intershift = n_datasets > 1 ? maximum(inter_shifts[2:end]) : 0.0
 
     # Calculate max intra-dataset drift
-    max_drift = _calc_max_drift(a.drift_model, n_frames)
+    max_drift = _calc_max_drift(a.drift_model, n_frames; n_chunks=cfg.n_chunks)
 
     # Diagnostic warnings
     if cfg.warn_large_intershift && !cfg.continuous && max_intershift > cfg.intershift_threshold_nm
@@ -75,7 +88,7 @@ end
 
 """Calculate inter-dataset shift magnitudes in nm (Euclidean distance)"""
 function _calc_inter_shifts(drift_model)
-    n_datasets = length(drift_model.inter)
+    n_datasets = drift_model.ndatasets
     shifts = Float64[]
     for ds in 1:n_datasets
         dx = drift_model.inter[ds].dm[1] * 1000  # μm to nm
@@ -85,16 +98,17 @@ function _calc_inter_shifts(drift_model)
     shifts
 end
 
-function _calc_max_drift(drift_model, n_frames)
+"""Calculate max intra-dataset drift using drift_trajectory"""
+function _calc_max_drift(drift_model, n_frames; n_chunks::Int=0)
     DC = SMLMDriftCorrection
-    n_datasets = length(drift_model.intra)
-    frames = 1:n_frames
+    n_datasets = drift_model.ndatasets
 
+    # Use drift_trajectory to get all drift values
     max_drift = 0.0
     for ds in 1:n_datasets
-        drift_x = [DC.applydrift(0.0, f, drift_model.intra[ds].dm[1]) for f in frames]
-        drift_y = [DC.applydrift(0.0, f, drift_model.intra[ds].dm[2]) for f in frames]
-        max_drift = max(max_drift, maximum(abs.(drift_x)) * 1000, maximum(abs.(drift_y)) * 1000)
+        traj = DC.drift_trajectory(drift_model; dataset=ds)
+        # Note: traj.x and traj.y are in μm, convert to nm
+        max_drift = max(max_drift, maximum(abs.(traj.x)) * 1000, maximum(abs.(traj.y)) * 1000)
     end
     max_drift
 end
@@ -106,16 +120,16 @@ function _save_step_outputs!(dir::String, a::Analysis, cfg::DriftCorrectConfig, 
 
     if v >= Verbosity.STANDARD
         _write_drift_stats(dir, cfg, a.drift_model, t, max_drift, inter_shifts, n_frames)
-        _save_drift_figures(dir, a.drift_model, n_frames, cfg.continuous)
+        _save_drift_figures(dir, a.drift_model, n_frames, cfg.continuous; n_chunks=cfg.n_chunks)
     end
 
     if v >= Verbosity.DETAILED
-        _save_drift_detailed(dir, a.drift_model, n_frames, inter_shifts)
+        _save_drift_detailed(dir, a.drift_model, n_frames, inter_shifts; n_chunks=cfg.n_chunks)
     end
 end
 
 function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n_frames)
-    n_datasets = length(drift_model.intra)
+    n_datasets = drift_model.ndatasets
     max_intershift = n_datasets > 1 ? maximum(inter_shifts[2:end]) : 0.0
 
     filepath = joinpath(dir, "stats.md")
@@ -133,8 +147,6 @@ function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n
         println(io, "")
         println(io, "## Parameters")
         println(io, "- degree: $(cfg.degree)")
-        println(io, "- model: $(cfg.intramodel)")
-        println(io, "- cost_fun: $(cfg.cost_fun)")
         println(io, "- continuous: $(cfg.continuous)")
 
         if n_datasets > 1
@@ -149,23 +161,24 @@ function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n
     end
 end
 
-function _save_drift_figures(dir, drift_model, n_frames, continuous::Bool)
+function _save_drift_figures(dir, drift_model, n_frames, continuous::Bool; n_chunks::Int=0)
     DC = SMLMDriftCorrection
-    n_datasets = length(drift_model.intra)
-    frames = collect(1:n_frames)
+    n_datasets = drift_model.ndatasets
 
     if n_datasets == 1
-        drift_x = [DC.applydrift(0.0, f, drift_model.intra[1].dm[1]) for f in frames] .* 1000
-        drift_y = [DC.applydrift(0.0, f, drift_model.intra[1].dm[2]) for f in frames] .* 1000
+        # Single dataset - use drift_trajectory
+        traj = DC.drift_trajectory(drift_model; dataset=1)
+        drift_x = traj.x .* 1000  # μm to nm
+        drift_y = traj.y .* 1000
 
         fig = Figure(size=(1200, 400))
 
         ax1 = Axis(fig[1, 1], xlabel="Frame", ylabel="X Drift (nm)", title="X Drift")
-        lines!(ax1, frames, drift_x, color=:blue)
+        lines!(ax1, traj.frames, drift_x, color=:blue)
         hlines!(ax1, [0], color=:gray, linestyle=:dash)
 
         ax2 = Axis(fig[1, 2], xlabel="Frame", ylabel="Y Drift (nm)", title="Y Drift")
-        lines!(ax2, frames, drift_y, color=:red)
+        lines!(ax2, traj.frames, drift_y, color=:red)
         hlines!(ax2, [0], color=:gray, linestyle=:dash)
 
         ax3 = Axis(fig[1, 3], xlabel="X (nm)", ylabel="Y (nm)", title="XY Path", aspect=DataAspect())
@@ -174,120 +187,123 @@ function _save_drift_figures(dir, drift_model, n_frames, continuous::Bool)
         scatter!(ax3, [drift_x[end]], [drift_y[end]], color=:red, markersize=10)
 
         save(joinpath(dir, "drift_trajectory.png"), fig)
-    elseif continuous
-        # Continuous mode: show cumulative drift trajectory
-        _save_continuous_drift_figure(dir, drift_model, n_frames)
     else
-        # Registered mode: show per-dataset drift
-        _save_perdataset_drift_figure(dir, drift_model, n_frames)
+        # Multi-dataset: always show global frame continuous view
+        # This gives a clear picture of drift evolution across entire acquisition
+        _save_continuous_drift_figure(dir, drift_model, n_frames; n_chunks=n_chunks, continuous=continuous)
     end
 end
 
-"""Plot cumulative drift trajectory for continuous acquisition (TYPE 1)"""
-function _save_continuous_drift_figure(dir, drift_model, n_frames)
+"""Plot drift trajectory with global frame view for multi-dataset acquisitions"""
+function _save_continuous_drift_figure(dir, drift_model, n_frames; n_chunks::Int=0, continuous::Bool=true)
     DC = SMLMDriftCorrection
-    n_datasets = length(drift_model.intra)
-    frames = collect(1:n_frames)
+    n_datasets = drift_model.ndatasets
 
-    # Anchor at dataset 1's inter-shift (subtract to start at origin)
-    inter1_x = drift_model.inter[1].dm[1] * 1000
-    inter1_y = drift_model.inter[1].dm[2] * 1000
+    # Use drift_trajectory with cumulative=true to show actual stage drift
+    # (chains datasets end-to-end rather than all relative to ds1)
+    traj = DC.drift_trajectory(drift_model; cumulative=true)
 
-    # Build continuous trajectory
-    all_global_frames = Int[]
-    all_drift_x = Float64[]
-    all_drift_y = Float64[]
+    # Anchor at origin (subtract first point)
+    drift_x = (traj.x .- traj.x[1]) .* 1000  # μm to nm
+    drift_y = (traj.y .- traj.y[1]) .* 1000
 
+    mode_str = continuous ? "Continuous" : "Registered"
+    fig = Figure(size=(1200, 600))
+
+    # Use actual frame range from trajectory data
+    total_frames = maximum(traj.frames)
+    frames_per_ds = total_frames ÷ n_datasets
+
+    # Top row: X and Y drift vs frame
+    top = fig[1, 1:2] = GridLayout()
+    ax1 = Axis(top[1, 1], xlabel="Global Frame", ylabel="X Drift (nm)",
+               title="X Drift ($(n_datasets) datasets, $mode_str)")
+    lines!(ax1, traj.frames, drift_x, color=:blue)
+    hlines!(ax1, [0], color=:gray, linestyle=:dash)
+    for ds in 2:n_datasets
+        vlines!(ax1, [(ds-1) * frames_per_ds], color=:lightgray, linestyle=:dot)
+    end
+    xlims!(ax1, 1, total_frames)
+
+    ax2 = Axis(top[1, 2], xlabel="Global Frame", ylabel="Y Drift (nm)",
+               title="Y Drift")
+    lines!(ax2, traj.frames, drift_y, color=:red)
+    hlines!(ax2, [0], color=:gray, linestyle=:dash)
+    for ds in 2:n_datasets
+        vlines!(ax2, [(ds-1) * frames_per_ds], color=:lightgray, linestyle=:dot)
+    end
+    xlims!(ax2, 1, total_frames)
+
+    # Bottom row: XY trajectory with legend to the right
+    bottom = fig[2, 1:2] = GridLayout()
+    ax3 = Axis(bottom[1, 1], xlabel="X (nm)", ylabel="Y (nm)",
+               title="XY Drift Trajectory", aspect=DataAspect())
+
+    # Plot continuous trajectory colored by time (matching X/Y projections)
+    # Use frame index for coloring to show temporal evolution
+    colors = [:blue, :red, :green, :orange, :purple, :cyan, :magenta, :brown,
+              :darkblue, :darkred, :darkgreen, :darkorange, :violet, :teal, :pink, :chocolate,
+              :navy, :crimson, :forestgreen, :coral]
+
+    # Sort by frame to ensure continuous path
+    sorted_indices = sortperm(traj.frames)
+    sorted_x = drift_x[sorted_indices]
+    sorted_y = drift_y[sorted_indices]
+    sorted_frames = traj.frames[sorted_indices]
+
+    # Plot each dataset segment in order (continuous path, color-coded)
     for ds in 1:n_datasets
-        # Total drift = inter[ds] + intra[ds](frame), anchored at origin
-        inter_x = (drift_model.inter[ds].dm[1] * 1000) - inter1_x
-        inter_y = (drift_model.inter[ds].dm[2] * 1000) - inter1_y
-
-        for f in frames
-            global_frame = (ds - 1) * n_frames + f
-            intra_x = DC.applydrift(0.0, f, drift_model.intra[ds].dm[1]) * 1000
-            intra_y = DC.applydrift(0.0, f, drift_model.intra[ds].dm[2]) * 1000
-
-            push!(all_global_frames, global_frame)
-            push!(all_drift_x, inter_x + intra_x)
-            push!(all_drift_y, inter_y + intra_y)
+        ds_start = (ds - 1) * frames_per_ds + 1
+        ds_end = ds * frames_per_ds
+        mask = (sorted_frames .>= ds_start) .& (sorted_frames .<= ds_end)
+        if any(mask)
+            c = colors[mod1(ds, length(colors))]
+            lines!(ax3, sorted_x[mask], sorted_y[mask], color=c, linewidth=1.0, label="DS $ds")
         end
     end
 
-    total_frames = n_datasets * n_frames
-
-    fig = Figure(size=(1200, 600))
-
-    ax1 = Axis(fig[1, 1], xlabel="Global Frame", ylabel="X Drift (nm)",
-               title="Continuous X Drift ($(n_datasets) datasets)")
-    lines!(ax1, all_global_frames, all_drift_x, color=:blue)
-    hlines!(ax1, [0], color=:gray, linestyle=:dash)
-    # Mark dataset boundaries
-    for ds in 2:n_datasets
-        vlines!(ax1, [(ds-1) * n_frames], color=:lightgray, linestyle=:dot)
+    # Connect dataset endpoints with dashed lines to show jumps
+    for ds in 1:(n_datasets-1)
+        ds_end = ds * frames_per_ds
+        next_start = ds * frames_per_ds + 1
+        # Find last point of current dataset and first point of next
+        end_mask = sorted_frames .== ds_end
+        start_mask = sorted_frames .== next_start
+        if any(end_mask) && any(start_mask)
+            end_idx = findfirst(end_mask)
+            start_idx = findfirst(start_mask)
+            lines!(ax3, [sorted_x[end_idx], sorted_x[start_idx]],
+                       [sorted_y[end_idx], sorted_y[start_idx]],
+                   color=:gray, linestyle=:dash, linewidth=0.5)
+        end
     end
 
-    ax2 = Axis(fig[1, 2], xlabel="Global Frame", ylabel="Y Drift (nm)",
-               title="Continuous Y Drift")
-    lines!(ax2, all_global_frames, all_drift_y, color=:red)
-    hlines!(ax2, [0], color=:gray, linestyle=:dash)
-    for ds in 2:n_datasets
-        vlines!(ax2, [(ds-1) * n_frames], color=:lightgray, linestyle=:dot)
-    end
+    scatter!(ax3, [sorted_x[1]], [sorted_y[1]], color=:green, markersize=12, label="Start")
+    scatter!(ax3, [sorted_x[end]], [sorted_y[end]], color=:red, markersize=12, label="End")
 
-    ax3 = Axis(fig[2, 1:2], xlabel="X (nm)", ylabel="Y (nm)",
-               title="Continuous XY Trajectory", aspect=DataAspect())
-    lines!(ax3, all_drift_x, all_drift_y, color=:black, linewidth=0.5)
-    scatter!(ax3, [all_drift_x[1]], [all_drift_y[1]], color=:green, markersize=12, label="Start")
-    scatter!(ax3, [all_drift_x[end]], [all_drift_y[end]], color=:red, markersize=12, label="End")
-    axislegend(ax3, position=:lt)
+    # Legend to the right of XY plot
+    if n_datasets <= 8
+        Legend(bottom[1, 2], ax3, framevisible=false)
+    end
 
     save(joinpath(dir, "drift_trajectory.png"), fig)
 end
 
-"""Plot per-dataset drift for registered acquisition (TYPE 2)"""
-function _save_perdataset_drift_figure(dir, drift_model, n_frames)
+function _save_drift_detailed(dir, drift_model, n_frames, inter_shifts; n_chunks::Int=0)
     DC = SMLMDriftCorrection
-    n_datasets = length(drift_model.intra)
-    frames = collect(1:n_frames)
-    colors = [:blue, :red, :green, :orange, :purple, :cyan, :magenta, :brown]
-
-    fig = Figure(size=(1200, 600))
-
-    ax1 = Axis(fig[1, 1], xlabel="Frame", ylabel="X Drift (nm)", title="X Drift per Dataset")
-    ax2 = Axis(fig[1, 2], xlabel="Frame", ylabel="Y Drift (nm)", title="Y Drift per Dataset")
-    ax3 = Axis(fig[2, 1:2], xlabel="X (nm)", ylabel="Y (nm)", title="XY Paths per Dataset", aspect=DataAspect())
-
-    for ds in 1:n_datasets
-        c = colors[mod1(ds, length(colors))]
-        drift_x = [DC.applydrift(0.0, f, drift_model.intra[ds].dm[1]) for f in frames] .* 1000
-        drift_y = [DC.applydrift(0.0, f, drift_model.intra[ds].dm[2]) for f in frames] .* 1000
-
-        lines!(ax1, frames, drift_x, color=c, label="DS $ds")
-        lines!(ax2, frames, drift_y, color=c, label="DS $ds")
-        lines!(ax3, drift_x, drift_y, color=c, label="DS $ds")
-    end
-
-    if n_datasets <= 6
-        axislegend(ax1, position=:lt)
-    end
-    save(joinpath(dir, "drift_trajectory.png"), fig)
-end
-
-function _save_drift_detailed(dir, drift_model, n_frames, inter_shifts)
-    DC = SMLMDriftCorrection
-    n_datasets = length(drift_model.intra)
-    frames = 1:n_frames
+    n_datasets = drift_model.ndatasets
 
     filepath = joinpath(dir, "per_dataset.md")
     open(filepath, "w") do io
-        println(io, "# Per-Dataset Drift Details\n")
-        println(io, "| Dataset | Max X (nm) | Max Y (nm) | Inter-Shift (nm) |")
+        label = n_chunks > 0 ? "Chunk" : "Dataset"
+        println(io, "# Per-$label Drift Details\n")
+        println(io, "| $label | Max X (nm) | Max Y (nm) | Inter-Shift (nm) |")
         println(io, "|---------|------------|------------|------------------|")
 
         for ds in 1:n_datasets
-            drift_x = [DC.applydrift(0.0, f, drift_model.intra[ds].dm[1]) for f in frames] .* 1000
-            drift_y = [DC.applydrift(0.0, f, drift_model.intra[ds].dm[2]) for f in frames] .* 1000
+            traj = DC.drift_trajectory(drift_model; dataset=ds)
+            drift_x = traj.x .* 1000  # μm to nm
+            drift_y = traj.y .* 1000
             inter = inter_shifts[ds]
             println(io, "| $ds | $(round(maximum(abs.(drift_x)), digits=1)) | $(round(maximum(abs.(drift_y)), digits=1)) | $(round(inter, digits=1)) |")
         end

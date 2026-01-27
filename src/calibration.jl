@@ -413,7 +413,7 @@ end
 # Fallback for SMLMData Emitter2DFit (no pvalue field)
 function _copy_emitter_with_uncertainty(e::SMLMData.Emitter2DFit, σ_x::Float32, σ_y::Float32)
     SMLMData.Emitter2DFit(
-        e.x, e.y, e.photons, e.bg, σ_x, σ_y, e.σ_photons, e.σ_bg,
+        e.x, e.y, e.photons, e.bg, σ_x, σ_y, e.σ_xy, e.σ_photons, e.σ_bg,
         e.frame, e.dataset, e.track_id, e.id
     )
 end
@@ -536,6 +536,7 @@ end
 # Fallback for SMLMData Emitter2DFit
 function _create_combined_emitter(template::SMLMData.Emitter2DFit,
                                    x, y, photons, bg, σ_x, σ_y, frame, dataset, track_id, pvalue)
-    SMLMData.Emitter2DFit(x, y, photons, bg, σ_x, σ_y, σ_x, σ_y,
+    T = eltype(x)
+    SMLMData.Emitter2DFit(x, y, photons, bg, σ_x, σ_y, zero(T), σ_x, σ_y,
                           frame, dataset, track_id, 0)
 end
