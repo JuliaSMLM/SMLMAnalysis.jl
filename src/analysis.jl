@@ -24,7 +24,9 @@ function _checkpoint!(a::Analysis; save::Union{Bool,Nothing}=nothing)
         a.smld_raw,
         a.smld,
         a.smld_connected,
-        a.drift_model
+        a.drift_model,
+        a.bagol_result,
+        a.bagol_smld
     )
 
     # Determine if we should save to disk
@@ -55,6 +57,8 @@ function reset!(a::Analysis)
     a.smld = nothing
     a.smld_connected = nothing
     a.drift_model = nothing
+    a.bagol_result = nothing
+    a.bagol_smld = nothing
     empty!(a.checkpoints)
     empty!(a.steps)
     a.step_counter = 0
@@ -75,6 +79,8 @@ function reset!(a::Analysis, step::Int)
         a.smld = cp.smld
         a.smld_connected = cp.smld_connected
         a.drift_model = cp.drift_model
+        a.bagol_result = cp.bagol_result
+        a.bagol_smld = cp.bagol_smld
 
         # Trim history to step
         a.steps = a.steps[1:step]
@@ -104,6 +110,8 @@ function reset!(a::Analysis, step::Int)
         a.smld = data.smld
         a.smld_connected = data.smld_connected
         a.drift_model = data.drift_model
+        a.bagol_result = data.bagol_result
+        a.bagol_smld = data.bagol_smld
         a.roi_batch = nothing  # Not saved, would need to regenerate
         a.roi_datasets = data.roi_datasets
 
@@ -123,62 +131,14 @@ function reset!(a::Analysis, step::Int)
             data.smld_raw,
             data.smld,
             data.smld_connected,
-            data.drift_model
+            data.drift_model,
+            get(data, :bagol_result, nothing),
+            get(data, :bagol_smld, nothing)
         )
 
         @info "Reset to after step $step (loaded from disk): $(a.steps[end].name)"
     end
     a
-end
-
-# ============================================================
-# Recipe execution
-# ============================================================
-
-function run_recipe(recipe::Vector{<:StepConfig}, data, camera::SMLMData.AbstractCamera;
-                    outdir=nothing, verbose=Verbosity.STANDARD, checkpoint=false)
-    a = Analysis(data, camera; outdir, verbose, checkpoint)
-
-    if outdir !== nothing
-        mkpath(outdir)
-        _save_recipe(outdir, recipe)
-    end
-
-    for cfg in recipe
-        run_step!(a, cfg)
-    end
-
-    if outdir !== nothing
-        _write_summary(a)
-    end
-
-    a
-end
-
-function _save_recipe(outdir, recipe)
-    filepath = joinpath(outdir, "recipe.toml")
-    open(filepath, "w") do io
-        println(io, "# Analysis Recipe")
-        println(io, "# Generated: $(Dates.now())")
-        println(io, "")
-
-        for (i, cfg) in enumerate(recipe)
-            println(io, "[[step]]")
-            println(io, "number = $i")
-            println(io, "type = \"$(nameof(typeof(cfg)))\"")
-            for f in fieldnames(typeof(cfg))
-                v = getfield(cfg, f)
-                if v isa String
-                    println(io, "$f = \"$v\"")
-                elseif v isa Symbol
-                    println(io, "$f = \"$v\"")
-                elseif v !== nothing
-                    println(io, "$f = $v")
-                end
-            end
-            println(io, "")
-        end
-    end
 end
 
 # ============================================================
@@ -282,18 +242,67 @@ function _write_summary(a::Analysis)
 end
 
 # ============================================================
-# Convenience: one-shot analyze (backwards compat wrapper)
+# Convenience: one-shot analyze
 # ============================================================
 
+"""
+    analyze(data, camera; kwargs...) -> Analysis
+
+Run complete SMLM analysis pipeline with sensible defaults.
+
+# Arguments
+- `data`: Image stack (H×W×N array) or path to data file
+- `camera`: Camera model (IdealCamera or SCMOSCamera)
+
+# Keyword Arguments
+## General
+- `outdir=nothing`: Output directory for results
+- `verbose=Verbosity.STANDARD`: Verbosity level
+- `n_datasets=1`: Number of datasets in the acquisition
+
+## Detection + Fitting
+- `boxsize=11`: ROI size for detection
+- `detect_min_photons=500.0`: Minimum photons for detection
+- `psf_sigma=0.135`: Expected PSF sigma (μm)
+- `use_gpu=true`: Use GPU for detection
+- `psf_model=:variable`: PSF model (:fixed, :variable, :anisotropic)
+- `iterations=20`: MLE iterations
+
+## Filtering
+- `filter=true`: Enable filtering step
+- `min_photons=500.0`: Minimum photons
+- `max_precision=0.015`: Maximum precision (μm)
+- `min_pvalue=1e-3`: Minimum p-value
+
+## Frame Connection
+- `frameconnect=false`: Enable frame connection
+- `maxframegap=5`: Maximum frame gap for tracks
+
+## Drift Correction
+- `drift=true`: Enable drift correction
+- `degree=2`: Polynomial degree
+
+## Isolated Filter
+- `isolated=false`: Enable isolated emitter filter
+- `n_sigma=2.0`: Neighbor search radius (σ units)
+
+## Rendering
+- `render=true`: Enable rendering
+- `render_zoom=20`: Render zoom factor
+
+# Returns
+Analysis object with results accessible via `result.smld`, `result.drift_model`, etc.
+"""
 function analyze(data, camera::SMLMData.AbstractCamera;
                  outdir=nothing,
                  verbose=Verbosity.STANDARD,
+                 n_datasets::Int=1,
                  # Detection
                  boxsize=11, detect_min_photons=500.0, psf_sigma=0.135, use_gpu=true,
                  # Fitting
                  psf_model=:variable, iterations=20,
                  # Filtering
-                 filter=true, min_photons=500.0, max_precision=0.015, min_pvalue=1e-3,
+                 filter=true, min_photons=500.0, max_precision=0.007, min_pvalue=1e-3,
                  # Frame connection
                  frameconnect=false, maxframegap=5,
                  # Drift
@@ -303,58 +312,64 @@ function analyze(data, camera::SMLMData.AbstractCamera;
                  # Render
                  render=true, render_zoom=20)
 
-    recipe = StepConfig[]
+    # Create analysis object
+    a = Analysis(data, camera; outdir, verbose, n_datasets)
 
-    push!(recipe, DetectConfig(
+    # Detection + Fitting (combined step)
+    run_step!(a, DetectFitConfig(
         boxsize=boxsize,
         min_photons=detect_min_photons,
         psf_sigma=psf_sigma,
         use_gpu=use_gpu,
-        verbose=verbose
-    ))
-
-    push!(recipe, FitConfig(
         psf_model=psf_model,
         iterations=iterations,
-        verbose=verbose
+        # Pass filter thresholds for preview plot
+        filter_min_photons=min_photons,
+        filter_max_precision=max_precision,
+        filter_min_pvalue=min_pvalue
     ))
 
+    # Filtering
     if filter
-        push!(recipe, FilterConfig(
-            min_photons=min_photons,
-            max_precision=max_precision,
-            min_pvalue=min_pvalue,
-            verbose=verbose
+        run_step!(a, FilterConfig(
+            photons=(min_photons, Inf),
+            precision=(0.0, max_precision),
+            pvalue=(min_pvalue, 1.0)
         ))
     end
 
+    # Frame connection
     if frameconnect
-        push!(recipe, FrameConnectConfig(
-            maxframegap=maxframegap,
-            verbose=verbose
+        run_step!(a, FrameConnectConfig(
+            maxframegap=maxframegap
         ))
     end
 
+    # Drift correction
     if drift
-        push!(recipe, DriftCorrectConfig(
-            degree=degree,
-            verbose=verbose
+        run_step!(a, DriftCorrectConfig(
+            degree=degree
         ))
     end
 
+    # Isolated filter
     if isolated
-        push!(recipe, IsolatedConfig(
-            n_sigma=n_sigma,
-            verbose=verbose
+        run_step!(a, IsolatedConfig(
+            n_sigma=n_sigma
         ))
     end
 
+    # Render
     if render
-        push!(recipe, RenderConfig(
-            zoom=render_zoom,
-            verbose=verbose
+        run_step!(a, RenderConfig(
+            zoom=render_zoom
         ))
     end
 
-    run_recipe(recipe, data, camera; outdir, verbose)
+    # Write summary if output directory specified
+    if outdir !== nothing
+        _write_summary(a)
+    end
+
+    a
 end

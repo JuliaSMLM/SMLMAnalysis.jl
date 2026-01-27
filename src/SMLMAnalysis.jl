@@ -7,33 +7,25 @@ Provides a step-based pipeline for SMLM analysis with:
 - Typed step configs that mirror upstream package kwargs
 - Checkpointing and reset for interactive exploration
 - Verbosity levels for controlling output detail
-- Recipe-based batch execution for reproducibility
 
 # Quick Start
 ```julia
 using SMLMAnalysis
 
-# Interactive step-by-step
-a = Analysis(images, camera; outdir="output/")
-run_step!(a, DetectConfig(boxsize=11, min_photons=500))
-run_step!(a, FitConfig(psf_model=:variable))
-run_step!(a, FilterConfig(min_photons=500))
+# One-liner with defaults
+result = analyze(images, camera; outdir="output/", n_datasets=4)
+
+# Or interactive step-by-step
+a = Analysis(images, camera; outdir="output/", n_datasets=4)
+run_step!(a, DetectFitConfig(boxsize=9, psf_model=:variable))
+run_step!(a, FilterConfig(photons=(500.0, Inf)))
+run_step!(a, FrameConnectConfig(maxframegap=5))
 run_step!(a, DriftCorrectConfig(degree=2))
 run_step!(a, RenderConfig(zoom=20))
 
-# Or batch via recipe
-recipe = [
-    DetectConfig(boxsize=11),
-    FitConfig(psf_model=:variable),
-    FilterConfig(min_photons=500),
-    DriftCorrectConfig(degree=2),
-    RenderConfig(zoom=20),
-]
-result = run_recipe(recipe, images, camera; outdir="output/")
-
 # Reset and try different params
-reset!(a, 2)  # Go back to after fit
-run_step!(a, FilterConfig(min_photons=300))  # Try looser filter
+reset!(a, 1)  # Go back to after detectfit
+run_step!(a, FilterConfig(photons=(300.0, Inf)))  # Try looser filter
 ```
 
 # Re-exported Types
@@ -57,6 +49,7 @@ using SMLMFrameConnection
 using SMLMRender
 using SMLMDriftCorrection
 using MicroscopePSFs
+using SMLMBaGoL
 using HDF5
 using JLD2
 using CairoMakie
@@ -79,6 +72,9 @@ export getboxes
 export GaussMLEFitter
 export GaussianXYNB, GaussianXYNBS, GaussianXYNBSXSY, AstigmaticXYZNB
 export LocalizationResult
+# Re-export fit - use GaussMLE's fit for fitters
+using GaussMLE: fit
+export fit
 
 # Re-export from SMLMFrameConnection
 export frameconnect
@@ -88,7 +84,10 @@ export driftcorrect
 
 # Re-export from SMLMRender
 export render, save_image
-export HistogramRender, GaussianRender, CircleRender
+export HistogramRender, GaussianRender, CircleRender, EllipseRender
+
+# Re-export from SMLMBaGoL
+export MAPNResult, run_bagol, estimate_mapn
 
 # ============================================================
 # Core types
@@ -98,17 +97,15 @@ export Verbosity
 export DataSource, get_images
 export StepConfig, StepRecord
 export AnalysisCheckpoint, Analysis
+export crop_camera, crop_images
 
 # ============================================================
 # Step configs and run_step! implementations
 # ============================================================
 include("steps/common.jl")  # Shared helpers for steps
 
-include("steps/detect.jl")
-export DetectConfig
-
-include("steps/fit.jl")
-export FitConfig
+include("steps/detectfit.jl")
+export DetectFitConfig
 
 include("steps/filter.jl")
 export FilterConfig
@@ -125,6 +122,9 @@ export IsolatedConfig
 include("steps/render.jl")
 export RenderConfig, RenderSpec, DEFAULT_RENDERS
 
+include("steps/bagol.jl")
+export BaGoLConfig
+
 # ============================================================
 # I/O (before analysis.jl - checkpoint_io is used by analysis.jl)
 # ============================================================
@@ -134,6 +134,10 @@ export save_smld, load_smld, smld_info
 include("io/smart_h5.jl")
 export load_smart_h5, load_smart_h5_info, load_smart_h5_frame, smart_h5_to_array
 
+include("io/lidkelab_h5.jl")
+export load_lidkelab_h5, load_lidkelab_h5_info, load_lidkelab_h5_block
+export load_lidkelab_h5_calibration, load_lidkelab_h5_calibration_for_scmos
+
 include("io/checkpoint_io.jl")
 export resume_analysis
 
@@ -142,7 +146,7 @@ export resume_analysis
 # ============================================================
 include("analysis.jl")
 export run_step!, reset!, checkpoint!, debug!
-export run_recipe, analyze
+export analyze
 
 # ============================================================
 # Calibration (used by frameconnect step)

@@ -5,7 +5,8 @@ Saves analysis state after each step to enable cross-session resume.
 Checkpoints are stored in outdir/checkpoints/step_NNN_name.jld2
 
 Saved state:
-- smld, smld_raw, smld_connected, drift_model
+- smld, smld_raw, smld_connected, bagol_smld (as columnar arrays for fast serialization)
+- drift_model, bagol_result
 - roi_datasets (dataset index for each ROI)
 - step_history (Vector{StepRecord})
 - camera
@@ -15,9 +16,83 @@ Saved state:
 Not saved (reconstructable):
 - images (reload from path)
 - roi_batch (can reconstruct from smld if needed)
+
+Versions:
+- v3: Uses columnar format for emitters (100-1000x faster serialization)
+- v4: Added bagol_result (BaGoLDiagnostics)
+- v5: Added bagol_smld (grouped emitters from BaGoL)
 """
 
 using JLD2
+
+# ============================================================
+# Columnar SMLD serialization (fast for millions of emitters)
+# ============================================================
+
+"""
+Convert SMLD emitters to columnar format for fast JLD2 serialization.
+Returns a NamedTuple with arrays for each field.
+"""
+function _smld_to_columnar(smld::Union{BasicSMLD, Nothing})
+    smld === nothing && return nothing
+    isempty(smld.emitters) && return (
+        emitter_type = Nothing,
+        n = 0,
+        camera = smld.camera,
+        n_frames = smld.n_frames,
+        n_datasets = smld.n_datasets,
+        metadata = smld.metadata
+    )
+
+    e = smld.emitters
+    n = length(e)
+    T = typeof(e[1])
+    fields = fieldnames(T)
+
+    # Build columnar data dict
+    cols = Dict{Symbol, Any}()
+    for f in fields
+        vals = [getfield(em, f) for em in e]
+        cols[f] = vals
+    end
+
+    (
+        emitter_type = T,
+        n = n,
+        columns = cols,
+        camera = smld.camera,
+        n_frames = smld.n_frames,
+        n_datasets = smld.n_datasets,
+        metadata = smld.metadata
+    )
+end
+
+"""
+Reconstruct SMLD from columnar format.
+"""
+function _columnar_to_smld(cols)
+    cols === nothing && return nothing
+    cols.n == 0 && return BasicSMLD(
+        AbstractEmitter[],
+        cols.camera,
+        cols.n_frames,
+        cols.n_datasets,
+        cols.metadata
+    )
+
+    T = cols.emitter_type
+    n = cols.n
+    fields = fieldnames(T)
+
+    # Reconstruct emitters
+    emitters = Vector{T}(undef, n)
+    for i in 1:n
+        args = [cols.columns[f][i] for f in fields]
+        emitters[i] = T(args...)
+    end
+
+    BasicSMLD(emitters, cols.camera, cols.n_frames, cols.n_datasets, cols.metadata)
+end
 
 # ============================================================
 # Checkpoint directory management
@@ -48,6 +123,8 @@ end
 
 Save current analysis state to disk. Called automatically after each step
 when `a.checkpoint == true` and `a.outdir` is set.
+
+Uses columnar format for SMLD data (v3) for fast serialization of millions of emitters.
 """
 function _save_checkpoint!(a::Analysis)
     path = _checkpoint_path(a)
@@ -59,12 +136,20 @@ function _save_checkpoint!(a::Analysis)
     # Determine image source
     image_source = a.data.path !== nothing ? a.data.path : :memory
 
+    # Convert SMLD to columnar format for fast serialization
+    smld_cols = _smld_to_columnar(a.smld)
+    smld_raw_cols = _smld_to_columnar(a.smld_raw)
+    smld_connected_cols = _smld_to_columnar(a.smld_connected)
+    bagol_smld_cols = _smld_to_columnar(a.bagol_smld)
+
     # Save state (exclude roi_batch - can reconstruct from smld if needed)
     jldsave(path;
-        smld = a.smld,
-        smld_raw = a.smld_raw,
-        smld_connected = a.smld_connected,
+        smld_cols = smld_cols,
+        smld_raw_cols = smld_raw_cols,
+        smld_connected_cols = smld_connected_cols,
+        bagol_smld_cols = bagol_smld_cols,
         drift_model = a.drift_model,
+        bagol_result = a.bagol_result,
         roi_datasets = a.roi_datasets,
         steps = a.steps,
         step_counter = a.step_counter,
@@ -73,7 +158,7 @@ function _save_checkpoint!(a::Analysis)
         verbose = a.verbose,
         n_datasets = a.n_datasets,
         n_frames_per_dataset = a.n_frames_per_dataset,
-        checkpoint_version = 2  # v2: added roi_datasets, n_datasets, n_frames_per_dataset
+        checkpoint_version = 5  # v5: added bagol_smld
     )
 
     path
@@ -87,6 +172,7 @@ end
     _load_checkpoint(path::String) -> NamedTuple
 
 Load checkpoint data from disk. Returns a NamedTuple with all saved fields.
+Handles v1, v2 (direct SMLD), and v3 (columnar SMLD) formats.
 """
 function _load_checkpoint(path::String)
     !isfile(path) && error("Checkpoint not found: $path")
@@ -95,11 +181,28 @@ function _load_checkpoint(path::String)
         # Check version for backward compatibility
         version = haskey(file, "checkpoint_version") ? file["checkpoint_version"] : 1
 
+        # Load SMLD based on version
+        if version >= 3
+            # v3+: columnar format
+            smld = _columnar_to_smld(file["smld_cols"])
+            smld_raw = _columnar_to_smld(file["smld_raw_cols"])
+            smld_connected = _columnar_to_smld(file["smld_connected_cols"])
+            bagol_smld = version >= 5 && haskey(file, "bagol_smld_cols") ? _columnar_to_smld(file["bagol_smld_cols"]) : nothing
+        else
+            # v1/v2: direct SMLD objects
+            smld = file["smld"]
+            smld_raw = file["smld_raw"]
+            smld_connected = file["smld_connected"]
+            bagol_smld = nothing
+        end
+
         (
-            smld = file["smld"],
-            smld_raw = file["smld_raw"],
-            smld_connected = file["smld_connected"],
+            smld = smld,
+            smld_raw = smld_raw,
+            smld_connected = smld_connected,
+            bagol_smld = bagol_smld,
             drift_model = file["drift_model"],
+            bagol_result = version >= 4 && haskey(file, "bagol_result") ? file["bagol_result"] : nothing,
             roi_datasets = version >= 2 && haskey(file, "roi_datasets") ? file["roi_datasets"] : nothing,
             steps = file["steps"],
             step_counter = file["step_counter"],
@@ -234,6 +337,8 @@ function resume_analysis(outdir::String; images=nothing, step::Union{Int,Nothing
         cp.smld,
         cp.smld_connected,
         cp.drift_model,
+        cp.bagol_result,
+        cp.bagol_smld,
         Dict{Int, AnalysisCheckpoint}(),  # Will be populated from disk on demand
         cp.steps,
         cp.step_counter,
