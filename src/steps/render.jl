@@ -16,8 +16,8 @@ end
 # Default renders: gaussian density, histogram time, circles time
 const DEFAULT_RENDERS = [
     RenderSpec(strategy=:gaussian, zoom=20, colormap=:inferno, color_by=nothing, clip_percentile=0.999),
-    RenderSpec(strategy=:histogram, zoom=10, colormap=:turbo, color_by=:frame, clip_percentile=0.999),
-    RenderSpec(strategy=:circles, zoom=50, colormap=:turbo, color_by=:frame, clip_percentile=0.999),
+    RenderSpec(strategy=:histogram, zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=0.999),
+    RenderSpec(strategy=:circles, zoom=50, colormap=:turbo, color_by=:absolute_frame, clip_percentile=0.999),
 ]
 
 @kwdef struct RenderConfig <: StepConfig
