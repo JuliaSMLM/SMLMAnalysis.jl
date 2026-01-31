@@ -13,6 +13,8 @@ Drift correction step - wraps SMLMDriftCorrection.driftcorrect
     n_chunks::Int = 0         # Split continuous data into N chunks (0 = no chunking)
     chunk_frames::Int = 0     # Alternative: frames per chunk (0 = use n_chunks instead)
     maxn::Int = 200           # Maximum neighbors for entropy calculation
+    # Quality mode
+    quality::Symbol = :singlepass  # :singlepass (fast) or :iterative (slower, converges)
     # Diagnostics
     warn_large_intershift::Bool = true  # Warn if TYPE 2 has large inter-dataset shifts
     intershift_threshold_nm::Float64 = 500.0  # nm threshold for warning
@@ -42,6 +44,7 @@ function run_step!(a::Analysis, cfg::DriftCorrectConfig)
         n_chunks = cfg.n_chunks,
         chunk_frames = cfg.chunk_frames,
         maxn = cfg.maxn,
+        quality = cfg.quality,
         verbose = 0
     )
 
@@ -68,18 +71,25 @@ function run_step!(a::Analysis, cfg::DriftCorrectConfig)
             "unexpected for continuous acquisition - check data alignment"
     end
 
+    # Capture convergence info if available (iterative mode)
+    converged = hasproperty(drift_result, :converged) ? drift_result.converged : nothing
+    iterations = hasproperty(drift_result, :iterations) ? drift_result.iterations : nothing
+
     summary = Dict{Symbol,Any}(
         :max_drift_nm => round(max_drift, digits=1),
         :max_intershift_nm => round(max_intershift, digits=1),
         :n_datasets => n_datasets,
         :n_frames => n_frames,
-        :continuous => cfg.continuous
+        :continuous => cfg.continuous,
+        :quality => cfg.quality,
+        :converged => converged,
+        :iterations => iterations
     )
     _record!(a, cfg, t, summary)
     _checkpoint!(a)
 
     if dir !== nothing
-        _save_step_outputs!(dir, a, cfg, v, t, max_drift, inter_shifts, n_frames)
+        _save_step_outputs!(dir, a, cfg, v, t, max_drift, inter_shifts, n_frames, converged, iterations)
     end
 
     v >= Verbosity.PROGRESS && @info "  → max drift $(round(max_drift, digits=1))nm, inter-shift $(round(max_intershift, digits=1))nm ($(round(t, digits=2))s)"
@@ -114,12 +124,13 @@ function _calc_max_drift(drift_model, n_frames; n_chunks::Int=0)
 end
 
 function _save_step_outputs!(dir::String, a::Analysis, cfg::DriftCorrectConfig, v::Int, t::Float64,
-                             max_drift::Float64, inter_shifts::Vector{Float64}, n_frames::Int)
+                             max_drift::Float64, inter_shifts::Vector{Float64}, n_frames::Int,
+                             converged::Union{Bool,Nothing}, iterations::Union{Int,Nothing})
     mkpath(dir)
     _save_config!(dir, cfg)
 
     if v >= Verbosity.STANDARD
-        _write_drift_stats(dir, cfg, a.drift_model, t, max_drift, inter_shifts, n_frames)
+        _write_drift_stats(dir, cfg, a.drift_model, t, max_drift, inter_shifts, n_frames, converged, iterations)
         _save_drift_figures(dir, a.drift_model, n_frames, cfg.continuous; n_chunks=cfg.n_chunks)
     end
 
@@ -128,7 +139,8 @@ function _save_step_outputs!(dir::String, a::Analysis, cfg::DriftCorrectConfig, 
     end
 end
 
-function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n_frames)
+function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n_frames,
+                            converged::Union{Bool,Nothing}, iterations::Union{Int,Nothing})
     n_datasets = drift_model.ndatasets
     max_intershift = n_datasets > 1 ? maximum(inter_shifts[2:end]) : 0.0
 
@@ -137,6 +149,11 @@ function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n
         println(io, "# Drift Correction Statistics\n")
         println(io, "## Summary")
         println(io, "- **Mode**: $(cfg.continuous ? "Continuous (TYPE 1)" : "Registered (TYPE 2)")")
+        println(io, "- **Quality**: $(cfg.quality)")
+        if cfg.quality == :iterative && converged !== nothing
+            println(io, "- **Converged**: $(converged)")
+            println(io, "- **Iterations**: $(iterations)")
+        end
         println(io, "- **Max intra-dataset drift**: $(round(max_drift, digits=1)) nm")
         if n_datasets > 1
             println(io, "- **Max inter-dataset shift**: $(round(max_intershift, digits=1)) nm")
@@ -148,6 +165,10 @@ function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n
         println(io, "## Parameters")
         println(io, "- degree: $(cfg.degree)")
         println(io, "- continuous: $(cfg.continuous)")
+        println(io, "- quality: $(cfg.quality)")
+        if cfg.n_chunks > 0
+            println(io, "- n_chunks: $(cfg.n_chunks)")
+        end
 
         if n_datasets > 1
             println(io, "")
