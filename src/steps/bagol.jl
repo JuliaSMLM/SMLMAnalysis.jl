@@ -100,7 +100,8 @@ function run_step!(a::Analysis, cfg::BaGoLConfig)
         :n_emitters => n_emitters,
         :compression => n_locs > 0 ? round(n_locs / max(1, n_emitters), digits=1) : 0.0
     )
-    _record!(a, cfg, t, summary)
+    # diagnostics is the BaGoL info struct (tuple-pattern)
+    _record!(a, cfg, t, summary; info=diagnostics)
 
     # Save outputs using SMLMRender
     if verbose >= Verbosity.STANDARD
@@ -139,8 +140,9 @@ function _save_bagol_outputs!(a::Analysis, cfg::BaGoLConfig, bagol_smld::BasicSM
     # 1. PRIMARY QC: Input/Output Overlay with ellipses showing σ
     # Gray ellipses = input locs (many, small σ)
     # Red ellipses = output emitters (few, even smaller σ from combining)
+    # Tuple-pattern: render returns (image, RenderInfo), ignore here
     if diagnostics.n_emitters > 0
-        SMLMRender.render([a.smld, bagol_smld];
+        _ = SMLMRender.render([a.smld, bagol_smld];
             colors = [:gray, :red],
             strategy = EllipseRender(),
             zoom = zoom,
@@ -149,7 +151,7 @@ function _save_bagol_outputs!(a::Analysis, cfg::BaGoLConfig, bagol_smld::BasicSM
     end
 
     # 2. Gaussian renders for detail/publication
-    SMLMRender.render(a.smld;
+    _ = SMLMRender.render(a.smld;
         strategy = GaussianRender(),
         zoom = zoom,
         colormap = :inferno,
@@ -157,7 +159,7 @@ function _save_bagol_outputs!(a::Analysis, cfg::BaGoLConfig, bagol_smld::BasicSM
     )
 
     if diagnostics.n_emitters > 0
-        SMLMRender.render(bagol_smld;
+        _ = SMLMRender.render(bagol_smld;
             strategy = GaussianRender(),
             zoom = zoom,
             colormap = :viridis,

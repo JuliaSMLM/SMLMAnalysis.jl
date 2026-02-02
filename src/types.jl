@@ -121,11 +121,35 @@ struct StepRecord
     timestamp::DateTime
     timing::Float64
     summary::Dict{Symbol, Any}
+    info::Any  # Upstream package info struct (BoxesInfo, FitInfo, DriftInfo, etc.)
 end
 
-function StepRecord(number::Int, cfg::StepConfig, timing::Float64, summary::Dict{Symbol,Any})
-    StepRecord(number, step_name(cfg), cfg, now(), timing, summary)
+function StepRecord(number::Int, cfg::StepConfig, timing::Float64, summary::Dict{Symbol,Any}; info=nothing)
+    StepRecord(number, step_name(cfg), cfg, now(), timing, summary, info)
 end
+
+# ============================================================
+# AnalysisInfo - aggregated info from all steps (tuple-pattern)
+# ============================================================
+"""
+    AnalysisInfo
+
+Aggregated metadata from all analysis steps, following the tuple-pattern.
+
+Contains timing information and per-step info structs from upstream packages.
+Each step stores its upstream info struct (BoxesInfo, FitInfo, DriftInfo, etc.)
+in the corresponding field.
+
+# Fields
+- `elapsed_ns::UInt64`: Total elapsed time in nanoseconds
+- `steps::Dict{Symbol, Any}`: Step name → upstream info struct mapping
+"""
+struct AnalysisInfo
+    elapsed_ns::UInt64
+    steps::Dict{Symbol, Any}
+end
+
+AnalysisInfo() = AnalysisInfo(UInt64(0), Dict{Symbol, Any}())
 
 # ============================================================
 # Analysis Checkpoint - snapshot of state for reset

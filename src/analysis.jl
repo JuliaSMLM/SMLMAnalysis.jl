@@ -175,8 +175,8 @@ function _stepdir(a::Analysis, cfg::StepConfig)
     joinpath(a.outdir, "$(lpad(a.step_counter, 2, '0'))_$(step_name(cfg))")
 end
 
-function _record!(a::Analysis, cfg::StepConfig, t::Float64, summary::Dict{Symbol,Any})
-    push!(a.steps, StepRecord(a.step_counter, cfg, t, summary))
+function _record!(a::Analysis, cfg::StepConfig, t::Float64, summary::Dict{Symbol,Any}; info=nothing)
+    push!(a.steps, StepRecord(a.step_counter, cfg, t, summary; info=info))
 end
 
 function _save_config!(dir::String, cfg::StepConfig)
@@ -246,9 +246,11 @@ end
 # ============================================================
 
 """
-    analyze(data, camera; kwargs...) -> Analysis
+    analyze(data, camera; kwargs...) -> (Analysis, AnalysisInfo)
 
 Run complete SMLM analysis pipeline with sensible defaults.
+
+Returns a tuple of (Analysis, AnalysisInfo) following the JuliaSMLM tuple-pattern.
 
 # Arguments
 - `data`: Image stack (H×W×N array) or path to data file
@@ -291,7 +293,17 @@ Run complete SMLM analysis pipeline with sensible defaults.
 - `render_zoom=20`: Render zoom factor
 
 # Returns
-Analysis object with results accessible via `result.smld`, `result.drift_model`, etc.
+Tuple of (Analysis, AnalysisInfo):
+- `Analysis`: Object with results accessible via `result.smld`, `result.drift_model`, etc.
+- `AnalysisInfo`: Aggregated metadata from all steps with per-step info structs
+
+# Example
+```julia
+(result, info) = analyze(images, camera; outdir="output/")
+result.smld           # Final SMLD
+info.steps[:detectfit]  # DetectFit step info (BoxesInfo, FitInfo)
+info.steps[:driftcorrect]  # Drift step info (DriftInfo)
+```
 """
 function analyze(data, camera::SMLMData.AbstractCamera;
                  outdir=nothing,
@@ -311,6 +323,8 @@ function analyze(data, camera::SMLMData.AbstractCamera;
                  isolated=false, n_sigma=2.0,
                  # Render
                  render=true, render_zoom=20)
+
+    t_start = time_ns()
 
     # Create analysis object
     a = Analysis(data, camera; outdir, verbose, n_datasets)
@@ -371,5 +385,40 @@ function analyze(data, camera::SMLMData.AbstractCamera;
         _write_summary(a)
     end
 
-    a
+    # Build AnalysisInfo from step records (tuple-pattern)
+    elapsed_ns = time_ns() - t_start
+    info = _build_analysis_info(a, elapsed_ns)
+
+    (a, info)
+end
+
+"""
+    _build_analysis_info(a::Analysis, elapsed_ns::UInt64) -> AnalysisInfo
+
+Build AnalysisInfo from step records, aggregating per-step info structs.
+"""
+function _build_analysis_info(a::Analysis, elapsed_ns::UInt64)
+    steps = Dict{Symbol, Any}()
+    for step in a.steps
+        step_name_sym = Symbol(step.name)
+        if step.info !== nothing
+            steps[step_name_sym] = step.info
+        end
+    end
+    AnalysisInfo(elapsed_ns, steps)
+end
+
+"""
+    get_analysis_info(a::Analysis) -> AnalysisInfo
+
+Extract AnalysisInfo from an Analysis object.
+
+Useful when running steps interactively with run_step! and wanting
+to get the aggregated info at the end.
+"""
+function get_analysis_info(a::Analysis)
+    # Sum up timing from all steps
+    total_time_s = sum(s.timing for s in a.steps; init=0.0)
+    elapsed_ns = UInt64(round(total_time_s * 1e9))
+    _build_analysis_info(a, elapsed_ns)
 end

@@ -38,7 +38,8 @@ function run_step!(a::Analysis, cfg::DriftCorrectConfig)
         v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(cfg.name)" degree=cfg.degree continuous=cfg.continuous
     end
 
-    t = @elapsed drift_result = SMLMDriftCorrection.driftcorrect(a.smld;
+    # Tuple-pattern: returns (corrected_smld, DriftInfo) where DriftInfo contains .model
+    t = @elapsed (corrected_smld, drift_info) = SMLMDriftCorrection.driftcorrect(a.smld;
         degree = cfg.degree,
         dataset_mode = dataset_mode,
         n_chunks = cfg.n_chunks,
@@ -48,8 +49,8 @@ function run_step!(a::Analysis, cfg::DriftCorrectConfig)
         verbose = 0
     )
 
-    a.smld = drift_result.smld
-    a.drift_model = drift_result.model
+    a.smld = corrected_smld
+    a.drift_model = drift_info.model
 
     n_datasets = a.drift_model.ndatasets
     n_frames = a.smld.n_frames
@@ -71,9 +72,9 @@ function run_step!(a::Analysis, cfg::DriftCorrectConfig)
             "unexpected for continuous acquisition - check data alignment"
     end
 
-    # Capture convergence info if available (iterative mode)
-    converged = hasproperty(drift_result, :converged) ? drift_result.converged : nothing
-    iterations = hasproperty(drift_result, :iterations) ? drift_result.iterations : nothing
+    # Capture convergence info from drift_info (tuple-pattern)
+    converged = hasproperty(drift_info, :converged) ? drift_info.converged : nothing
+    iterations = hasproperty(drift_info, :iterations) ? drift_info.iterations : nothing
 
     summary = Dict{Symbol,Any}(
         :max_drift_nm => round(max_drift, digits=1),
@@ -85,7 +86,8 @@ function run_step!(a::Analysis, cfg::DriftCorrectConfig)
         :converged => converged,
         :iterations => iterations
     )
-    _record!(a, cfg, t, summary)
+    # Include drift_info in step record (tuple-pattern)
+    _record!(a, cfg, t, summary; info=drift_info)
     _checkpoint!(a)
 
     if dir !== nothing

@@ -81,6 +81,10 @@ function run_step!(a::Analysis, cfg::DetectFitConfig)
     total_rois = 0
     total_fits = 0
 
+    # Collect info from each dataset (tuple-pattern)
+    all_boxes_info = []
+    all_fit_info = []
+
     # Sample data for overlay plots (capture 12 frames from first dataset for 3x4 grid)
     sample_images = nothing
     sample_roi_batch = nothing
@@ -96,21 +100,23 @@ function run_step!(a::Analysis, cfg::DetectFitConfig)
 
             v >= Verbosity.DETAILED && @info "  Dataset $ds: $(size(images)) images"
 
-            # Detect
-            roi_batch = SMLMBoxer.getboxes(images, a.camera;
+            # Detect (tuple-pattern: returns (ROIBatch, BoxesInfo))
+            (roi_batch, boxes_info) = SMLMBoxer.getboxes(images, a.camera;
                 boxsize = cfg.boxsize,
                 overlap = cfg.overlap,
                 min_photons = cfg.min_photons,
                 psf_sigma = cfg.psf_sigma,
                 use_gpu = cfg.use_gpu
             )
+            push!(all_boxes_info, boxes_info)
             n_rois = length(roi_batch)
             total_rois += n_rois
 
             v >= Verbosity.DETAILED && @info "    Detected $n_rois ROIs"
 
-            # Fit
-            smld_ds = GaussMLE.fit(fitter, roi_batch)
+            # Fit (tuple-pattern: returns (BasicSMLD, FitInfo))
+            (smld_ds, fit_info) = GaussMLE.fit(roi_batch, fitter)
+            push!(all_fit_info, fit_info)
             n_fits = length(smld_ds.emitters)
             total_fits += n_fits
 
@@ -168,7 +174,14 @@ function run_step!(a::Analysis, cfg::DetectFitConfig)
         :n_fits => total_fits,
         :n_frames_per_dataset => n_frames_per_dataset
     )
-    _record!(a, cfg, t, summary)
+
+    # Aggregate per-dataset info (tuple-pattern)
+    step_info = (
+        boxes_info = all_boxes_info,
+        fit_info = all_fit_info,
+        elapsed_ns = UInt64(round(t * 1e9))
+    )
+    _record!(a, cfg, t, summary; info=step_info)
     _checkpoint!(a)
 
     if dir !== nothing

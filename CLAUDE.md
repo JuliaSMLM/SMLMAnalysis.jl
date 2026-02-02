@@ -130,8 +130,37 @@ src/
 - **`Analysis`**: Mutable state container holding DataSource, camera, multi-dataset info (`n_datasets`, `n_frames_per_dataset`), intermediate products (roi_batch, roi_datasets, smld_raw, smld, smld_connected, drift_model), checkpoints, and step history
 - **`DataSource`**: Lazy loading wrapper - can hold images directly or a file path for deferred loading
 - **`StepConfig`**: Abstract type; each step has a concrete config with kwargs mirroring upstream packages
-- **`StepRecord`**: Logged after each step with timing, config, and summary statistics
+- **`StepRecord`**: Logged after each step with timing, config, summary statistics, and upstream info struct
+- **`AnalysisInfo`**: Aggregated metadata from all steps, containing per-step info structs from upstream packages
 - **`Verbosity`**: Output detail levels (SILENT=0, PROGRESS=1, STANDARD=2, DETAILED=3, DEBUG=4)
+
+### Tuple-Pattern API
+
+SMLMAnalysis follows the JuliaSMLM tuple-pattern where functions return `(result, Info)` tuples:
+
+```julia
+# analyze() returns (Analysis, AnalysisInfo)
+(result, info) = analyze(images, camera; outdir="output/")
+result.smld               # Final SMLD
+info.elapsed_ns           # Total time in nanoseconds
+info.steps[:detectfit]    # Per-step info from upstream packages
+info.steps[:driftcorrect] # DriftInfo from SMLMDriftCorrection
+
+# Interactive usage - extract info after running steps
+a = Analysis(images, camera)
+run_step!(a, DetectFitConfig())
+run_step!(a, FilterConfig(photons=(500.0, Inf)))
+info = get_analysis_info(a)  # Builds AnalysisInfo from step records
+```
+
+Each step internally handles tuple returns from upstream packages:
+- `getboxes()` → `(ROIBatch, BoxesInfo)`
+- `fit()` → `(BasicSMLD, FitInfo)`
+- `frameconnect()` → `(combined, ConnectInfo)` with `.connected` in info
+- `driftcorrect()` → `(corrected_smld, DriftInfo)` with `.model` in info
+- `render()` → `(image, RenderInfo)`
+
+Step records store upstream info in `step.info` field for later access.
 
 ### Data Flow
 

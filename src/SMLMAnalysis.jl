@@ -95,7 +95,7 @@ export MAPNResult, run_bagol, estimate_mapn
 include("types.jl")
 export Verbosity
 export DataSource, get_images
-export StepConfig, StepRecord
+export StepConfig, StepRecord, AnalysisInfo
 export AnalysisCheckpoint, Analysis
 export crop_camera, crop_images
 
@@ -146,7 +146,7 @@ export resume_analysis
 # ============================================================
 include("analysis.jl")
 export run_step!, reset!, checkpoint!, debug!
-export analyze
+export analyze, get_analysis_info
 
 # ============================================================
 # Calibration (used by frameconnect step)

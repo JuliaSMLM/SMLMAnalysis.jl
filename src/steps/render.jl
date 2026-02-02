@@ -49,8 +49,11 @@ function run_step!(a::Analysis, cfg::RenderConfig)
 
     v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(cfg.name)" n_renders=length(specs)
 
+    # Collect render_info from each render (tuple-pattern)
+    all_render_info = []
     t = @elapsed for spec in specs
-        _render_single(a.smld, spec, dir, v)
+        render_info = _render_single(a.smld, spec, dir, v)
+        push!(all_render_info, render_info)
     end
 
     n_locs = length(a.smld.emitters)
@@ -59,7 +62,13 @@ function run_step!(a::Analysis, cfg::RenderConfig)
         :n_renders => length(specs),
         :renders => [(s.strategy, s.zoom, s.colormap, s.color_by) for s in specs]
     )
-    _record!(a, cfg, t, summary)
+
+    # Aggregate render info (tuple-pattern)
+    step_info = (
+        render_info = all_render_info,
+        elapsed_ns = UInt64(round(t * 1e9))
+    )
+    _record!(a, cfg, t, summary; info=step_info)
 
     if dir !== nothing
         _save_step_outputs!(dir, a, cfg, v, t, n_locs, specs)
@@ -69,6 +78,9 @@ function run_step!(a::Analysis, cfg::RenderConfig)
     a
 end
 
+"""
+Render single specification, returns RenderInfo (tuple-pattern).
+"""
 function _render_single(smld, spec::RenderSpec, dir::Union{String,Nothing}, v::Int)
     strategy_obj = if spec.strategy == :gaussian
         GaussianRender()
@@ -96,9 +108,12 @@ function _render_single(smld, spec::RenderSpec, dir::Union{String,Nothing}, v::I
         render_kwargs[:color_by] = spec.color_by
     end
 
-    SMLMRender.render(smld; render_kwargs...)
+    # Tuple-pattern: returns (image, RenderInfo)
+    (image, render_info) = SMLMRender.render(smld; render_kwargs...)
 
     v >= Verbosity.DETAILED && @info "    $(spec.strategy) $(spec.colormap) $(spec.zoom)x" color_by=spec.color_by
+
+    return render_info
 end
 
 function _adaptive_clip_percentile(n_locs::Int)

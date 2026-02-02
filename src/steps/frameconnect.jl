@@ -28,15 +28,16 @@ function run_step!(a::Analysis, cfg::FrameConnectConfig)
 
     n_before = length(a.smld.emitters)
 
-    t = @elapsed fc_result = SMLMFrameConnection.frameconnect(a.smld;
+    # Tuple-pattern: returns (combined, ConnectInfo) where ConnectInfo contains .connected
+    t = @elapsed (combined, connect_info) = SMLMFrameConnection.frameconnect(a.smld;
         maxframegap = cfg.maxframegap,
         nsigmadev = cfg.nsigmadev,
         nnearestclusters = cfg.nnearestclusters,
         nmaxnn = cfg.nmaxnn
     )
 
-    a.smld_connected = fc_result.connected
-    a.smld = fc_result.combined
+    a.smld_connected = connect_info.connected
+    a.smld = combined
 
     # Optional chi² filtering to remove tracks with high chi² pairs (likely double-emitter fits)
     n_tracks_filtered = 0
@@ -70,7 +71,8 @@ function run_step!(a::Analysis, cfg::FrameConnectConfig)
         calibration_result = _analyze_and_calibrate!(a, cfg, summary)
     end
 
-    _record!(a, cfg, t, summary)
+    # Include connect_info in step record (tuple-pattern)
+    _record!(a, cfg, t, summary; info=connect_info)
     _checkpoint!(a)
 
     if dir !== nothing
