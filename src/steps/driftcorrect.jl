@@ -15,6 +15,8 @@ Drift correction step - wraps SMLMDriftCorrection.driftcorrect
     maxn::Int = 200           # Maximum neighbors for entropy calculation
     # Quality mode
     quality::Symbol = :singlepass  # :singlepass (fast) or :iterative (slower, converges)
+    # ROI selection
+    auto_roi::Bool = true  # Automatically select dense ROI for faster estimation
     # Diagnostics
     warn_large_intershift::Bool = true  # Warn if TYPE 2 has large inter-dataset shifts
     intershift_threshold_nm::Float64 = 500.0  # nm threshold for warning
@@ -46,7 +48,8 @@ function run_step!(a::Analysis, cfg::DriftCorrectConfig)
         chunk_frames = cfg.chunk_frames,
         maxn = cfg.maxn,
         quality = cfg.quality,
-        verbose = 0
+        auto_roi = cfg.auto_roi,
+        verbose = v >= Verbosity.DETAILED ? 1 : 0
     )
 
     a.smld = corrected_smld

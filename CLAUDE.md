@@ -186,16 +186,24 @@ DriftCorrectConfig supports two primary use cases:
 
 **Continuous single acquisition** (one long movie):
 ```julia
-# Single polynomial fit - NO chunking
+# Chunked for long acquisitions (>4000 frames)
+run_step!(a, DriftCorrectConfig(
+    degree = 3,
+    continuous = true,
+    chunk_frames = 4000,  # ~4000 frames per chunk is reasonable
+    auto_roi = true       # Dense ROI subset for faster estimation
+))
+
+# Or single polynomial for shorter acquisitions
 run_step!(a, DriftCorrectConfig(
     degree = 5,           # Higher degree for complex drift patterns
     continuous = true,
-    n_chunks = 0          # Single polynomial, no artificial boundaries
+    n_chunks = 0          # Single polynomial
 ))
 ```
-- Use `n_chunks=0` for continuous data from a single acquisition
-- Higher degree (4-5) captures oscillating drift patterns
-- Chunking continuous data creates artificial discontinuities
+- Consider chunking when >4000 frames; use `chunk_frames=4000` as reasonable max
+- Shorter acquisitions can use single polynomial with moderate degree (4-5)
+- `auto_roi=true` selects dense regions for better entropy signal
 
 **Registered multi-dataset** (multiple files with stage registration):
 ```julia
@@ -208,8 +216,6 @@ run_step!(a, DriftCorrectConfig(
 ```
 - Each dataset treated independently, then aligned via entropy optimization
 - Requires spatial overlap between datasets for inter-dataset alignment
-
-**When NOT to use chunking**: Chunking (`n_chunks > 0`) is designed for very long continuous acquisitions where memory is a concern. For typical single-file acquisitions (even 20k+ frames), prefer `n_chunks=0` with appropriate polynomial degree.
 
 ### DetectFitConfig Data Sources
 
