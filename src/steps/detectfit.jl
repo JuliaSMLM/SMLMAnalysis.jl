@@ -179,7 +179,7 @@ function run_step!(a::Analysis, cfg::DetectFitConfig)
     step_info = (
         boxes_info = all_boxes_info,
         fit_info = all_fit_info,
-        elapsed_ns = UInt64(round(t * 1e9))
+        elapsed_s = t
     )
     _record!(a, cfg, t, summary; info=step_info)
     _checkpoint!(a)

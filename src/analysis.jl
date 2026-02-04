@@ -386,18 +386,18 @@ function analyze(data, camera::SMLMData.AbstractCamera;
     end
 
     # Build AnalysisInfo from step records (tuple-pattern)
-    elapsed_ns = time_ns() - t_start
-    info = _build_analysis_info(a, elapsed_ns)
+    elapsed_s = (time_ns() - t_start) / 1e9
+    info = _build_analysis_info(a, elapsed_s)
 
     (a, info)
 end
 
 """
-    _build_analysis_info(a::Analysis, elapsed_ns::UInt64) -> AnalysisInfo
+    _build_analysis_info(a::Analysis, elapsed_s::Float64) -> AnalysisInfo
 
 Build AnalysisInfo from step records, aggregating per-step info structs.
 """
-function _build_analysis_info(a::Analysis, elapsed_ns::UInt64)
+function _build_analysis_info(a::Analysis, elapsed_s::Float64)
     steps = Dict{Symbol, Any}()
     for step in a.steps
         step_name_sym = Symbol(step.name)
@@ -405,7 +405,7 @@ function _build_analysis_info(a::Analysis, elapsed_ns::UInt64)
             steps[step_name_sym] = step.info
         end
     end
-    AnalysisInfo(elapsed_ns, steps)
+    AnalysisInfo(elapsed_s, steps)
 end
 
 """
@@ -418,7 +418,6 @@ to get the aggregated info at the end.
 """
 function get_analysis_info(a::Analysis)
     # Sum up timing from all steps
-    total_time_s = sum(s.timing for s in a.steps; init=0.0)
-    elapsed_ns = UInt64(round(total_time_s * 1e9))
-    _build_analysis_info(a, elapsed_ns)
+    elapsed_s = sum(s.timing for s in a.steps; init=0.0)
+    _build_analysis_info(a, elapsed_s)
 end

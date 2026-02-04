@@ -141,15 +141,15 @@ Each step stores its upstream info struct (BoxesInfo, FitInfo, DriftInfo, etc.)
 in the corresponding field.
 
 # Fields
-- `elapsed_ns::UInt64`: Total elapsed time in nanoseconds
+- `elapsed_s::Float64`: Total elapsed time in seconds
 - `steps::Dict{Symbol, Any}`: Step name → upstream info struct mapping
 """
 struct AnalysisInfo
-    elapsed_ns::UInt64
+    elapsed_s::Float64
     steps::Dict{Symbol, Any}
 end
 
-AnalysisInfo() = AnalysisInfo(UInt64(0), Dict{Symbol, Any}())
+AnalysisInfo() = AnalysisInfo(0.0, Dict{Symbol, Any}())
 
 # ============================================================
 # Analysis Checkpoint - snapshot of state for reset

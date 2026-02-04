@@ -5,13 +5,13 @@ using Test
     @testset "Types" begin
         # Test AnalysisInfo constructor
         info = AnalysisInfo()
-        @test info.elapsed_ns == UInt64(0)
+        @test info.elapsed_s == 0.0
         @test isempty(info.steps)
 
         # Test AnalysisInfo with data
         steps = Dict{Symbol, Any}(:test => (a=1, b=2))
-        info = AnalysisInfo(UInt64(1000), steps)
-        @test info.elapsed_ns == UInt64(1000)
+        info = AnalysisInfo(1.5, steps)
+        @test info.elapsed_s == 1.5
         @test info.steps[:test].a == 1
 
         # Test StepRecord with info
