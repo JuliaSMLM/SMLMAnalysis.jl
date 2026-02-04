@@ -180,6 +180,37 @@ For large acquisitions split into multiple datasets (e.g., 4 datasets × 2000 fr
 - **Global frames for plots only**: Drift correction plots convert to global frame indices for visualization, but internal data stays per-dataset
 - **SMLD structure**: `smld.n_frames` = frames per dataset, `smld.n_datasets` = number of datasets
 
+### Drift Correction Modes
+
+DriftCorrectConfig supports two primary use cases:
+
+**Continuous single acquisition** (one long movie):
+```julia
+# Single polynomial fit - NO chunking
+run_step!(a, DriftCorrectConfig(
+    degree = 5,           # Higher degree for complex drift patterns
+    continuous = true,
+    n_chunks = 0          # Single polynomial, no artificial boundaries
+))
+```
+- Use `n_chunks=0` for continuous data from a single acquisition
+- Higher degree (4-5) captures oscillating drift patterns
+- Chunking continuous data creates artificial discontinuities
+
+**Registered multi-dataset** (multiple files with stage registration):
+```julia
+# Multiple datasets with spatial overlap
+run_step!(a, DriftCorrectConfig(
+    degree = 2,
+    continuous = false,   # Registered mode
+    quality = :singlepass
+))
+```
+- Each dataset treated independently, then aligned via entropy optimization
+- Requires spatial overlap between datasets for inter-dataset alignment
+
+**When NOT to use chunking**: Chunking (`n_chunks > 0`) is designed for very long continuous acquisitions where memory is a concern. For typical single-file acquisitions (even 20k+ frames), prefer `n_chunks=0` with appropriate polynomial degree.
+
 ### DetectFitConfig Data Sources
 
 The combined detection+fitting step supports three data source modes:
