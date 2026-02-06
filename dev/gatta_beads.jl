@@ -52,7 +52,7 @@ run_step!(a, DetectFitConfig(
     boxsize = 11,
     min_photons = 1000.0,
     psf_sigma = 0.135,
-    use_gpu = true,
+    backend = :auto,
     # Fitting - variable sigma
     psf_model = :variable,
     iterations = 20,

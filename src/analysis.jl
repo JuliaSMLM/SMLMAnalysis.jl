@@ -422,7 +422,7 @@ function analyze(data, camera::SMLMData.AbstractCamera;
                  verbose=Verbosity.STANDARD,
                  n_datasets::Int=1,
                  # Detection
-                 boxsize=11, detect_min_photons=500.0, psf_sigma=0.135, use_gpu=true,
+                 boxsize=11, detect_min_photons=500.0, psf_sigma=0.135, backend=:auto,
                  # Fitting
                  psf_model=:variable, iterations=20,
                  # Filtering
@@ -443,7 +443,7 @@ function analyze(data, camera::SMLMData.AbstractCamera;
         boxsize=boxsize,
         min_photons=detect_min_photons,
         psf_sigma=psf_sigma,
-        use_gpu=use_gpu,
+        backend=backend,
         psf_model=psf_model,
         iterations=iterations,
         n_datasets=n_datasets,

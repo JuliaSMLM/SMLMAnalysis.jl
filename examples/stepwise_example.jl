@@ -54,7 +54,8 @@ Workaround for gen_images not respecting dataset parameter.
 function gen_images_for_dataset(smld, psf, dataset::Int; kwargs...)
     emitters_d = filter(e -> e.dataset == dataset, smld.emitters)
     smld_d = BasicSMLD(emitters_d, smld.camera, smld.n_frames, 1, smld.metadata)
-    gen_images(smld_d, psf; dataset=1, kwargs...)
+    (images, _) = gen_images(smld_d, psf; dataset=1, kwargs...)
+    images
 end
 
 # ============================================================================
@@ -67,7 +68,7 @@ println("="^60)
 
 camera = IdealCamera(256, 128, PIXEL_SIZE)  # width=256, height=128 (rectangular to catch permutation bugs)
 
-sim_params = StaticSMLMParams(
+sim_params = StaticSMLMConfig(
     density = 2.0,
     σ_psf = PSF_SIGMA,
     nframes = N_FRAMES,
@@ -78,7 +79,9 @@ fluor = GenericFluor(photons=50000.0, k_off=20.0, k_on=0.02)
 
 println("Simulating $(N_DATASETS) datasets x $(N_FRAMES) frames/dataset...")
 t_sim = @elapsed begin
-    smld_truth, smld_model, _ = simulate(sim_params; pattern=pattern, molecule=fluor, camera=camera)
+    (_, sim_info) = simulate(sim_params; pattern=pattern, molecule=fluor, camera=camera)
+    smld_truth = sim_info.smld_true
+    smld_model = sim_info.smld_model
 end
 println("  Ground truth emitters: $(length(smld_truth.emitters))")
 println("  Emitter appearances: $(length(smld_model.emitters)) ($(round(t_sim, digits=1))s)")
@@ -132,7 +135,7 @@ run_step!(a, DetectFitConfig(
     boxsize = 7,
     min_photons = 500.0,
     psf_sigma = PSF_SIGMA,
-    use_gpu = false,
+    backend = :cpu,
     psf_model = :variable,
     iterations = 20
 ))
@@ -249,6 +252,25 @@ end
 println()
 
 # ============================================================================
+# Extract reproducible config from step history
+# ============================================================================
+
+println("="^60)
+println("Extracting AnalysisConfig")
+println("="^60)
+
+config = get_config(a)
+println("  Steps: $(length(config.steps))")
+for (i, step) in enumerate(config.steps)
+    println("    $i. $(step_name(step))")
+end
+
+# Extract AnalysisInfo from step records (tuple-pattern)
+info = get_analysis_info(a)
+println("  Total time: $(round(info.elapsed_s, digits=2))s")
+println()
+
+# ============================================================================
 # Summary & Iteration Guide
 # ============================================================================
 
@@ -274,6 +296,10 @@ To iterate on parameters (in REPL):
   run_step!(a, FrameConnectConfig(maxframegap=5))
   run_step!(a, DriftCorrectConfig(degree=2))
   run_step!(a, RenderConfig(zoom=20))
+
+  # Extract config for reproducibility
+  config = get_config(a)
+  (result, info) = analyze(new_images, config)
 
   # Resume from disk after closing Julia:
   a = resume_analysis(OUTPUT_DIR; images=images)

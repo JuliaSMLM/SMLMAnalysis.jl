@@ -31,7 +31,7 @@ run_step!(a, FilterConfig(photons=(300.0, Inf)))  # Try looser filter
 # Re-exported Types
 Key types from ecosystem packages are re-exported for convenience:
 - SMLMData: AbstractCamera, IdealCamera, SCMOSCamera, BasicSMLD, Emitter types
-- GaussMLE: GaussMLEFitter, PSF models, ROIBatch
+- GaussMLE: GaussMLEConfig, PSF models, ROIBatch
 - SMLMRender: render strategies
 """
 module SMLMAnalysis
@@ -62,7 +62,7 @@ export BasicSMLD, ROIBatch
 export AbstractSMLMConfig, AbstractSMLMInfo
 
 # Re-export from SMLMSim
-export StaticSMLMParams, DiffusionSMLMParams
+export StaticSMLMConfig, DiffusionSMLMConfig
 export simulate, gen_images, gen_image
 export Nmer2D, Nmer3D, GenericFluor
 
@@ -70,9 +70,9 @@ export Nmer2D, Nmer3D, GenericFluor
 export getboxes
 
 # Re-export from GaussMLE
-export GaussMLEFitter
+export GaussMLEConfig
 export GaussianXYNB, GaussianXYNBS, GaussianXYNBSXSY, AstigmaticXYZNB
-export LocalizationResult
+export GaussMLEFitInfo
 # Re-export fit - use GaussMLE's fit for fitters
 using GaussMLE: fit
 export fit

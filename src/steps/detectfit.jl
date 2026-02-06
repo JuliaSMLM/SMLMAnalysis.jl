@@ -33,7 +33,9 @@ For each dataset:
     overlap::Float64 = 2.0
     min_photons::Float64 = 500.0
     psf_sigma::Float64 = 0.135
-    use_gpu::Bool = true
+
+    # Backend: :auto (GPU with CPU fallback), :gpu (GPU only), :cpu (CPU only)
+    backend::Symbol = :auto
 
     # Fit params (passed to GaussMLE.fit)
     psf_model::Symbol = :variable  # :fixed, :variable, :anisotropic
@@ -68,7 +70,7 @@ function run_step!(a::Analysis, cfg::DetectFitConfig)
     else
         error("Unknown psf_model: $(cfg.psf_model)")
     end
-    fitter = GaussMLEConfig(psf_model=psf, iterations=cfg.iterations)
+    fitter = GaussMLEConfig(psf_model=psf, iterations=cfg.iterations, backend=cfg.backend)
 
     # Process each dataset
     all_emitters = AbstractEmitter[]
@@ -101,7 +103,7 @@ function run_step!(a::Analysis, cfg::DetectFitConfig)
                 overlap = cfg.overlap,
                 min_photons = cfg.min_photons,
                 psf_sigma = cfg.psf_sigma,
-                use_gpu = cfg.use_gpu
+                backend = cfg.backend
             )
             push!(all_boxes_info, boxes_info)
             n_rois = length(roi_batch)

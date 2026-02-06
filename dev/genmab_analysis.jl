@@ -66,7 +66,7 @@ run_step!(a, DetectFitConfig(
     boxsize = 9,
     min_photons = 500.0,
     psf_sigma = 0.130,  # ~1.3 pixels at 97.8nm
-    use_gpu = true,
+    backend = :auto,
     # Fitting - variable sigma for dSTORM
     psf_model = :variable,
     iterations = 20,

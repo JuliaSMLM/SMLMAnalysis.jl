@@ -130,8 +130,9 @@ function _save_bagol_outputs!(a::Analysis, cfg::BaGoLConfig, bagol_smld::BasicSM
     stepdir === nothing && return
     mkpath(stepdir)
 
-    # Save config
+    # Save config and info
     _save_config!(stepdir, cfg)
+    _save_info!(stepdir, diagnostics)
 
     zoom = cfg.render_zoom
 
@@ -190,7 +191,7 @@ function _save_bagol_stats!(stepdir::String, input_smld::BasicSMLD, bagol_smld::
 
         println(io, "## Model Parameters")
         println(io, "- Final μ: $(round(diagnostics.final_μ, digits=2)) (mean locs/emitter)")
-        println(io, "- Final α: $(round(diagnostics.final_α, digits=2))")
+        println(io, "- Final shape: $(round(diagnostics.final_shape, digits=2))")
         println(io, "")
 
         # Precision improvement comparison

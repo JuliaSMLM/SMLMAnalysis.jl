@@ -5,11 +5,13 @@ SMLM analysis using the one-liner analyze() function.
 
 This example demonstrates:
 1. Generating realistic simulated SMLM data (4 datasets x 2000 frames)
-2. Running complete pipeline with analyze() and keyword arguments
+2. Running complete pipeline with AnalysisConfig (primary interface)
+3. Alternative: legacy keyword arguments interface
 
 The analyze() approach is best for:
 - Quick analysis with sensible defaults
 - Production workflows with standard parameters
+- Reproducible configs (save/share AnalysisConfig)
 
 For interactive parameter tuning, see stepwise_example.jl
 """
@@ -43,7 +45,8 @@ Workaround for gen_images not respecting dataset parameter.
 function gen_images_for_dataset(smld, psf, dataset::Int; kwargs...)
     emitters_d = filter(e -> e.dataset == dataset, smld.emitters)
     smld_d = BasicSMLD(emitters_d, smld.camera, smld.n_frames, 1, smld.metadata)
-    gen_images(smld_d, psf; dataset=1, kwargs...)
+    (images, _) = gen_images(smld_d, psf; dataset=1, kwargs...)
+    images
 end
 
 # ============================================================================
@@ -59,7 +62,7 @@ camera = IdealCamera(256, 128, PIXEL_SIZE)
 println("Camera: 256x128 pixels, $(PIXEL_SIZE*1000)nm/pixel")
 
 # Simulation: octamer pattern (8-mer @ 150nm diameter)
-sim_params = StaticSMLMParams(
+sim_params = StaticSMLMConfig(
     density = 2.0,          # 2 patterns/um^2
     σ_psf = PSF_SIGMA,
     nframes = N_FRAMES,     # Frames per dataset
@@ -79,7 +82,8 @@ println("Pattern: 8-mer @ 50nm, density = $(sim_params.density) patterns/um^2")
 
 # Run simulation
 t_sim = @elapsed begin
-    _, smld_model, _ = simulate(sim_params; pattern=pattern, molecule=fluor, camera=camera)
+    (_, sim_info) = simulate(sim_params; pattern=pattern, molecule=fluor, camera=camera)
+    smld_model = sim_info.smld_model
 end
 println("Simulated $(length(smld_model.emitters)) emitter appearances ($(round(t_sim, digits=1))s)")
 
@@ -98,40 +102,42 @@ println("  Combined: $(size(images))")
 println()
 
 # ============================================================================
-# Step 2: Run Analysis
+# Step 2: Run Analysis with AnalysisConfig (primary interface)
 # ============================================================================
 
 println("="^60)
-println("Running analysis with analyze()")
+println("Running analysis with AnalysisConfig")
 println("="^60)
 
 mkpath(OUTPUT_DIR)
 
-result = analyze(images, camera;
+config = AnalysisConfig(
+    camera = camera,
+    steps = [
+        DetectFitConfig(
+            boxsize = 7,
+            min_photons = 500.0,
+            psf_sigma = PSF_SIGMA,
+            backend = :cpu,
+            psf_model = :variable,
+            iterations = 20,
+            n_datasets = N_DATASETS
+        ),
+        FilterConfig(
+            photons = (500.0, Inf),
+            precision = (0.0, 0.007),
+            pvalue = (1e-3, 1.0)
+        ),
+        FrameConnectConfig(maxframegap = 5),
+        DriftCorrectConfig(degree = 2),
+        RenderConfig(zoom = 20),
+    ],
     outdir = OUTPUT_DIR,
-    n_datasets = N_DATASETS,
-    # Detection + Fitting
-    boxsize = 7,
-    detect_min_photons = 500.0,
-    psf_sigma = PSF_SIGMA,
-    use_gpu = true,
-    psf_model = :variable,
-    iterations = 20,
-    # Filtering
-    filter = true,
-    min_photons = 500.0,
-    max_precision = 0.007,
-    min_pvalue = 1e-3,
-    # Frame Connection
-    frameconnect = true,
-    maxframegap = 5,
-    # Drift
-    drift = true,
-    degree = 2,
-    # Render
-    render = true,
-    render_zoom = 20
+    verbose = Verbosity.STANDARD
 )
+
+# analyze() returns (Analysis, AnalysisInfo) tuple
+(result, info) = analyze(images, config)
 
 # ============================================================================
 # Summary
@@ -146,5 +152,11 @@ println("Results:")
 println("  Final localizations: $(length(result.smld.emitters))")
 println("  Datasets: $(result.smld.n_datasets)")
 println("  Frames per dataset: $(result.smld.n_frames)")
+println("  Total time: $(round(info.elapsed_s, digits=2))s")
+println()
+println("Step info available:")
+for (name, _) in info.steps
+    println("  info.steps[:$name]")
+end
 println()
 println("Output saved to: $OUTPUT_DIR")
