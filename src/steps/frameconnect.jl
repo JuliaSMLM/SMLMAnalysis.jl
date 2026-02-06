@@ -2,8 +2,7 @@
 Frame connection step - wraps SMLMFrameConnection.frameconnect
 """
 
-@kwdef struct FrameConnectConfig <: StepConfig
-    name::String = "frameconnect"
+@kwdef struct FrameConnectConfig <: SMLMData.AbstractSMLMConfig
     # SMLMFrameConnection.frameconnect kwargs
     maxframegap::Int = 5
     nsigmadev::Float64 = 5.0
@@ -15,16 +14,15 @@ Frame connection step - wraps SMLMFrameConnection.frameconnect
     # Chi² filtering - removes tracks with high chi² pairs (likely double-emitter fits)
     filter_high_chi2::Bool = false
     chi2_filter_threshold::Float64 = 6.0  # ~99.7% of chi²(2) is below this
-    verbose::Int = Verbosity.STANDARD
 end
 
 function run_step!(a::Analysis, cfg::FrameConnectConfig)
     a.smld === nothing && error("Must run Fit first")
     a.step_counter += 1
-    v = _get_verbose(a, cfg)
+    v = a.verbose
     dir = _stepdir(a, cfg)
 
-    v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(cfg.name)" maxframegap=cfg.maxframegap
+    v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(step_name(cfg))" maxframegap=cfg.maxframegap
 
     n_before = length(a.smld.emitters)
 

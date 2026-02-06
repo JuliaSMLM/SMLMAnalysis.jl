@@ -20,8 +20,7 @@ const DEFAULT_RENDERS = [
     RenderSpec(strategy=:circles, zoom=50, colormap=:turbo, color_by=:absolute_frame, clip_percentile=0.999),
 ]
 
-@kwdef struct RenderConfig <: StepConfig
-    name::String = "render"
+@kwdef struct RenderConfig <: SMLMData.AbstractSMLMConfig
     # Render specifications - vector of RenderSpec or single spec via legacy fields
     renders::Vector{RenderSpec} = DEFAULT_RENDERS
     # Legacy single-render fields (used if renders is empty or for backward compat)
@@ -30,14 +29,12 @@ const DEFAULT_RENDERS = [
     colormap::Symbol = :inferno
     color_by::Union{Symbol, Nothing} = nothing
     clip_percentile::Union{Float64, Symbol} = :auto
-    # Extra
-    verbose::Int = Verbosity.STANDARD
 end
 
 function run_step!(a::Analysis, cfg::RenderConfig)
     a.smld === nothing && error("Must run Fit first")
     a.step_counter += 1
-    v = _get_verbose(a, cfg)
+    v = a.verbose
     dir = _stepdir(a, cfg)
 
     # Use renders list if non-empty, otherwise fall back to single spec from legacy fields
@@ -47,7 +44,7 @@ function run_step!(a::Analysis, cfg::RenderConfig)
         [RenderSpec(strategy=cfg.strategy, zoom=cfg.zoom, colormap=cfg.colormap, color_by=cfg.color_by)]
     end
 
-    v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(cfg.name)" n_renders=length(specs)
+    v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(step_name(cfg))" n_renders=length(specs)
 
     # Collect render_info from each render (tuple-pattern)
     all_render_info = []

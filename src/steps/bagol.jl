@@ -26,9 +26,7 @@ Configuration for BaGoL grouping step.
 - `max_partition_size`: Maximum locs per partition (default: 1000)
 - `render_zoom`: Zoom factor for renders (default: 50)
 """
-Base.@kwdef struct BaGoLConfig <: StepConfig
-    name::String = "bagol"
-    verbose::Int = Verbosity.STANDARD
+Base.@kwdef struct BaGoLConfig <: SMLMData.AbstractSMLMConfig
     # RJMCMC parameters
     n_iterations::Int = 10000
     burn_in::Int = 2000
@@ -62,10 +60,10 @@ function run_step!(a::Analysis, cfg::BaGoLConfig)
 
     a.step_counter += 1
     t0 = time()
-    verbose = _get_verbose(a, cfg)
+    verbose = a.verbose
 
     if verbose >= Verbosity.PROGRESS
-        @info "Step $(a.step_counter): $(cfg.name)"
+        @info "Step $(a.step_counter): $(step_name(cfg))"
     end
 
     n_locs = length(a.smld.emitters)

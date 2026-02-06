@@ -15,9 +15,7 @@ For each dataset:
 5. (File mode only) Free images from memory
 """
 
-@kwdef struct DetectFitConfig <: StepConfig
-    name::String = "detectfit"
-
+@kwdef struct DetectFitConfig <: SMLMData.AbstractSMLMConfig
     # Data source (optional - use Analysis.data if not specified)
     # Option 1: Single file with n_datasets (splits frames evenly)
     path::Union{String, Nothing} = nothing
@@ -47,21 +45,18 @@ For each dataset:
     filter_min_photons::Float64 = 500.0
     filter_max_precision::Float64 = 0.007  # 7nm default
     filter_min_pvalue::Float64 = 1e-6
-
-    # Extra
-    verbose::Int = Verbosity.STANDARD
 end
 
 function run_step!(a::Analysis, cfg::DetectFitConfig)
     a.step_counter += 1
-    v = _get_verbose(a, cfg)
+    v = a.verbose
     dir = _stepdir(a, cfg)
 
     # Determine data sources: use Analysis.data if available, else use file paths from config
     sources, source_mode = _resolve_data_sources(a, cfg)
     n_datasets = length(sources)
 
-    v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(cfg.name)" n_datasets=n_datasets psf_model=cfg.psf_model
+    v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(step_name(cfg))" n_datasets=n_datasets psf_model=cfg.psf_model
 
     # Setup fitter
     psf = if cfg.psf_model == :fixed

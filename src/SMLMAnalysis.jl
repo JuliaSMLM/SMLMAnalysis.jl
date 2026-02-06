@@ -59,6 +59,7 @@ using NearestNeighbors
 export AbstractCamera, IdealCamera, SCMOSCamera
 export AbstractEmitter, Emitter2D, Emitter3D, Emitter2DFit, Emitter3DFit
 export BasicSMLD, ROIBatch
+export AbstractSMLMConfig, AbstractSMLMInfo
 
 # Re-export from SMLMSim
 export StaticSMLMParams, DiffusionSMLMParams
@@ -95,9 +96,10 @@ export MAPNResult, run_bagol, estimate_mapn
 include("types.jl")
 export Verbosity
 export DataSource, get_images
-export StepConfig, StepRecord, AnalysisInfo
+export AnalysisConfig, StepRecord, AnalysisInfo
 export AnalysisCheckpoint, Analysis
 export crop_camera, crop_images
+export step_name
 
 # ============================================================
 # Step configs and run_step! implementations
@@ -146,7 +148,7 @@ export resume_analysis
 # ============================================================
 include("analysis.jl")
 export run_step!, reset!, checkpoint!, debug!
-export analyze, get_analysis_info
+export analyze, get_analysis_info, get_config
 
 # ============================================================
 # Calibration (used by frameconnect step)

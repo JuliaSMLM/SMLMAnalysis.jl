@@ -145,41 +145,31 @@ end
 # Debug helper
 # ============================================================
 
-function debug!(a::Analysis, cfg::StepConfig)
-    # Create modified config with DEBUG verbosity
-    T = typeof(cfg)
-    fields = fieldnames(T)
-    vals = Dict{Symbol,Any}()
-    for f in fields
-        if f == :verbose
-            vals[f] = Verbosity.DEBUG
-        else
-            vals[f] = getfield(cfg, f)
-        end
+function debug!(a::Analysis, cfg::SMLMData.AbstractSMLMConfig)
+    # Temporarily set analysis to DEBUG verbosity, run step, restore
+    old_verbose = a.verbose
+    a.verbose = Verbosity.DEBUG
+    try
+        run_step!(a, cfg)
+    finally
+        a.verbose = old_verbose
     end
-    new_cfg = T(; vals...)
-    run_step!(a, new_cfg)
 end
 
 # ============================================================
 # Helpers used by all steps
 # ============================================================
 
-function _get_verbose(a::Analysis, cfg::StepConfig)
-    # Use step's verbose if not STANDARD, else use analysis default
-    cfg.verbose != Verbosity.STANDARD ? cfg.verbose : a.verbose
-end
-
-function _stepdir(a::Analysis, cfg::StepConfig)
+function _stepdir(a::Analysis, cfg::SMLMData.AbstractSMLMConfig)
     a.outdir === nothing && return nothing
     joinpath(a.outdir, "$(lpad(a.step_counter, 2, '0'))_$(step_name(cfg))")
 end
 
-function _record!(a::Analysis, cfg::StepConfig, t::Float64, summary::Dict{Symbol,Any}; info=nothing)
+function _record!(a::Analysis, cfg::SMLMData.AbstractSMLMConfig, t::Float64, summary::Dict{Symbol,Any}; info=nothing)
     push!(a.steps, StepRecord(a.step_counter, cfg, t, summary; info=info))
 end
 
-function _save_config!(dir::String, cfg::StepConfig)
+function _save_config!(dir::String, cfg::SMLMData.AbstractSMLMConfig)
     filepath = joinpath(dir, "config.toml")
     open(filepath, "w") do io
         println(io, "# $(nameof(typeof(cfg)))")
@@ -245,65 +235,132 @@ end
 # Convenience: one-shot analyze
 # ============================================================
 
-"""
-    analyze(data, camera; kwargs...) -> (Analysis, AnalysisInfo)
+# ============================================================
+# Primary interface: analyze(data, config::AnalysisConfig)
+# ============================================================
 
-Run complete SMLM analysis pipeline with sensible defaults.
+"""
+    analyze(data, config::AnalysisConfig) -> (Analysis, AnalysisInfo)
+
+Run SMLM analysis pipeline defined by config.
 
 Returns a tuple of (Analysis, AnalysisInfo) following the JuliaSMLM tuple-pattern.
 
 # Arguments
 - `data`: Image stack (H×W×N array) or path to data file
-- `camera`: Camera model (IdealCamera or SCMOSCamera)
-
-# Keyword Arguments
-## General
-- `outdir=nothing`: Output directory for results
-- `verbose=Verbosity.STANDARD`: Verbosity level
-- `n_datasets=1`: Number of datasets in the acquisition
-
-## Detection + Fitting
-- `boxsize=11`: ROI size for detection
-- `detect_min_photons=500.0`: Minimum photons for detection
-- `psf_sigma=0.135`: Expected PSF sigma (μm)
-- `use_gpu=true`: Use GPU for detection
-- `psf_model=:variable`: PSF model (:fixed, :variable, :anisotropic)
-- `iterations=20`: MLE iterations
-
-## Filtering
-- `filter=true`: Enable filtering step
-- `min_photons=500.0`: Minimum photons
-- `max_precision=0.015`: Maximum precision (μm)
-- `min_pvalue=1e-3`: Minimum p-value
-
-## Frame Connection
-- `frameconnect=false`: Enable frame connection
-- `maxframegap=5`: Maximum frame gap for tracks
-
-## Drift Correction
-- `drift=true`: Enable drift correction
-- `degree=2`: Polynomial degree
-
-## Isolated Filter
-- `isolated=false`: Enable isolated emitter filter
-- `n_sigma=2.0`: Neighbor search radius (σ units)
-
-## Rendering
-- `render=true`: Enable rendering
-- `render_zoom=20`: Render zoom factor
-
-# Returns
-Tuple of (Analysis, AnalysisInfo):
-- `Analysis`: Object with results accessible via `result.smld`, `result.drift_model`, etc.
-- `AnalysisInfo`: Aggregated metadata from all steps with per-step info structs
+- `config`: AnalysisConfig with camera, steps, and output settings
 
 # Example
 ```julia
-(result, info) = analyze(images, camera; outdir="output/")
-result.smld           # Final SMLD
-info.steps[:detectfit]  # DetectFit step info (BoxesInfo, FitInfo)
-info.steps[:driftcorrect]  # Drift step info (DriftInfo)
+config = AnalysisConfig(
+    camera = cam,
+    steps = [
+        DetectFitConfig(boxsize=9),
+        FilterConfig(photons=(500.0, Inf)),
+        DriftCorrectConfig(degree=2),
+        RenderConfig(zoom=20),
+    ],
+    outdir = "output/",
+)
+(result, info) = analyze(images, config)
+result.smld               # Final SMLD
+info.steps[:detectfit]    # DetectFit step info
+info.steps[:driftcorrect] # Drift step info
 ```
+"""
+function analyze(data, config::AnalysisConfig)
+    t_start = time_ns()
+
+    # Create analysis object
+    a = Analysis(data, config.camera;
+        outdir=config.outdir, verbose=config.verbose, checkpoint=config.checkpoint)
+
+    # Execute pipeline
+    _execute_pipeline!(a, config.steps)
+
+    # Write summary if output directory specified
+    if config.outdir !== nothing
+        _write_summary(a)
+    end
+
+    # Build AnalysisInfo from step records (tuple-pattern)
+    elapsed_s = (time_ns() - t_start) / 1e9
+    info = _build_analysis_info(a, elapsed_s)
+
+    (a, info)
+end
+
+"""
+    analyze(data, steps::AbstractSMLMConfig...; camera, kwargs...) -> (Analysis, AnalysisInfo)
+
+Convenience varargs form. Builds AnalysisConfig from positional step configs and keyword arguments.
+
+# Example
+```julia
+(result, info) = analyze(images,
+    DetectFitConfig(boxsize=9),
+    FilterConfig(photons=(500.0, Inf)),
+    DriftCorrectConfig(degree=2);
+    camera=cam, outdir="output/")
+```
+"""
+function analyze(data, steps::SMLMData.AbstractSMLMConfig...; camera::SMLMData.AbstractCamera, kwargs...)
+    config = AnalysisConfig(steps...; camera=camera, kwargs...)
+    analyze(data, config)
+end
+
+"""
+    _execute_pipeline!(a::Analysis, steps)
+
+Execute pipeline steps with automatic fusion of adjacent boxer+fitter configs.
+"""
+function _execute_pipeline!(a::Analysis, steps::Vector{SMLMData.AbstractSMLMConfig})
+    i = 1
+    while i <= length(steps)
+        # TODO: Detect adjacent BoxerConfig + FitConfig for fusion when upstream configs are used directly
+        # For now, execute each step sequentially
+        run_step!(a, steps[i])
+        i += 1
+    end
+end
+
+"""
+    get_config(a::Analysis) -> AnalysisConfig
+
+Extract an AnalysisConfig from a completed Analysis, enabling reproducibility.
+
+After interactive exploration with run_step!, extract the config that produced the result:
+
+```julia
+a = Analysis(images, camera; outdir="output/")
+run_step!(a, DetectFitConfig(boxsize=9))
+run_step!(a, FilterConfig(photons=(500.0, Inf)))
+
+config = get_config(a)  # Reproducible config from step history
+(result, info) = analyze(new_images, config)
+```
+"""
+function get_config(a::Analysis)
+    AnalysisConfig(
+        camera = a.camera,
+        steps = SMLMData.AbstractSMLMConfig[s.config for s in a.steps],
+        outdir = a.outdir,
+        verbose = a.verbose,
+        checkpoint = a.checkpoint
+    )
+end
+
+# ============================================================
+# Legacy kwargs interface (backward compatible)
+# ============================================================
+
+"""
+    analyze(data, camera::AbstractCamera; kwargs...) -> (Analysis, AnalysisInfo)
+
+Legacy convenience interface with flat keyword arguments.
+Builds a default pipeline from kwargs and runs it.
+
+See `analyze(data, config::AnalysisConfig)` for the primary interface.
 """
 function analyze(data, camera::SMLMData.AbstractCamera;
                  outdir=nothing,
@@ -324,72 +381,51 @@ function analyze(data, camera::SMLMData.AbstractCamera;
                  # Render
                  render=true, render_zoom=20)
 
-    t_start = time_ns()
+    # Build steps from kwargs
+    steps = SMLMData.AbstractSMLMConfig[]
 
-    # Create analysis object
-    a = Analysis(data, camera; outdir, verbose, n_datasets)
-
-    # Detection + Fitting (combined step)
-    run_step!(a, DetectFitConfig(
+    push!(steps, DetectFitConfig(
         boxsize=boxsize,
         min_photons=detect_min_photons,
         psf_sigma=psf_sigma,
         use_gpu=use_gpu,
         psf_model=psf_model,
         iterations=iterations,
-        # Pass filter thresholds for preview plot
+        n_datasets=n_datasets,
         filter_min_photons=min_photons,
         filter_max_precision=max_precision,
         filter_min_pvalue=min_pvalue
     ))
 
-    # Filtering
     if filter
-        run_step!(a, FilterConfig(
+        push!(steps, FilterConfig(
             photons=(min_photons, Inf),
             precision=(0.0, max_precision),
             pvalue=(min_pvalue, 1.0)
         ))
     end
 
-    # Frame connection
     if frameconnect
-        run_step!(a, FrameConnectConfig(
-            maxframegap=maxframegap
-        ))
+        push!(steps, FrameConnectConfig(maxframegap=maxframegap))
     end
 
-    # Drift correction
     if drift
-        run_step!(a, DriftCorrectConfig(
-            degree=degree
-        ))
+        push!(steps, DriftCorrectConfig(degree=degree))
     end
 
-    # Isolated filter
     if isolated
-        run_step!(a, IsolatedConfig(
-            n_sigma=n_sigma
-        ))
+        push!(steps, IsolatedConfig(n_sigma=n_sigma))
     end
 
-    # Render
     if render
-        run_step!(a, RenderConfig(
-            zoom=render_zoom
-        ))
+        push!(steps, RenderConfig(zoom=render_zoom))
     end
 
-    # Write summary if output directory specified
-    if outdir !== nothing
-        _write_summary(a)
-    end
-
-    # Build AnalysisInfo from step records (tuple-pattern)
-    elapsed_s = (time_ns() - t_start) / 1e9
-    info = _build_analysis_info(a, elapsed_s)
-
-    (a, info)
+    config = AnalysisConfig(
+        camera=camera, steps=steps,
+        outdir=outdir, verbose=verbose
+    )
+    analyze(data, config)
 end
 
 """

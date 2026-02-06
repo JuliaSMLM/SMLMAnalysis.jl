@@ -2,25 +2,22 @@
 Filtering step - filters localizations by various criteria
 """
 
-@kwdef struct FilterConfig <: StepConfig
-    name::String = "filter"
+@kwdef struct FilterConfig <: SMLMData.AbstractSMLMConfig
     # All filters use (min, max) tuples. Use -Inf/Inf for unbounded.
     photons::Union{Tuple{Float64, Float64}, Nothing} = nothing      # (min, max)
     precision::Union{Tuple{Float64, Float64}, Nothing} = nothing    # (min, max) in microns
     pvalue::Union{Tuple{Float64, Float64}, Nothing} = nothing       # (min, max)
     # PSF sigma: :auto (mode ± 10%), or (min, max) tuple in microns
     psf_sigma::Union{Symbol, Tuple{Float64, Float64}, Nothing} = nothing
-    # Extra
-    verbose::Int = Verbosity.STANDARD
 end
 
 function run_step!(a::Analysis, cfg::FilterConfig)
     a.smld === nothing && error("Must run Fit first")
     a.step_counter += 1
-    v = _get_verbose(a, cfg)
+    v = a.verbose
     dir = _stepdir(a, cfg)
 
-    v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(cfg.name)" photons=cfg.photons precision=cfg.precision
+    v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(step_name(cfg))" photons=cfg.photons precision=cfg.precision
 
     n_before = length(a.smld.emitters)
     t = @elapsed a.smld = _filter_smld(a.smld, cfg)

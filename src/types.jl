@@ -103,13 +103,14 @@ function crop_images(images::AbstractArray{T,3}, roi_x::UnitRange{Int}, roi_y::U
 end
 
 # ============================================================
-# Step Configs - abstract type and common interface
+# Step Configs - use AbstractSMLMConfig from SMLMData
 # ============================================================
-abstract type StepConfig end
 
-# Get the name field from any config
-step_name(cfg::StepConfig) = cfg.name
-step_verbose(cfg::StepConfig) = cfg.verbose
+# Alias for backward compatibility within this package
+const StepConfig = SMLMData.AbstractSMLMConfig
+
+# Derive step name from type (e.g., FilterConfig → "filter", DriftCorrectConfig → "driftcorrect")
+step_name(cfg::SMLMData.AbstractSMLMConfig) = lowercase(replace(string(nameof(typeof(cfg))), r"Config|Options" => ""))
 
 # ============================================================
 # Step Record - what gets logged after each step
@@ -117,14 +118,14 @@ step_verbose(cfg::StepConfig) = cfg.verbose
 struct StepRecord
     number::Int
     name::String
-    config::StepConfig
+    config::SMLMData.AbstractSMLMConfig
     timestamp::DateTime
     timing::Float64
     summary::Dict{Symbol, Any}
     info::Any  # Upstream package info struct (BoxesInfo, FitInfo, DriftInfo, etc.)
 end
 
-function StepRecord(number::Int, cfg::StepConfig, timing::Float64, summary::Dict{Symbol,Any}; info=nothing)
+function StepRecord(number::Int, cfg::SMLMData.AbstractSMLMConfig, timing::Float64, summary::Dict{Symbol,Any}; info=nothing)
     StepRecord(number, step_name(cfg), cfg, now(), timing, summary, info)
 end
 
@@ -132,24 +133,71 @@ end
 # AnalysisInfo - aggregated info from all steps (tuple-pattern)
 # ============================================================
 """
-    AnalysisInfo
+    AnalysisInfo <: AbstractSMLMInfo
 
 Aggregated metadata from all analysis steps, following the tuple-pattern.
 
 Contains timing information and per-step info structs from upstream packages.
-Each step stores its upstream info struct (BoxesInfo, FitInfo, DriftInfo, etc.)
-in the corresponding field.
+Steps are stored in pipeline order as a vector.
 
 # Fields
 - `elapsed_s::Float64`: Total elapsed time in seconds
 - `steps::Dict{Symbol, Any}`: Step name → upstream info struct mapping
 """
-struct AnalysisInfo
+struct AnalysisInfo <: SMLMData.AbstractSMLMInfo
     elapsed_s::Float64
     steps::Dict{Symbol, Any}
 end
 
 AnalysisInfo() = AnalysisInfo(0.0, Dict{Symbol, Any}())
+
+# ============================================================
+# AnalysisConfig - pipeline configuration (uniform interface)
+# ============================================================
+"""
+    AnalysisConfig <: AbstractSMLMConfig
+
+Complete description of an SMLM analysis pipeline.
+
+The `steps` vector contains upstream package configs (BoxerConfig, GaussMLEConfig, etc.)
+and SMLMAnalysis-specific configs (FilterConfig, IsolatedConfig). The pipeline executes
+steps in order, with automatic fusion of adjacent boxer+fitter steps.
+
+# Fields
+- `camera::AbstractCamera`: Camera model (required, no default)
+- `steps::Vector{SMLMData.AbstractSMLMConfig}`: Ordered pipeline steps
+- `outdir::Union{String, Nothing}`: Output directory for results
+- `verbose::Int`: Verbosity level (default: STANDARD)
+- `checkpoint::Bool`: Enable disk persistence of checkpoints
+
+# Example
+```julia
+config = AnalysisConfig(
+    camera = cam,
+    steps = [
+        BoxerConfig(boxsize=9),
+        GaussMLEConfig(psf_model=:variable),
+        FilterConfig(photons=(500.0, Inf)),
+        DriftConfig(degree=2),
+        RenderOptions(zoom=20),
+    ],
+    outdir = "output/",
+)
+(smld, info) = analyze(images, config)
+```
+"""
+@kwdef struct AnalysisConfig <: SMLMData.AbstractSMLMConfig
+    camera::SMLMData.AbstractCamera
+    steps::Vector{SMLMData.AbstractSMLMConfig} = SMLMData.AbstractSMLMConfig[]
+    outdir::Union{String, Nothing} = nothing
+    verbose::Int = Verbosity.STANDARD
+    checkpoint::Bool = false
+end
+
+# Varargs constructor: AnalysisConfig(step1, step2, ...; camera=cam, outdir="out/")
+function AnalysisConfig(steps::SMLMData.AbstractSMLMConfig...; camera::SMLMData.AbstractCamera, kwargs...)
+    AnalysisConfig(; camera=camera, steps=collect(SMLMData.AbstractSMLMConfig, steps), kwargs...)
+end
 
 # ============================================================
 # Analysis Checkpoint - snapshot of state for reset
@@ -323,10 +371,10 @@ function Base.show(io::IO, ::MIME"text/plain", a::Analysis)
     end
 end
 
-function Base.show(io::IO, cfg::StepConfig)
+function Base.show(io::IO, cfg::SMLMData.AbstractSMLMConfig)
     T = typeof(cfg)
     fields = fieldnames(T)
-    vals = [string(f, "=", getfield(cfg, f)) for f in fields if f != :verbose]
+    vals = [string(f, "=", getfield(cfg, f)) for f in fields]
     print(io, "$(nameof(T))($(join(vals, ", ")))")
 end
 

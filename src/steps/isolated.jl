@@ -4,21 +4,18 @@ Isolated emitter filter step - removes isolated localizations
 
 using NearestNeighbors
 
-@kwdef struct IsolatedConfig <: StepConfig
-    name::String = "isolated"
+@kwdef struct IsolatedConfig <: SMLMData.AbstractSMLMConfig
     n_sigma::Float64 = 2.0
     min_neighbors::Union{Int, Symbol} = :auto  # :auto uses triangle method
-    # Extra
-    verbose::Int = Verbosity.STANDARD
 end
 
 function run_step!(a::Analysis, cfg::IsolatedConfig)
     a.smld === nothing && error("Must run Fit first")
     a.step_counter += 1
-    v = _get_verbose(a, cfg)
+    v = a.verbose
     dir = _stepdir(a, cfg)
 
-    v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(cfg.name)" n_sigma=cfg.n_sigma min_neighbors=cfg.min_neighbors
+    v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(step_name(cfg))" n_sigma=cfg.n_sigma min_neighbors=cfg.min_neighbors
 
     n_before = length(a.smld.emitters)
     t = @elapsed a.smld, neighbor_counts, threshold = _filter_isolated(a.smld, cfg)
