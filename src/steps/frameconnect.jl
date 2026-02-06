@@ -74,7 +74,7 @@ function run_step!(a::Analysis, cfg::FrameConnectConfig)
     _checkpoint!(a)
 
     if dir !== nothing
-        _save_step_outputs!(dir, a, cfg, v, t, n_before, n_after, calibration_result, summary)
+        _save_step_outputs!(dir, a, cfg, v, t, n_before, n_after, calibration_result, summary, connect_info)
     end
 
     v >= Verbosity.PROGRESS && @info "  → $n_after tracks ($(round(compression, digits=1))x) ($(round(t, digits=2))s)"
@@ -180,9 +180,10 @@ function _analyze_and_calibrate!(a::Analysis, cfg::FrameConnectConfig, summary::
 end
 
 function _save_step_outputs!(dir::String, a::Analysis, cfg::FrameConnectConfig, v::Int, t::Float64,
-                             n_before::Int, n_after::Int, cal_result, summary)
+                             n_before::Int, n_after::Int, cal_result, summary, connect_info)
     mkpath(dir)
     _save_config!(dir, cfg)
+    _save_info!(dir, connect_info)
 
     if v >= Verbosity.STANDARD
         koff_stats = _save_frameconnect_figures(dir, a.smld_connected, cal_result)

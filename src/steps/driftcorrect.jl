@@ -92,7 +92,7 @@ function run_step!(a::Analysis, cfg::DriftCorrectConfig)
     _checkpoint!(a)
 
     if dir !== nothing
-        _save_step_outputs!(dir, a, cfg, v, t, max_drift, inter_shifts, n_frames, converged, iterations)
+        _save_step_outputs!(dir, a, cfg, v, t, max_drift, inter_shifts, n_frames, converged, iterations, drift_info)
     end
 
     v >= Verbosity.PROGRESS && @info "  → max drift $(round(max_drift, digits=1))nm, inter-shift $(round(max_intershift, digits=1))nm ($(round(t, digits=2))s)"
@@ -128,9 +128,10 @@ end
 
 function _save_step_outputs!(dir::String, a::Analysis, cfg::DriftCorrectConfig, v::Int, t::Float64,
                              max_drift::Float64, inter_shifts::Vector{Float64}, n_frames::Int,
-                             converged::Union{Bool,Nothing}, iterations::Union{Int,Nothing})
+                             converged::Union{Bool,Nothing}, iterations::Union{Int,Nothing}, drift_info)
     mkpath(dir)
     _save_config!(dir, cfg)
+    _save_info!(dir, drift_info)
 
     if v >= Verbosity.STANDARD
         _write_drift_stats(dir, cfg, a.drift_model, t, max_drift, inter_shifts, n_frames, converged, iterations)

@@ -68,7 +68,7 @@ function run_step!(a::Analysis, cfg::RenderConfig)
     _record!(a, cfg, t, summary; info=step_info)
 
     if dir !== nothing
-        _save_step_outputs!(dir, a, cfg, v, t, n_locs, specs)
+        _save_step_outputs!(dir, a, cfg, v, t, n_locs, specs, all_render_info)
     end
 
     v >= Verbosity.PROGRESS && @info "  → $(length(specs)) renders ($(round(t, digits=2))s)"
@@ -125,9 +125,23 @@ function _adaptive_clip_percentile(n_locs::Int)
     end
 end
 
-function _save_step_outputs!(dir::String, a::Analysis, cfg::RenderConfig, v::Int, t::Float64, n_locs::Int, specs::Vector{RenderSpec})
+function _save_step_outputs!(dir::String, a::Analysis, cfg::RenderConfig, v::Int, t::Float64, n_locs::Int, specs::Vector{RenderSpec}, all_render_info)
     mkpath(dir)
     _save_config!(dir, cfg)
+
+    # Write upstream info structs to info.toml
+    # Write header first, then append sections
+    open(joinpath(dir, "info.toml"), "w") do io
+        println(io, "# Upstream package info")
+    end
+    n_renders = length(all_render_info)
+    if n_renders == 1
+        _save_info!(dir, all_render_info[1]; section="render_info")
+    else
+        for i in 1:n_renders
+            _save_info!(dir, all_render_info[i]; section="render_info_$i")
+        end
+    end
 
     if v >= Verbosity.STANDARD
         _write_render_stats(dir, cfg, n_locs, t, specs)

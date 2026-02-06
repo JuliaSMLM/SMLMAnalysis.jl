@@ -68,7 +68,7 @@ function run_step!(a::Analysis, cfg::DetectFitConfig)
     else
         error("Unknown psf_model: $(cfg.psf_model)")
     end
-    fitter = GaussMLEFitter(psf_model=psf, iterations=cfg.iterations)
+    fitter = GaussMLEConfig(psf_model=psf, iterations=cfg.iterations)
 
     # Process each dataset
     all_emitters = AbstractEmitter[]
@@ -180,7 +180,7 @@ function run_step!(a::Analysis, cfg::DetectFitConfig)
     _checkpoint!(a)
 
     if dir !== nothing
-        _save_detectfit_outputs!(dir, a, cfg, v, t, total_rois, total_fits, sample_images, sample_roi_batch, sample_original_frames)
+        _save_detectfit_outputs!(dir, a, cfg, v, t, total_rois, total_fits, sample_images, sample_roi_batch, sample_original_frames, all_boxes_info, all_fit_info)
     end
 
     v >= Verbosity.PROGRESS && @info "  → $total_fits fits from $total_rois ROIs across $n_datasets datasets ($(round(t, digits=2))s)"
@@ -350,9 +350,25 @@ function _load_source(source, v)
     end
 end
 
-function _save_detectfit_outputs!(dir, a, cfg, v, t, n_rois, n_fits, sample_images, sample_roi_batch, sample_original_frames)
+function _save_detectfit_outputs!(dir, a, cfg, v, t, n_rois, n_fits, sample_images, sample_roi_batch, sample_original_frames, all_boxes_info, all_fit_info)
     mkpath(dir)
     _save_config!(dir, cfg)
+
+    # Write upstream info structs to info.toml
+    # Write header first, then append sections
+    open(joinpath(dir, "info.toml"), "w") do io
+        println(io, "# Upstream package info")
+    end
+    n_ds = length(all_boxes_info)
+    if n_ds == 1
+        _save_info!(dir, all_boxes_info[1]; section="boxes_info")
+        _save_info!(dir, all_fit_info[1]; section="fit_info")
+    else
+        for i in 1:n_ds
+            _save_info!(dir, all_boxes_info[i]; section="boxes_info_$i")
+            _save_info!(dir, all_fit_info[i]; section="fit_info_$i")
+        end
+    end
 
     if v >= Verbosity.STANDARD
         _write_detectfit_stats(dir, a, cfg, t, n_rois, n_fits)
