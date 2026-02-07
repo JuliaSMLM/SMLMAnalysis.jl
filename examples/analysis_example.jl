@@ -130,6 +130,8 @@ config = AnalysisConfig(
         FrameConnectConfig(maxframegap = 5),
         DriftCorrectConfig(degree = 2),
         RenderConfig(zoom=20, colormap=:inferno),
+        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame),
+        RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),
     ],
     outdir = OUTPUT_DIR,
     verbose = Verbosity.STANDARD

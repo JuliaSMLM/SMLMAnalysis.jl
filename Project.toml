@@ -33,6 +33,7 @@ TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
 [compat]
 CUDA = "5.9"
+SMLMData = "0.7"
 CairoMakie = "0.15.6"
 Colors = "0.12, 0.13"
 ColorSchemes = "3.31.0"
