@@ -126,6 +126,7 @@ run_step!(a, IsolatedConfig(
 println("\n--- RENDER ---")
 run_step!(a, RenderConfig(zoom=20, colormap=:inferno, clip_percentile=0.999))
 run_step!(a, RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame))
+run_step!(a, RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame))
 
 # =============================================================================
 # Summary
