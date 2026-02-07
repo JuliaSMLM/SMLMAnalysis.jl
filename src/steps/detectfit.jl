@@ -421,8 +421,10 @@ function _write_detectfit_stats(dir, a, cfg, t, n_rois, n_fits)
         if bleach_result !== nothing && bleach_result.r_squared > 0.5
             println(io, "")
             println(io, "## Photobleaching (from loc/frame decay)")
+            println(io, "- **Model**: N(t) = N₀·exp(-k·t) + C")
             println(io, "- **k_observed**: $(round(bleach_result.k_bleach, sigdigits=3)) /frame")
             println(io, "- **Half-life**: $(round(bleach_result.half_life, digits=0)) frames")
+            println(io, "- **Offset (C)**: $(round(Int, bleach_result.offset)) loc/frame")
             println(io, "- **R²**: $(round(bleach_result.r_squared, digits=3))")
             println(io, "")
             println(io, "*Note: k_observed = k_bleach × P_on. For GenericFluor, divide by duty cycle.*")
@@ -642,8 +644,10 @@ function _save_detectfit_overlays(dir, smld, sample_roi_batch, sample_images, cf
     # Match emitters to ROIs by position (approximate)
     if !isempty(sample_emitters)
         fit_colors = Symbol[]
-        # Get pixel size from camera edges (assumes uniform pixels)
+        # Convert emitter positions to pixel coordinates relative to cropped image
         pix_size = smld.camera.pixel_edges_x[2] - smld.camera.pixel_edges_x[1]
+        x_origin = smld.camera.pixel_edges_x[1]
+        y_origin = smld.camera.pixel_edges_y[1]
         for i in 1:length(sample_roi_batch)
             roi_frame_idx = sample_roi_batch.frame_indices[i]  # Remapped index (1:N)
             original_frame = sample_to_original[roi_frame_idx]  # Original frame number
@@ -655,9 +659,9 @@ function _save_detectfit_overlays(dir, smld, sample_roi_batch, sample_images, cf
             best_dist = Inf
             for e in sample_emitters
                 if e.frame == original_frame
-                    # Convert emitter position (microns) to pixels
-                    ex_px = e.x / pix_size
-                    ey_px = e.y / pix_size
+                    # Convert emitter position (microns) to pixels, accounting for camera origin
+                    ex_px = (e.x - x_origin) / pix_size
+                    ey_px = (e.y - y_origin) / pix_size
                     dist = sqrt((ex_px - roi_x)^2 + (ey_px - roi_y)^2)
                     if dist < best_dist
                         best_dist = dist
@@ -675,60 +679,15 @@ function _save_detectfit_overlays(dir, smld, sample_roi_batch, sample_images, cf
                 push!(fit_colors, :gray)  # No matching emitter found
             end
         end
-        _save_fit_overlay_with_legend(dir, sample_images, sample_roi_batch, fit_colors, cfg, sample_original_frames)
+
+        # Build title with color legend
+        prec_nm = round(cfg.filter_max_precision * 1000, digits=1)
+        title = "Fit: green=pass  red=photons<$(round(Int, cfg.filter_min_photons))  orange=prec>$(prec_nm)nm  purple=pval<$(cfg.filter_min_pvalue)  gray=no match"
+        _save_box_overlay(dir, "fit_overlay.png", sample_images, sample_roi_batch, fit_colors;
+                          title_prefix="Frame", frame_labels=sample_original_frames, suptitle=title)
     end
 end
 
-"""Save fit overlay with color info in figure title"""
-function _save_fit_overlay_with_legend(dir, images, roi_batch, box_colors, cfg, frame_labels)
-    n_frames = size(images, 3)
-    frame_indices = [round(Int, x) for x in range(1, n_frames, length=min(12, n_frames))]
-    # Use provided frame_labels for display titles
-    display_labels = frame_labels !== nothing ? frame_labels : frame_indices
-
-    # Contrast stretch
-    sample_frames = frame_indices[1:min(4, length(frame_indices))]
-    sample_data = vec(images[:, :, sample_frames])
-    bg_level = median(sample_data)
-    pmin = Float64(bg_level)
-    pmax = Float64(quantile(sample_data, 0.995))
-
-    # Build title with color legend info
-    prec_nm = round(cfg.filter_max_precision * 1000, digits=1)
-    title_str = "Fit Status: green=pass, red=photons<$(round(Int, cfg.filter_min_photons)), orange=prec>$(prec_nm)nm, purple=pval<$(cfg.filter_min_pvalue), gray=no match"
-
-    n_rows = ceil(Int, length(frame_indices) / 4)
-    fig = Figure(size=(1200, 50 + 250 * n_rows))
-    box_size = roi_batch.roi_size
-
-    # Add title at top
-    Label(fig[0, 1:4], title_str, fontsize=12)
-
-    for (idx, frame_num) in enumerate(frame_indices)
-        row = div(idx - 1, 4) + 1
-        col = mod(idx - 1, 4) + 1
-        display_frame = display_labels[idx]
-
-        ax = Axis(fig[row, col], title="Frame $display_frame", aspect=DataAspect(), yreversed=true)
-        frame_data = images[:, :, frame_num]'
-        heatmap!(ax, frame_data, colormap=:grays, colorrange=(pmin, pmax))
-
-        frame_mask = roi_batch.frame_indices .== frame_num
-        if any(frame_mask)
-            det_x = roi_batch.x_corners[frame_mask]
-            det_y = roi_batch.y_corners[frame_mask]
-            colors = box_colors[frame_mask]
-            for (x, y, c) in zip(det_x, det_y, colors)
-                lines!(ax, [x, x+box_size, x+box_size, x, x],
-                          [y, y, y+box_size, y+box_size, y],
-                    color=c, linewidth=0.5)
-            end
-        end
-        hidedecorations!(ax)
-    end
-
-    save(joinpath(dir, "fit_overlay.png"), fig)
-end
 
 """Determine box color based on fit status (like fit.jl)"""
 function _detectfit_box_color(e; min_photons=500.0, max_precision=0.007, min_pvalue=1e-6)
@@ -741,7 +700,10 @@ end
 
 """
 Estimate observed bleaching rate from localizations per frame decay.
-Fits N(t) = N_0 * exp(-k_observed * t) using linear regression on log(N).
+Fits N(t) = N_0 * exp(-k_observed * t) + C using linear regression on log(N - C).
+
+The offset C is estimated from the tail of the acquisition (last 10% of frames),
+representing the floor of spurious detections after fluorophores bleach.
 
 Note: This gives the OBSERVED decay rate, not the true k_bleach for GenericFluor.
 Since bleaching only occurs from the On state:
@@ -750,7 +712,7 @@ Since bleaching only occurs from the On state:
 
 To get true k_bleach: k_bleach = k_observed / P_on
 
-Returns (k_bleach, N_0, half_life, r_squared) or nothing if fit fails.
+Returns (k_bleach, N_0, offset, half_life, r_squared) or nothing if fit fails.
 """
 function _estimate_bleaching_rate(frame_counts::Vector{Int})
     # Filter out zero counts and use frames with sufficient data
@@ -768,10 +730,19 @@ function _estimate_bleaching_rate(frame_counts::Vector{Int})
         smoothed = Float64.(valid_counts)
     end
 
-    # Linear regression on log(N) vs frame
-    # log(N) = log(N_0) - k_bleach * t
-    x = Float64.(valid_frames)
-    y = log.(max.(smoothed, 1.0))  # Avoid log(0)
+    # Estimate offset C from tail (last 10% of frames)
+    tail_start = max(1, round(Int, 0.9 * length(smoothed)))
+    offset = mean(smoothed[tail_start:end])
+
+    # Subtract offset and fit linear regression on log(N - C) vs frame
+    # log(N - C) = log(N_0) - k_bleach * t
+    shifted = smoothed .- offset
+    # Only use points where shifted > 0 (above the offset)
+    pos_mask = shifted .> 0
+    sum(pos_mask) < 10 && return nothing
+
+    x = Float64.(valid_frames[pos_mask])
+    y = log.(shifted[pos_mask])
 
     n = length(x)
     sum_x = sum(x)
@@ -792,13 +763,13 @@ function _estimate_bleaching_rate(frame_counts::Vector{Int})
     N_0 = exp(intercept)
     half_life = log(2) / k_bleach
 
-    # R² calculation
-    y_pred = intercept .+ slope .* x
-    ss_res = sum((y .- y_pred) .^ 2)
-    ss_tot = sum((y .- mean(y)) .^ 2)
+    # R² on original scale: compare N_0*exp(-k*t) + C to smoothed data
+    y_pred = N_0 .* exp.(-k_bleach .* Float64.(valid_frames)) .+ offset
+    ss_res = sum((smoothed .- y_pred) .^ 2)
+    ss_tot = sum((smoothed .- mean(smoothed)) .^ 2)
     r_squared = ss_tot > 0 ? 1 - ss_res / ss_tot : 0.0
 
-    (k_bleach=k_bleach, N_0=N_0, half_life=half_life, r_squared=r_squared,
+    (k_bleach=k_bleach, N_0=N_0, offset=offset, half_life=half_life, r_squared=r_squared,
      valid_frames=valid_frames, smoothed=smoothed)
 end
 
@@ -823,21 +794,25 @@ function _save_detectfit_detailed(dir, smld)
     ax = Axis(fig[1, 1], xlabel="Frame", ylabel="Localizations", title="Localizations per Frame")
     lines!(ax, 1:n_frames, frame_counts, color=(:blue, 0.5), linewidth=0.5, label="Raw")
 
-    # Add exponential decay fit if successful
+    # Add exponential decay + offset fit if successful
     if bleach_result !== nothing
         # Plot smoothed data
         lines!(ax, bleach_result.valid_frames, bleach_result.smoothed,
                color=:blue, linewidth=1.5, label="Smoothed")
 
-        # Plot fitted exponential
+        # Plot fitted exponential + offset: N_0 * exp(-k*t) + C
         fit_frames = 1:n_frames
-        fit_counts = bleach_result.N_0 .* exp.(-bleach_result.k_bleach .* fit_frames)
+        fit_counts = bleach_result.N_0 .* exp.(-bleach_result.k_bleach .* fit_frames) .+ bleach_result.offset
         lines!(ax, fit_frames, fit_counts, color=:red, linewidth=2, linestyle=:dash,
                label="Fit: k=$(round(bleach_result.k_bleach, sigdigits=3))/frame")
 
+        # Plot offset line
+        hlines!(ax, [bleach_result.offset], color=(:red, 0.3), linestyle=:dot, linewidth=1,
+                label="Offset: $(round(Int, bleach_result.offset))")
+
         # Add annotation
         text!(ax, 0.95, 0.95,
-            text="k_observed = $(round(bleach_result.k_bleach, sigdigits=3)) /frame\nτ_1/2 = $(round(bleach_result.half_life, digits=0)) frames\nR² = $(round(bleach_result.r_squared, digits=3))",
+            text="k_obs = $(round(bleach_result.k_bleach, sigdigits=3)) /frame\nτ_1/2 = $(round(bleach_result.half_life, digits=0)) frames\noffset = $(round(Int, bleach_result.offset))\nR² = $(round(bleach_result.r_squared, digits=3))",
             align=(:right, :top),
             space=:relative,
             fontsize=11)

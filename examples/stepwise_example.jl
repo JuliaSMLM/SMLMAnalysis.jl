@@ -21,7 +21,7 @@ The stepwise approach is best for:
 - Exploring different analysis strategies
 - Development and debugging
 
-For production workflows, see recipe_example.jl
+For production workflows, see analysis_example.jl
 """
 
 import Pkg
@@ -206,7 +206,7 @@ println("="^60)
 println("Step 5: Render")
 println("="^60)
 
-run_step!(a, RenderConfig(zoom = 20))
+run_step!(a, RenderConfig(zoom=20, colormap=:inferno))
 
 println()
 
@@ -295,7 +295,7 @@ To iterate on parameters (in REPL):
   run_step!(a, FilterConfig(photons=(300.0, Inf), precision=(0.0, 0.020)))
   run_step!(a, FrameConnectConfig(maxframegap=5))
   run_step!(a, DriftCorrectConfig(degree=2))
-  run_step!(a, RenderConfig(zoom=20))
+  run_step!(a, RenderConfig(zoom=20, colormap=:inferno))
 
   # Extract config for reproducibility
   config = get_config(a)

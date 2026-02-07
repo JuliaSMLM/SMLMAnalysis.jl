@@ -188,19 +188,20 @@ IsolatedConfig(;
 )
 ```
 
-### RenderConfig
+### RenderConfig (from SMLMRender)
 
-Generate super-resolution images.
+Generate super-resolution images. Uses SMLMRender.RenderConfig directly.
+Each render is one step call with its own output folder.
 
 ```julia
 RenderConfig(;
-    renders=DEFAULT_RENDERS,  # Vector{RenderSpec}
-    strategy=:gaussian,       # :gaussian, :histogram, :circles
-    zoom=20,
-    colormap=:inferno,
-    color_by=nothing,         # nil=density, or :frame, :photons, :z
-    clip_percentile=:auto,
-    verbose=Verbosity.STANDARD
+    strategy=GaussianRender(),  # GaussianRender(), HistogramRender(), CircleRender(), EllipseRender()
+    zoom=nothing,               # Zoom factor for camera FOV mode
+    pixel_size=nothing,         # Pixel size in nm (data bounds mode)
+    colormap=nothing,           # :inferno, :viridis, :turbo, etc.
+    color_by=nothing,           # nil=density, or :absolute_frame, :photons, :z
+    clip_percentile=0.99,
+    filename=nothing,           # Auto-generated if outdir set
 )
 ```
 

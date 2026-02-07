@@ -117,7 +117,7 @@ run_step!(a, IsolatedConfig(
 # Render
 # =============================================================================
 println("\n--- RENDER ---")
-run_step!(a, RenderConfig())
+run_step!(a, RenderConfig(zoom=20, colormap=:inferno))
 
 # =============================================================================
 # Summary

@@ -21,7 +21,7 @@ run_step!(a, DetectFitConfig(boxsize=9, psf_model=:variable))
 run_step!(a, FilterConfig(photons=(500.0, Inf)))
 run_step!(a, FrameConnectConfig(maxframegap=5))
 run_step!(a, DriftCorrectConfig(degree=2))
-run_step!(a, RenderConfig(zoom=20))
+run_step!(a, RenderConfig(zoom=20, colormap=:inferno))
 
 # Reset and try different params
 reset!(a, 1)  # Go back to after detectfit
@@ -86,6 +86,9 @@ export driftcorrect
 # Re-export from SMLMRender
 export render, save_image
 export HistogramRender, GaussianRender, CircleRender, EllipseRender
+# Re-export RenderConfig from SMLMRender (used directly as step config)
+const RenderConfig = SMLMRender.RenderConfig
+export RenderConfig
 
 # Re-export from SMLMBaGoL
 export MAPNResult, run_bagol, estimate_mapn
@@ -122,7 +125,6 @@ include("steps/isolated.jl")
 export IsolatedConfig
 
 include("steps/render.jl")
-export RenderConfig, RenderSpec, DEFAULT_RENDERS
 
 include("steps/bagol.jl")
 export BaGoLConfig

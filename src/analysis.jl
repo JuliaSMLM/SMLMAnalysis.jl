@@ -313,7 +313,7 @@ config = AnalysisConfig(
         DetectFitConfig(boxsize=9),
         FilterConfig(photons=(500.0, Inf)),
         DriftCorrectConfig(degree=2),
-        RenderConfig(zoom=20),
+        RenderConfig(zoom=20, colormap=:inferno),
     ],
     outdir = "output/",
 )
@@ -328,7 +328,7 @@ function analyze(data, config::AnalysisConfig)
 
     # Create analysis object
     a = Analysis(data, config.camera;
-        outdir=config.outdir, verbose=config.verbose, checkpoint=config.checkpoint)
+        roi=config.roi, outdir=config.outdir, verbose=config.verbose, checkpoint=config.checkpoint)
 
     # Execute pipeline
     _execute_pipeline!(a, config.steps)
@@ -359,8 +359,11 @@ Convenience varargs form. Builds AnalysisConfig from positional step configs and
     camera=cam, outdir="output/")
 ```
 """
-function analyze(data, steps::SMLMData.AbstractSMLMConfig...; camera::SMLMData.AbstractCamera, kwargs...)
-    config = AnalysisConfig(steps...; camera=camera, kwargs...)
+function analyze(data, steps::SMLMData.AbstractSMLMConfig...;
+                 camera::SMLMData.AbstractCamera,
+                 roi=nothing,
+                 kwargs...)
+    config = AnalysisConfig(steps...; camera=camera, roi=roi, kwargs...)
     analyze(data, config)
 end
 
@@ -399,6 +402,7 @@ function get_config(a::Analysis)
     AnalysisConfig(
         camera = a.camera,
         steps = SMLMData.AbstractSMLMConfig[s.config for s in a.steps],
+        roi = nothing,  # ROI consumed at construction (camera/images already cropped)
         outdir = a.outdir,
         verbose = a.verbose,
         checkpoint = a.checkpoint
@@ -473,7 +477,7 @@ function analyze(data, camera::SMLMData.AbstractCamera;
     end
 
     if render
-        push!(steps, RenderConfig(zoom=render_zoom))
+        push!(steps, SMLMRender.RenderConfig(zoom=render_zoom, colormap=:inferno))
     end
 
     config = AnalysisConfig(

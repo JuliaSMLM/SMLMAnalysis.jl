@@ -1,6 +1,6 @@
-# Gatta Beads Analysis - Full Pipeline with DetectFitConfig
+# Gatta Beads Analysis - Full Pipeline (right-half ROI)
 #
-# Uses DetectFitConfig for combined detect+fit step.
+# Uses ROI to crop to the right half of the FOV.
 # This is a CONTINUOUS dataset (single acquisition), so n_datasets=1.
 #
 # Pipeline: detectfit → filter → frameconnect → drift → isolated → render
@@ -8,7 +8,7 @@
 using SMLMAnalysis
 
 println("="^60)
-println("GATTA BEADS ANALYSIS")
+println("GATTA BEADS ANALYSIS (right-half ROI)")
 println("="^60)
 
 # =============================================================================
@@ -22,6 +22,15 @@ info = load_smart_h5_info(h5file)
 println("Data: $(info.nframes) frames, $(info.width)×$(info.height), $(round(info.file_size_gb, digits=2)) GB")
 
 # =============================================================================
+# Load images
+# =============================================================================
+println("Loading images...")
+t_load = @elapsed begin
+    images, _ = smart_h5_to_array(h5file)
+end
+println("  Loaded $(size(images)) in $(round(t_load, digits=1))s")
+
+# =============================================================================
 # Camera Setup - ORCA-Fusion (C14440-20UP)
 # =============================================================================
 # 78nm pixels, 0.7 e-/ADU readnoise equivalent
@@ -32,13 +41,23 @@ camera = SCMOSCamera(info.width, info.height, 0.078f0, 0.7f0;
 println("Camera: $(info.width)×$(info.height) (nx×ny), 78nm pixels")
 
 # =============================================================================
-# Analysis Setup
+# Analysis Setup - ROI: right half of FOV
 # =============================================================================
+# x = columns (width), y = rows (height)
+roi = (x = info.width÷2+1:info.width, y = 1:info.height)
+println("ROI: x=$(roi.x), y=$(roi.y) (right half)")
+
 outdir = joinpath(@__DIR__, "output", "gatta_beads")
 
-# Create Analysis without data (data comes from DetectFitConfig)
-a = Analysis(camera; outdir, verbose=Verbosity.DETAILED, checkpoint=true)
+a = Analysis(images, camera;
+    roi = roi,
+    n_datasets = 1,
+    outdir = outdir,
+    verbose = Verbosity.DETAILED,
+    checkpoint = true
+)
 println("Output: $outdir")
+println("Cropped: $(a.n_frames_per_dataset) frames, camera $(length(a.camera.pixel_edges_x)-1)×$(length(a.camera.pixel_edges_y)-1)")
 println()
 
 # =============================================================================
@@ -46,8 +65,6 @@ println()
 # =============================================================================
 println("--- DETECTFIT ---")
 run_step!(a, DetectFitConfig(
-    path = h5file,
-    n_datasets = 1,  # Continuous acquisition
     # Detection
     boxsize = 11,
     min_photons = 1000.0,
@@ -107,12 +124,8 @@ run_step!(a, IsolatedConfig(
 # Render
 # =============================================================================
 println("\n--- RENDER ---")
-run_step!(a, RenderConfig(
-    renders = [
-        RenderSpec(strategy=:gaussian, zoom=20, colormap=:inferno, clip_percentile=0.999),
-        RenderSpec(strategy=:histogram, zoom=10, colormap=:turbo, color_by=:absolute_frame),
-    ]
-))
+run_step!(a, RenderConfig(zoom=20, colormap=:inferno, clip_percentile=0.999))
+run_step!(a, RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame))
 
 # =============================================================================
 # Summary

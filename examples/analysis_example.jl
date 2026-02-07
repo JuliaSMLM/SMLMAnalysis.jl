@@ -1,12 +1,11 @@
 """
-    recipe_example.jl
+    analysis_example.jl
 
 SMLM analysis using the one-liner analyze() function.
 
 This example demonstrates:
 1. Generating realistic simulated SMLM data (4 datasets x 2000 frames)
 2. Running complete pipeline with AnalysisConfig (primary interface)
-3. Alternative: legacy keyword arguments interface
 
 The analyze() approach is best for:
 - Quick analysis with sensible defaults
@@ -26,7 +25,7 @@ using MicroscopePSFs
 # Configuration
 # ============================================================================
 
-const OUTPUT_DIR = joinpath(@__DIR__, "output", "recipe_example")
+const OUTPUT_DIR = joinpath(@__DIR__, "output", "analysis_example")
 
 # Simulation parameters - realistic SMLM acquisition
 const N_FRAMES = 2000      # Frames per dataset
@@ -130,7 +129,7 @@ config = AnalysisConfig(
         ),
         FrameConnectConfig(maxframegap = 5),
         DriftCorrectConfig(degree = 2),
-        RenderConfig(zoom = 20),
+        RenderConfig(zoom=20, colormap=:inferno),
     ],
     outdir = OUTPUT_DIR,
     verbose = Verbosity.STANDARD

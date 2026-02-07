@@ -58,7 +58,7 @@ Save frame overlay with colored boxes around ROIs.
 - `box_colors`: Vector of colors, one per ROI (same order as roi_batch)
 - `title_prefix`: Prefix for frame titles (default "Frame")
 """
-function _save_box_overlay(dir, filename, images, roi_batch, box_colors; title_prefix="Frame", frame_labels=nothing)
+function _save_box_overlay(dir, filename, images, roi_batch, box_colors; title_prefix="Frame", frame_labels=nothing, suptitle=nothing)
     n_frames = size(images, 3)
     frame_indices = [round(Int, x) for x in range(1, n_frames, length=min(12, n_frames))]
     # Use provided frame_labels for display, or fall back to frame_indices
@@ -74,6 +74,11 @@ function _save_box_overlay(dir, filename, images, roi_batch, box_colors; title_p
 
     fig = Figure(size=_grid_figure_size(images))
     box_size = roi_batch.roi_size
+
+    # Optional supertitle
+    if suptitle !== nothing
+        Label(fig[0, 1:4], suptitle, fontsize=11)
+    end
 
     for (idx, frame_num) in enumerate(frame_indices)
         row = div(idx - 1, 4) + 1

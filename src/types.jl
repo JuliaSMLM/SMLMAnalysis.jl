@@ -166,6 +166,7 @@ steps in order, with automatic fusion of adjacent boxer+fitter steps.
 # Fields
 - `camera::AbstractCamera`: Camera model (required, no default)
 - `steps::Vector{SMLMData.AbstractSMLMConfig}`: Ordered pipeline steps
+- `roi::Union{NamedTuple, Nothing}`: Optional ROI as `(x=100:300, y=50:200)` to crop images/camera
 - `outdir::Union{String, Nothing}`: Output directory for results
 - `verbose::Int`: Verbosity level (default: STANDARD)
 - `checkpoint::Bool`: Enable disk persistence of checkpoints
@@ -179,7 +180,7 @@ config = AnalysisConfig(
         GaussMLEConfig(psf_model=:variable),
         FilterConfig(photons=(500.0, Inf)),
         DriftConfig(degree=2),
-        RenderOptions(zoom=20),
+        RenderConfig(zoom=20, colormap=:inferno),
     ],
     outdir = "output/",
 )
@@ -189,6 +190,7 @@ config = AnalysisConfig(
 @kwdef struct AnalysisConfig <: SMLMData.AbstractSMLMConfig
     camera::SMLMData.AbstractCamera
     steps::Vector{SMLMData.AbstractSMLMConfig} = SMLMData.AbstractSMLMConfig[]
+    roi::Union{@NamedTuple{x::UnitRange{Int}, y::UnitRange{Int}}, Nothing} = nothing
     outdir::Union{String, Nothing} = nothing
     verbose::Int = Verbosity.STANDARD
     checkpoint::Bool = false
