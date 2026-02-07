@@ -54,6 +54,7 @@ using HDF5
 using JLD2
 using CairoMakie
 using NearestNeighbors
+using Optim
 
 # Re-export from SMLMData
 export AbstractCamera, IdealCamera, SCMOSCamera

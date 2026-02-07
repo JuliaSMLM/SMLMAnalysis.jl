@@ -62,18 +62,20 @@ Common coordination scenarios:
 
 ## Development Commands
 
+**Always start Julia with `-t auto`** for multithreading (drift correction, frame connection, etc.):
+
 ```bash
 # Run tests
-julia --project=. -e 'using Pkg; Pkg.test()'
+julia -t auto --project=. -e 'using Pkg; Pkg.test()'
 
 # Build documentation
-julia --project=docs docs/make.jl
+julia -t auto --project=docs docs/make.jl
 
 # Develop with local JuliaSMLM packages
 julia --project=. -e 'using Pkg; Pkg.develop(path="../SMLMData")'
 
 # Run examples (have their own Project.toml)
-cd examples && julia --project=. stepwise_example.jl
+cd examples && julia -t auto --project=. stepwise_example.jl
 ```
 
 ## Architecture

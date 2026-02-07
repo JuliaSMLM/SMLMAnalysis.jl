@@ -421,10 +421,11 @@ function _write_detectfit_stats(dir, a, cfg, t, n_rois, n_fits)
         if bleach_result !== nothing && bleach_result.r_squared > 0.5
             println(io, "")
             println(io, "## Photobleaching (from loc/frame decay)")
-            println(io, "- **Model**: N(t) = N₀·exp(-k·t) + C")
+            println(io, "- **Model**: N(t) = a + b·exp(-k·t)")
             println(io, "- **k_observed**: $(round(bleach_result.k_bleach, sigdigits=3)) /frame")
             println(io, "- **Half-life**: $(round(bleach_result.half_life, digits=0)) frames")
-            println(io, "- **Offset (C)**: $(round(Int, bleach_result.offset)) loc/frame")
+            println(io, "- **a (offset)**: $(round(Int, bleach_result.offset)) loc/frame")
+            println(io, "- **b (amplitude)**: $(round(Int, bleach_result.N_0)) loc/frame")
             println(io, "- **R²**: $(round(bleach_result.r_squared, digits=3))")
             println(io, "")
             println(io, "*Note: k_observed = k_bleach × P_on. For GenericFluor, divide by duty cycle.*")
@@ -700,10 +701,10 @@ end
 
 """
 Estimate observed bleaching rate from localizations per frame decay.
-Fits N(t) = N_0 * exp(-k_observed * t) + C using linear regression on log(N - C).
+Fits N(t) = a + b·exp(-k·t) using Nelder-Mead optimization.
 
-The offset C is estimated from the tail of the acquisition (last 10% of frames),
-representing the floor of spurious detections after fluorophores bleach.
+Initial guess from linearized fit: estimate offset from tail, then linear regression
+on log(N - offset) to get b and k. Nelder-Mead refines all three parameters.
 
 Note: This gives the OBSERVED decay rate, not the true k_bleach for GenericFluor.
 Since bleaching only occurs from the On state:
@@ -730,46 +731,55 @@ function _estimate_bleaching_rate(frame_counts::Vector{Int})
         smoothed = Float64.(valid_counts)
     end
 
-    # Estimate offset C from tail (last 10% of frames)
+    # --- Initial guess from linearized fit ---
     tail_start = max(1, round(Int, 0.9 * length(smoothed)))
-    offset = mean(smoothed[tail_start:end])
+    a0 = mean(smoothed[tail_start:end])
 
-    # Subtract offset and fit linear regression on log(N - C) vs frame
-    # log(N - C) = log(N_0) - k_bleach * t
-    shifted = smoothed .- offset
-    # Only use points where shifted > 0 (above the offset)
+    shifted = smoothed .- a0
     pos_mask = shifted .> 0
     sum(pos_mask) < 10 && return nothing
 
-    x = Float64.(valid_frames[pos_mask])
-    y = log.(shifted[pos_mask])
+    x_lin = Float64.(valid_frames[pos_mask])
+    y_lin = log.(shifted[pos_mask])
 
-    n = length(x)
-    sum_x = sum(x)
-    sum_y = sum(y)
-    sum_xy = sum(x .* y)
-    sum_x2 = sum(x .^ 2)
-
+    n = length(x_lin)
+    sum_x = sum(x_lin)
+    sum_y = sum(y_lin)
+    sum_xy = sum(x_lin .* y_lin)
+    sum_x2 = sum(x_lin .^ 2)
     denom = n * sum_x2 - sum_x^2
     abs(denom) < 1e-10 && return nothing
 
     slope = (n * sum_xy - sum_x * sum_y) / denom
     intercept = (sum_y - slope * sum_x) / n
+    k0 = -slope
+    b0 = exp(intercept)
+    k0 <= 0 && return nothing
 
-    # k_bleach should be positive (slope is negative for decay)
-    k_bleach = -slope
-    k_bleach <= 0 && return nothing  # No decay detected
+    # --- Nelder-Mead refinement ---
+    t = Float64.(valid_frames)
+    function cost(p)
+        a, b, k = p
+        k <= 0 && return Inf
+        pred = a .+ b .* exp.(-k .* t)
+        sum((smoothed .- pred) .^ 2)
+    end
 
-    N_0 = exp(intercept)
-    half_life = log(2) / k_bleach
+    result = optimize(cost, [a0, b0, k0], NelderMead(),
+                      Optim.Options(iterations=5000, g_tol=1e-8))
 
-    # R² on original scale: compare N_0*exp(-k*t) + C to smoothed data
-    y_pred = N_0 .* exp.(-k_bleach .* Float64.(valid_frames)) .+ offset
+    a_fit, b_fit, k_fit = Optim.minimizer(result)
+    k_fit <= 0 && return nothing
+
+    half_life = log(2) / k_fit
+
+    # R² on smoothed data
+    y_pred = a_fit .+ b_fit .* exp.(-k_fit .* t)
     ss_res = sum((smoothed .- y_pred) .^ 2)
     ss_tot = sum((smoothed .- mean(smoothed)) .^ 2)
     r_squared = ss_tot > 0 ? 1 - ss_res / ss_tot : 0.0
 
-    (k_bleach=k_bleach, N_0=N_0, offset=offset, half_life=half_life, r_squared=r_squared,
+    (k_bleach=k_fit, N_0=b_fit, offset=a_fit, half_life=half_life, r_squared=r_squared,
      valid_frames=valid_frames, smoothed=smoothed)
 end
 
@@ -800,28 +810,24 @@ function _save_detectfit_detailed(dir, smld)
         lines!(ax, bleach_result.valid_frames, bleach_result.smoothed,
                color=:blue, linewidth=1.5, label="Smoothed")
 
-        # Plot fitted exponential + offset: N_0 * exp(-k*t) + C
+        # Plot fitted model: a + b·exp(-k·t)
+        k = round(bleach_result.k_bleach, sigdigits=3)
+        τ = round(bleach_result.half_life, digits=0)
+        a = round(Int, bleach_result.offset)
+        R² = round(bleach_result.r_squared, digits=3)
         fit_frames = 1:n_frames
         fit_counts = bleach_result.N_0 .* exp.(-bleach_result.k_bleach .* fit_frames) .+ bleach_result.offset
         lines!(ax, fit_frames, fit_counts, color=:red, linewidth=2, linestyle=:dash,
-               label="Fit: k=$(round(bleach_result.k_bleach, sigdigits=3))/frame")
+               label="Fit: k=$k/frame, τ½=$(Int(τ)), a=$a, R²=$R²")
 
         # Plot offset line
-        hlines!(ax, [bleach_result.offset], color=(:red, 0.3), linestyle=:dot, linewidth=1,
-                label="Offset: $(round(Int, bleach_result.offset))")
-
-        # Add annotation
-        text!(ax, 0.95, 0.95,
-            text="k_obs = $(round(bleach_result.k_bleach, sigdigits=3)) /frame\nτ_1/2 = $(round(bleach_result.half_life, digits=0)) frames\noffset = $(round(Int, bleach_result.offset))\nR² = $(round(bleach_result.r_squared, digits=3))",
-            align=(:right, :top),
-            space=:relative,
-            fontsize=11)
+        hlines!(ax, [bleach_result.offset], color=(:red, 0.3), linestyle=:dot, linewidth=1)
     else
         hlines!(ax, [mean(frame_counts)], color=:red, linestyle=:dash,
                 label="mean ($(round(mean(frame_counts), digits=1)))")
     end
 
-    axislegend(ax, position=:rt, framevisible=false)
+    axislegend(ax, position=:rt, framevisible=false, labelsize=10)
     save(joinpath(dir, "localizations_per_frame.png"), fig)
 
     return bleach_result
