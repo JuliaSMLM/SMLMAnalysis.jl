@@ -25,7 +25,7 @@ Run complete SMLM analysis pipeline. Returns tuple of (result, info).
 - Filtering: `filter=true`, `min_photons=500.0`, `max_precision=0.007`, `min_pvalue=1e-3`
 - Frame connection: `frameconnect=false`, `maxframegap=5`
 - Drift: `drift=true`, `degree=2`
-- Isolated: `isolated=false`, `n_sigma=2.0`
+- Density filter: `densityfilter=false`, `n_sigma=2.0`
 - Render: `render=true`, `render_zoom=20`
 
 ### run_step!
@@ -177,14 +177,14 @@ DriftCorrectConfig(;
 )
 ```
 
-### IsolatedConfig
+### DensityFilterConfig
 
-Filter isolated emitters.
+Filter by local neighbor density.
 
 ```julia
-IsolatedConfig(;
+DensityFilterConfig(;
     n_sigma=2.0,              # Neighbor search radius (σ units)
-    verbose=Verbosity.STANDARD
+    min_neighbors=:auto,      # :auto uses valley method
 )
 ```
 

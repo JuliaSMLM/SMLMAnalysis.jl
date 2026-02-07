@@ -7,7 +7,7 @@
 # Data: A431 cells + IgG1-2F8-RGY (E345R/E430G/Y436F triple mutant) + C1q
 # Date: 20250611 (second RGY dataset)
 #
-# Pipeline: detectfit → filter → frameconnect → drift → isolated → render
+# Pipeline: detectfit → filter → frameconnect → drift → densityfilter → render
 
 import Pkg
 Pkg.activate(@__DIR__)
@@ -105,10 +105,10 @@ run_step!(a, DriftCorrectConfig(
 ))
 
 # =============================================================================
-# Isolated Emitter Filter
+# Density Filter
 # =============================================================================
-println("\n--- ISOLATED ---")
-run_step!(a, IsolatedConfig(
+println("\n--- DENSITYFILTER ---")
+run_step!(a, DensityFilterConfig(
     n_sigma = 2.0,
     min_neighbors = :auto
 ))

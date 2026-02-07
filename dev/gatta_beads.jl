@@ -3,7 +3,7 @@
 # Uses ROI to crop to the right half of the FOV.
 # This is a CONTINUOUS dataset (single acquisition), so n_datasets=1.
 #
-# Pipeline: detectfit → filter → frameconnect → drift → isolated → render
+# Pipeline: detectfit → filter → frameconnect → drift → densityfilter → render
 
 using SMLMAnalysis
 
@@ -112,10 +112,10 @@ run_step!(a, DriftCorrectConfig(
 ))
 
 # =============================================================================
-# Isolated Emitter Filter
+# Density Filter
 # =============================================================================
-println("\n--- ISOLATED ---")
-run_step!(a, IsolatedConfig(
+println("\n--- DENSITYFILTER ---")
+run_step!(a, DensityFilterConfig(
     n_sigma = 2.0,
     min_neighbors = :auto
 ))

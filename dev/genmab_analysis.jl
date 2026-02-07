@@ -7,7 +7,7 @@
 # Data: A431 cells + IgG (2F8 wild-type, E345R, E430G, RGY mutants) + C1q
 # 20 datasets × 5000 frames = 100k frames per cell
 #
-# Pipeline: detectfit → filter → frameconnect → drift → isolated → render
+# Pipeline: detectfit → filter → frameconnect → drift → densityfilter → render
 
 using SMLMAnalysis
 
@@ -108,10 +108,10 @@ run_step!(a, DriftCorrectConfig(
 ))
 
 # =============================================================================
-# Isolated Emitter Filter
+# Density Filter
 # =============================================================================
-println("\n--- ISOLATED ---")
-run_step!(a, IsolatedConfig(
+println("\n--- DENSITYFILTER ---")
+run_step!(a, DensityFilterConfig(
     n_sigma = 2.0,
     min_neighbors = :auto
 ))

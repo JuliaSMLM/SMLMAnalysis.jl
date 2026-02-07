@@ -121,8 +121,8 @@ export FrameConnectConfig
 include("steps/driftcorrect.jl")
 export DriftCorrectConfig
 
-include("steps/isolated.jl")
-export IsolatedConfig
+include("steps/densityfilter.jl")
+export DensityFilterConfig
 
 include("steps/render.jl")
 

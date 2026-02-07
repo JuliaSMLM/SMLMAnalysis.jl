@@ -160,7 +160,7 @@ AnalysisInfo() = AnalysisInfo(0.0, Dict{Symbol, Any}())
 Complete description of an SMLM analysis pipeline.
 
 The `steps` vector contains upstream package configs (BoxerConfig, GaussMLEConfig, etc.)
-and SMLMAnalysis-specific configs (FilterConfig, IsolatedConfig). The pipeline executes
+and SMLMAnalysis-specific configs (FilterConfig, DensityFilterConfig). The pipeline executes
 steps in order, with automatic fusion of adjacent boxer+fitter steps.
 
 # Fields

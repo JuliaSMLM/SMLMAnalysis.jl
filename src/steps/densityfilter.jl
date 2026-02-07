@@ -1,15 +1,15 @@
 """
-Isolated emitter filter step - removes isolated localizations
+Density filter step - removes isolated localizations by neighbor count
 """
 
 using NearestNeighbors
 
-@kwdef struct IsolatedConfig <: SMLMData.AbstractSMLMConfig
+@kwdef struct DensityFilterConfig <: SMLMData.AbstractSMLMConfig
     n_sigma::Float64 = 2.0
     min_neighbors::Union{Int, Symbol} = :auto  # :auto uses triangle method
 end
 
-function run_step!(a::Analysis, cfg::IsolatedConfig)
+function run_step!(a::Analysis, cfg::DensityFilterConfig)
     a.smld === nothing && error("Must run Fit first")
     a.step_counter += 1
     v = a.verbose
@@ -18,7 +18,7 @@ function run_step!(a::Analysis, cfg::IsolatedConfig)
     v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(step_name(cfg))" n_sigma=cfg.n_sigma min_neighbors=cfg.min_neighbors
 
     n_before = length(a.smld.emitters)
-    t = @elapsed a.smld, neighbor_counts, threshold = _filter_isolated(a.smld, cfg)
+    t = @elapsed a.smld, neighbor_counts, threshold = _filter_by_density(a.smld, cfg)
     n_after = length(a.smld.emitters)
     n_rejected = n_before - n_after
 
@@ -29,7 +29,7 @@ function run_step!(a::Analysis, cfg::IsolatedConfig)
         :threshold => threshold
     )
     _record!(a, cfg, t, summary)
-    _checkpoint!(a; save=false)  # In-memory only; isolated is fast to recompute
+    _checkpoint!(a; save=false)  # In-memory only; density filter is fast to recompute
 
     if dir !== nothing
         _save_step_outputs!(dir, a, cfg, v, t, neighbor_counts, threshold, n_before, n_after)
@@ -39,7 +39,7 @@ function run_step!(a::Analysis, cfg::IsolatedConfig)
     a
 end
 
-function _filter_isolated(smld::BasicSMLD, cfg::IsolatedConfig)
+function _filter_by_density(smld::BasicSMLD, cfg::DensityFilterConfig)
     emitters = smld.emitters
     n = length(emitters)
 
@@ -170,23 +170,23 @@ function _valley_threshold(counts::Vector{Int})
     end
 end
 
-function _save_step_outputs!(dir::String, a::Analysis, cfg::IsolatedConfig, v::Int, t::Float64,
+function _save_step_outputs!(dir::String, a::Analysis, cfg::DensityFilterConfig, v::Int, t::Float64,
                              neighbor_counts::Vector{Int}, threshold::Int, n_before::Int, n_after::Int)
     mkpath(dir)
     _save_config!(dir, cfg)
 
     if v >= Verbosity.STANDARD
-        _write_isolated_stats(dir, cfg, n_before, n_after, threshold, t)
-        _save_isolated_figures(dir, neighbor_counts, threshold, cfg)
+        _write_densityfilter_stats(dir, cfg, n_before, n_after, threshold, t)
+        _save_densityfilter_figures(dir, neighbor_counts, threshold, cfg)
     end
 end
 
-function _write_isolated_stats(dir, cfg, n_before, n_after, threshold, t)
+function _write_densityfilter_stats(dir, cfg, n_before, n_after, threshold, t)
     n_rejected = n_before - n_after
 
     filepath = joinpath(dir, "stats.md")
     open(filepath, "w") do io
-        println(io, "# Isolated Filter Statistics\n")
+        println(io, "# Density Filter Statistics\n")
         println(io, "## Summary")
         println(io, "- **Input**: $n_before")
         println(io, "- **Output**: $n_after")
@@ -200,7 +200,7 @@ function _write_isolated_stats(dir, cfg, n_before, n_after, threshold, t)
     end
 end
 
-function _save_isolated_figures(dir, neighbor_counts, threshold, cfg)
+function _save_densityfilter_figures(dir, neighbor_counts, threshold, cfg)
     isempty(neighbor_counts) && return
 
     # Build histogram for visualization - use actual max, no artificial cap

@@ -115,7 +115,7 @@ src/
 │   ├── filter.jl        # FilterConfig → photon/precision/pvalue/psf filtering
 │   ├── frameconnect.jl  # FrameConnectConfig → SMLMFrameConnection.frameconnect
 │   ├── driftcorrect.jl  # DriftCorrectConfig → SMLMDriftCorrection.driftcorrect
-│   ├── isolated.jl      # IsolatedConfig → isolated emitter filtering
+│   ├── densityfilter.jl  # DensityFilterConfig → density-based neighbor filtering
 │   └── render.jl        # RenderConfig → SMLMRender.render
 ├── calibration.jl       # Uncertainty calibration from frame connection
 └── io/

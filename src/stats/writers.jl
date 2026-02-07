@@ -312,47 +312,6 @@ function write_drift_stats(drift_model, smld, config, elapsed_time, DC)
 end
 
 # =============================================================================
-# Isolated Filter Stats
-# =============================================================================
-
-"""Write isolated emitter filter statistics markdown file."""
-function write_isolated_stats(n_before, n_after, neighbor_counts, threshold, config, elapsed_time)
-    n_rejected = n_before - n_after
-    auto_mode = config.isolated_min_neighbors == :auto
-
-    filepath = joinpath(config.outdir, "07_isolated", "isolated_stats.md")
-    open(filepath, "w") do io
-        println(io, "# Isolated Emitter Filter Statistics\n")
-        println(io, "## Summary")
-        println(io, "- **Input**: $(n_before) localizations")
-        println(io, "- **Output**: $(n_after) localizations")
-        println(io, "- **Rejected**: $(n_rejected) ($(round(100*n_rejected/n_before, digits=1))%)")
-        println(io, "- **Time**: $(round(elapsed_time, digits=2))s")
-        println(io, "")
-        println(io, "## Parameters")
-        println(io, "- n_sigma: $(config.isolated_n_sigma) (neighbor if dist < n_sigma × σ_combined)")
-        if auto_mode
-            println(io, "- min_neighbors: **$threshold** (auto: triangle method)")
-        else
-            println(io, "- min_neighbors: $threshold (manual)")
-        end
-        println(io, "")
-        println(io, "## Neighbor Count Distribution")
-        if !isempty(neighbor_counts)
-            p = quantile(neighbor_counts, [0.0, 0.05, 0.25, 0.50, 0.75, 0.95, 1.0])
-            println(io, "- Min: $(Int(p[1]))")
-            println(io, "- Median: $(Int(p[4]))")
-            println(io, "- Max: $(Int(p[7]))")
-        end
-        println(io, "")
-        println(io, "## Health Check")
-        rejection_rate = n_rejected / n_before
-        println(io, "- Rejection rate: $(round(100*rejection_rate, digits=1))% ",
-                rejection_rate < 0.2 ? "✓" : "⚠ (high rejection)")
-    end
-end
-
-# =============================================================================
 # Frame Connection Stats
 # =============================================================================
 

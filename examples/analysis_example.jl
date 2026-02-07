@@ -129,6 +129,7 @@ config = AnalysisConfig(
         ),
         FrameConnectConfig(maxframegap = 5),
         DriftCorrectConfig(degree = 2),
+        DensityFilterConfig(n_sigma=2.0, min_neighbors=:auto),
         RenderConfig(zoom=20, colormap=:inferno),
         RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame),
         RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),

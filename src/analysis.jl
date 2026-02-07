@@ -435,8 +435,8 @@ function analyze(data, camera::SMLMData.AbstractCamera;
                  frameconnect=false, maxframegap=5,
                  # Drift
                  drift=true, degree=2,
-                 # Isolated
-                 isolated=false, n_sigma=2.0,
+                 # Density filter
+                 densityfilter=false, n_sigma=2.0,
                  # Render
                  render=true, render_zoom=20)
 
@@ -472,8 +472,8 @@ function analyze(data, camera::SMLMData.AbstractCamera;
         push!(steps, DriftCorrectConfig(degree=degree))
     end
 
-    if isolated
-        push!(steps, IsolatedConfig(n_sigma=n_sigma))
+    if densityfilter
+        push!(steps, DensityFilterConfig(n_sigma=n_sigma))
     end
 
     if render
