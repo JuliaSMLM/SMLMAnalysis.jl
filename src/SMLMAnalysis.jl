@@ -145,6 +145,7 @@ export load_lidkelab_h5, load_lidkelab_h5_info, load_lidkelab_h5_block
 export load_lidkelab_h5_calibration, load_lidkelab_h5_calibration_for_scmos
 
 include("io/checkpoint_io.jl")
+export save_pipeline_state, load_pipeline_state
 
 # ============================================================
 # Analysis orchestrator

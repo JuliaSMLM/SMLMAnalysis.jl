@@ -8,22 +8,29 @@ CurrentModule = SMLMAnalysis
 
 ```@docs
 analyze
-reset!
-checkpoint!
-debug!
-get_analysis_info
-get_config
 ```
 
 ## Types
 
 ```@docs
-Analysis
 AnalysisConfig
+AnalysisResult
 AnalysisInfo
 StepRecord
 DataSource
 ```
+
+### Verbosity Levels
+
+`Verbosity` is a module with integer constants controlling output detail:
+
+| Level | Constant | Output |
+|-------|----------|--------|
+| 0 | `Verbosity.SILENT` | Errors only |
+| 1 | `Verbosity.PROGRESS` | Step names, counts, timing |
+| 2 | `Verbosity.STANDARD` | + stats.md, basic figures |
+| 3 | `Verbosity.DETAILED` | + diagnostic plots, per-filter breakdowns |
+| 4 | `Verbosity.DEBUG` | + MP4 animations, frame-by-frame analysis |
 
 ## Step Configs
 
@@ -33,12 +40,19 @@ FilterConfig
 FrameConnectConfig
 DriftCorrectConfig
 DensityFilterConfig
-BaGoLConfig
 ```
 
 !!! note "RenderConfig"
     `RenderConfig` is re-exported from SMLMRender.jl and used directly as a step config.
     See [SMLMRender documentation](https://github.com/JuliaSMLM/SMLMRender.jl) for details.
+
+## Multi-Target
+
+```@docs
+MultiTargetConfig
+MultiTargetResult
+MultiTargetInfo
+```
 
 ## I/O
 
@@ -46,12 +60,17 @@ BaGoLConfig
 save_smld
 load_smld
 smld_info
-resume_analysis
+save_pipeline_state
+load_pipeline_state
 load_smart_h5
 load_smart_h5_info
+load_smart_h5_frame
+smart_h5_to_array
 load_lidkelab_h5
 load_lidkelab_h5_info
 load_lidkelab_h5_block
+load_lidkelab_h5_calibration
+load_lidkelab_h5_calibration_for_scmos
 ```
 
 ## Calibration
@@ -67,4 +86,6 @@ recombine_tracks
 ```@docs
 crop_camera
 crop_images
+step_name
+step_outdir
 ```

@@ -152,7 +152,11 @@ end
 # Alias for backward compatibility within this package
 const StepConfig = SMLMData.AbstractSMLMConfig
 
-# Derive step name from type (e.g., FilterConfig → "filter", DriftCorrectConfig → "driftcorrect")
+"""
+    step_name(cfg::AbstractSMLMConfig) -> String
+
+Derive step name from config type (e.g., `FilterConfig` → `"filter"`, `DriftCorrectConfig` → `"driftcorrect"`).
+"""
 step_name(cfg::SMLMData.AbstractSMLMConfig) = lowercase(replace(string(nameof(typeof(cfg))), r"Config|Options" => ""))
 
 # ============================================================

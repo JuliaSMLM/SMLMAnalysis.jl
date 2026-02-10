@@ -189,24 +189,6 @@ RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolu
 
 ![Circle render](assets/render_circles.png)
 
-## Step 7: BaGoL (Optional)
-
-`BaGoLConfig` performs Bayesian Grouping of Localizations, estimating the true number and positions of emitters from repeated localizations.
-
-```julia
-BaGoLConfig(
-    n_iterations = 10000,     # MCMC iterations
-    burn_in = 2000,           # Burn-in before recording
-    partition_threshold = 500, # Partition large datasets
-    render_zoom = 50          # High zoom for grouped emitters
-)
-```
-
-BaGoL produces:
-- **Overlay plot**: Input localizations (gray ellipses) vs grouped emitters (red ellipses)
-- **Gaussian render**: Super-resolution image from grouped emitter positions
-- **K posterior**: Posterior distribution P(K|data) over the number of emitters
-
 ## Step-by-Step Workflow
 
 The `analyze()` dispatch enables iterative parameter tuning:

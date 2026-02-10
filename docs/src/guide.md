@@ -249,3 +249,61 @@ config = AnalysisConfig(
 )
 (result, info) = analyze(config)
 ```
+
+## Multi-Target Analysis
+
+`MultiTargetConfig` orchestrates independent analysis pipelines for multiple color channels and produces composite multi-channel renders.
+
+### Configuration
+
+Each channel gets its own `AnalysisConfig` and image data. The `MultiTargetConfig` ties them together with labels, colors, and composite rendering settings:
+
+```julia
+mt = MultiTargetConfig(
+    labels = [:IgG, :C1q],
+    colors = [:red, :green],
+    render_zoom = 20,
+    render_strategies = [GaussianRender(), CircleRender()],
+    clip_percentile = 0.99,
+    outdir = "output/cell1/",
+)
+
+(result, info) = analyze([
+    (image_stacks_647, config_647),
+    (image_stacks_568, config_568),
+], mt)
+```
+
+### Accessing results
+
+```julia
+result.smlds              # Vector{BasicSMLD}, one per channel
+result[:IgG]              # Per-channel AnalysisResult
+result[:IgG].smld         # Channel SMLD
+info.channels[:IgG]       # Per-channel AnalysisInfo
+info.composite_renders    # Vector{RenderInfo} from composite renders
+```
+
+### Output structure
+
+Multi-target analysis writes per-channel outputs and composite renders:
+
+```
+output/cell1/
+├── IgG/                  # Per-channel pipeline output
+│   ├── 01_detectfit/
+│   ├── 02_filter/
+│   └── ...
+├── C1q/
+│   └── ...
+├── composite/            # Multi-channel overlay renders
+│   ├── gaussianrender_20x.png
+│   └── circlerender_20x.png
+├── smld_IgG.h5           # Per-channel SMLD files
+├── smld_C1q.h5
+└── multi_target_config.toml
+```
+
+### Composite rendering
+
+For non-histogram strategies, `clip_percentile` (default 0.99) clips outlier intensities before normalization to improve contrast. Histogram overlays use saturate mode instead (count=1 = full brightness).
