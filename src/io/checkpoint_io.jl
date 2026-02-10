@@ -6,12 +6,12 @@ In the functional pipeline, users save intermediate SMLDs directly:
 
 ```julia
 # Save after expensive detectfit
-(smld, info) = detectfit(image_stacks, camera, cfg)
+(smld, info) = analyze(image_stacks, DetectFitConfig(camera=cam, boxsize=9))
 save_smld("output/detectfit.h5", smld)
 
 # Resume later
 smld = load_smld("output/detectfit.h5")
-(smld, info) = filter_step(smld, FilterConfig(photons=(500.0, Inf)))
+(smld, info) = analyze(smld, FilterConfig(photons=(500.0, Inf)))
 ```
 
 For full pipeline state save/restore (including drift model, connected SMLD, etc.),
@@ -142,7 +142,7 @@ step_records, camera.
 state = load_pipeline_state("output/checkpoint.jld2")
 smld = state.smld
 # Continue pipeline from here
-(smld, info) = filter_step(smld, FilterConfig(photons=(500.0, Inf)))
+(smld, info) = analyze(smld, FilterConfig(photons=(500.0, Inf)))
 ```
 """
 function load_pipeline_state(path::String)

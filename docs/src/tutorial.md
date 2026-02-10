@@ -209,11 +209,11 @@ BaGoL produces:
 
 ## Step-by-Step Workflow
 
-The pure step functions enable iterative parameter tuning:
+The `analyze()` dispatch enables iterative parameter tuning:
 
 ```julia
 # Run detection + fitting (expensive step)
-(smld, df_info) = detectfit(image_stacks, camera, DetectFitConfig(boxsize=7);
+(smld, df_info) = analyze(image_stacks, DetectFitConfig(camera=camera, boxsize=7);
     outdir="output/", step_number=1, verbose=Verbosity.STANDARD)
 smld_raw = df_info.smld_raw
 
@@ -221,21 +221,21 @@ smld_raw = df_info.smld_raw
 save_smld("output/after_detectfit.h5", smld)
 
 # Try filter parameters
-(smld_filtered, _) = filter_step(smld, FilterConfig(photons=(500.0, Inf));
+(smld_filtered, _) = analyze(smld, FilterConfig(photons=(500.0, Inf));
     smld_raw=smld_raw, outdir="output/", step_number=2, verbose=Verbosity.STANDARD)
 
 # Not happy? Try looser filter on same smld (no re-detection needed)
-(smld_filtered, _) = filter_step(smld, FilterConfig(photons=(300.0, Inf));
+(smld_filtered, _) = analyze(smld, FilterConfig(photons=(300.0, Inf));
     smld_raw=smld_raw)
 
 # Continue pipeline
-(smld_fc, fc_info) = frameconnect_step(smld_filtered, FrameConnectConfig(max_frame_gap=5))
-(smld_dc, dc_info) = driftcorrect_step(smld_fc, DriftCorrectConfig(degree=2))
-(img, _) = render_step(smld_dc, RenderConfig(zoom=20, colormap=:inferno))
+(smld_fc, fc_info) = analyze(smld_filtered, FrameConnectConfig(max_frame_gap=5))
+(smld_dc, dc_info) = analyze(smld_fc, DriftCorrectConfig(degree=2))
+(img, _) = analyze(smld_dc, RenderConfig(zoom=20, colormap=:inferno))
 
 # Resume from saved checkpoint in new session
 smld = load_smld("output/after_detectfit.h5")
-(smld, _) = filter_step(smld, FilterConfig(photons=(400.0, Inf)))
+(smld, _) = analyze(smld, FilterConfig(photons=(400.0, Inf)))
 ```
 
 ## Output Directory Structure

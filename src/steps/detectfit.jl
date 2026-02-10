@@ -43,6 +43,9 @@ localizations via GaussMLE in a single step, with per-dataset processing.
   intended `FilterConfig` settings.
 """
 @kwdef struct DetectFitConfig <: SMLMData.AbstractSMLMConfig
+    # Camera (optional - injected by AnalysisConfig pipeline, required for standalone analyze())
+    camera::Union{SMLMData.AbstractCamera, Nothing} = nothing
+
     # Data source (for file-based workflows)
     path::Union{String, Nothing} = nothing
     paths::Union{Vector{String}, Nothing} = nothing
@@ -367,6 +370,52 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
     v >= Verbosity.PROGRESS && @info "  -> $total_fits fits from $total_rois ROIs across $n_datasets_val datasets ($(round(t, digits=2))s)"
 
     return (smld, (step_record=record, boxes_info=all_boxes_info, fit_info=all_fit_info, elapsed_s=t, smld_raw=smld))
+end
+
+# ============================================================
+# Camera injection helper
+# ============================================================
+
+"""
+    _inject_camera(cfg::DetectFitConfig, camera::AbstractCamera) -> DetectFitConfig
+
+Inject camera into DetectFitConfig if not already set. Used by AnalysisConfig pipeline.
+"""
+function _inject_camera(cfg::DetectFitConfig, camera::SMLMData.AbstractCamera)
+    cfg.camera !== nothing && return cfg
+    DetectFitConfig(; camera=camera, [f => getfield(cfg, f) for f in fieldnames(DetectFitConfig) if f != :camera]...)
+end
+
+# ============================================================
+# analyze() dispatch methods
+# ============================================================
+
+"""
+    analyze(data, cfg::DetectFitConfig; kwargs...) -> (smld, info)
+
+Run combined detection and fitting. Camera must be set in `cfg.camera`.
+
+# Arguments
+- `data::Vector{<:AbstractArray{<:Real,3}}`: Vector of image stacks (one per dataset)
+- `cfg::DetectFitConfig`: Configuration (must include `camera`)
+"""
+function analyze(data::Vector{<:AbstractArray{<:Real,3}}, cfg::DetectFitConfig; kwargs...)
+    cfg.camera === nothing && error("DetectFitConfig.camera is required for analyze(). Set camera=... in the config.")
+    detectfit(data, cfg.camera, cfg; kwargs...)
+end
+
+function analyze(images::AbstractArray{<:Real,3}, cfg::DetectFitConfig; kwargs...)
+    analyze([images], cfg; kwargs...)
+end
+
+"""
+    analyze(cfg::DetectFitConfig; kwargs...) -> (smld, info)
+
+File-based detection and fitting. Requires `cfg.path` or `cfg.paths` and `cfg.camera`.
+"""
+function analyze(cfg::DetectFitConfig; kwargs...)
+    cfg.camera === nothing && error("DetectFitConfig.camera is required for analyze(). Set camera=... in the config.")
+    detectfit(cfg.camera, cfg; kwargs...)
 end
 
 # ============================================================

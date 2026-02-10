@@ -84,6 +84,13 @@ function render_step(smld::BasicSMLD, cfg::SMLMRender.RenderConfig;
     (render_image, (step_record=record, render_info=render_info))
 end
 
+"""
+    analyze(smld, cfg::RenderConfig; kwargs...) -> (render_image, info)
+
+Render localizations to a super-resolution image.
+"""
+analyze(smld::BasicSMLD, cfg::SMLMRender.RenderConfig; kwargs...) = render_step(smld, cfg; kwargs...)
+
 function _write_render_stats(dir, cfg::SMLMRender.RenderConfig, render_info, n_locs, t)
     filepath = joinpath(dir, "stats.md")
     open(filepath, "w") do io

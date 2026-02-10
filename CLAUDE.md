@@ -81,10 +81,10 @@ cd examples && julia -t auto --project=. stepwise_example.jl
 
 ### Functional Pipeline
 
-The package uses a functional pipeline architecture where each analysis step is a pure function returning `(result, info)` tuples. Steps are configured via typed config structs (`<: SMLMData.AbstractSMLMConfig`):
+The package uses a unified `analyze()` dispatch architecture where the config type determines the operation. Steps are configured via typed config structs (`<: SMLMData.AbstractSMLMConfig`):
 
 ```julia
-# Primary interface: AnalysisConfig with ordered steps
+# Full pipeline with AnalysisConfig
 config = AnalysisConfig(
     camera = cam,
     steps = [
@@ -98,12 +98,12 @@ config = AnalysisConfig(
 )
 (result, info) = analyze(image_stacks, config)
 
-# Step-by-step with pure functions
-(smld, df_info) = detectfit(image_stacks, camera, DetectFitConfig(boxsize=9))
-(smld, f_info) = filter_step(smld, FilterConfig(photons=(500.0, Inf)))
-(smld, fc_info) = frameconnect_step(smld, FrameConnectConfig(max_frame_gap=5))
-(smld, dc_info) = driftcorrect_step(smld, DriftCorrectConfig(degree=2))
-(img, r_info) = render_step(smld, RenderConfig(zoom=20))
+# Step-by-step with analyze() dispatch
+(smld, df_info) = analyze(image_stacks, DetectFitConfig(camera=cam, boxsize=9))
+(smld, f_info) = analyze(smld, FilterConfig(photons=(500.0, Inf)))
+(smld, fc_info) = analyze(smld, FrameConnectConfig(max_frame_gap=5))
+(smld, dc_info) = analyze(smld, DriftCorrectConfig(degree=2))
+(img, r_info) = analyze(smld, RenderConfig(zoom=20))
 
 # Save intermediate state for later resume
 save_smld("output/after_detectfit.h5", smld)
@@ -118,14 +118,14 @@ src/
 ├── types.jl             # AnalysisConfig, AnalysisResult, AnalysisInfo, DataSource, Verbosity
 ├── analysis.jl          # analyze() pipeline orchestrator
 ├── multitarget.jl       # MultiTargetConfig, multi-channel composite analysis
-├── steps/               # One file per step type (pure functions)
+├── steps/               # One file per step type (analyze() dispatch + internal functions)
 │   ├── common.jl        # Shared helpers (step_outdir, _save_config!, _save_info!)
-│   ├── detectfit.jl     # DetectFitConfig, detectfit() → (smld, info)
-│   ├── filter.jl        # FilterConfig, filter_step() → (smld, info)
-│   ├── frameconnect.jl  # FrameConnectConfig, frameconnect_step() → (smld, info)
-│   ├── driftcorrect.jl  # DriftCorrectConfig, driftcorrect_step() → (smld, info)
-│   ├── densityfilter.jl # DensityFilterConfig, densityfilter_step() → (smld, info)
-│   ├── render.jl        # render_step() → (image, info) (uses SMLMRender.RenderConfig)
+│   ├── detectfit.jl     # DetectFitConfig, analyze(data, cfg) → (smld, info)
+│   ├── filter.jl        # FilterConfig, analyze(smld, cfg) → (smld, info)
+│   ├── frameconnect.jl  # FrameConnectConfig, analyze(smld, cfg) → (smld, info)
+│   ├── driftcorrect.jl  # DriftCorrectConfig, analyze(smld, cfg) → (smld, info)
+│   ├── densityfilter.jl # DensityFilterConfig, analyze(smld, cfg) → (smld, info)
+│   ├── render.jl        # analyze(smld, RenderConfig) → (image, info)
 ├── calibration.jl       # Uncertainty calibration from frame connection
 └── io/
     ├── smld_io.jl       # HDF5 serialization (save_smld, load_smld)
@@ -150,19 +150,19 @@ src/
 SMLMAnalysis follows the JuliaSMLM tuple-pattern where functions return `(result, info)` tuples:
 
 ```julia
-# analyze() returns (AnalysisResult, AnalysisInfo)
+# Pipeline analyze() returns (AnalysisResult, AnalysisInfo)
 (result, info) = analyze(image_stacks, config)
 result.smld               # Final SMLD
 info.elapsed_s            # Total elapsed time in seconds
 info.steps[:detectfit]    # Per-step info from upstream packages
 info.steps[:driftcorrect] # DriftInfo from SMLMDriftCorrection
 
-# Pure step functions return (result, NamedTuple)
-(smld, df_info) = detectfit(image_stacks, camera, DetectFitConfig())
+# Step dispatch returns (result, NamedTuple)
+(smld, df_info) = analyze(image_stacks, DetectFitConfig(camera=cam))
 df_info.smld_raw          # Pre-filter SMLD
 df_info.step_record       # StepRecord with timing/summary
 
-(smld, fc_info) = frameconnect_step(smld, FrameConnectConfig())
+(smld, fc_info) = analyze(smld, FrameConnectConfig())
 fc_info.smld_connected    # Connected SMLD with track info
 ```
 
@@ -241,7 +241,7 @@ DriftCorrectConfig(
 
 The combined detection+fitting step supports three data source modes:
 
-1. **In-memory images**: Pass `Vector{Array}` to `analyze(image_stacks, config)` or `detectfit(image_stacks, camera, cfg)`
+1. **In-memory images**: Pass `Vector{Array}` to `analyze(image_stacks, config)` or `analyze(image_stacks, DetectFitConfig(camera=cam))`
 2. **Single file with blocks**: `DetectFitConfig(path="data.h5", h5_format=:mic)` auto-detects MIC blocks as datasets
 3. **Multiple files**: `DetectFitConfig(paths=["d1.h5", "d2.h5"])` loads one file per dataset
 
@@ -251,8 +251,9 @@ H5 formats auto-detected: `:smart` (SMART microscope), `:mic` (LidkeLab MIC form
 
 1. Create `src/steps/yourstep.jl` with:
    - `@kwdef struct YourStepConfig <: SMLMData.AbstractSMLMConfig` with relevant fields
-   - Pure function: `yourstep(smld, cfg; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)` returning `(result, (step_record=..., ...))`
-2. Include it in `SMLMAnalysis.jl` and export the config and function
+   - Internal function: `yourstep(smld, cfg; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)` returning `(result, (step_record=..., ...))`
+   - Dispatch method: `analyze(smld::BasicSMLD, cfg::YourStepConfig; kw...) = yourstep(smld, cfg; kw...)`
+2. Include it in `SMLMAnalysis.jl` and export the config type
 3. Add dispatch case in `analyze()` loop in `analysis.jl`
 
 ### Re-exported Types
@@ -260,9 +261,9 @@ H5 formats auto-detected: `:smart` (SMART microscope), `:mic` (LidkeLab MIC form
 From ecosystem packages (available after `using SMLMAnalysis`):
 - **SMLMData**: AbstractCamera, IdealCamera, SCMOSCamera, Emitter2D/3D/2DFit/3DFit, BasicSMLD, ROIBatch, AbstractSMLMConfig, AbstractSMLMInfo
 - **GaussMLE**: GaussMLEConfig, GaussianXYNB/S/SXSY, AstigmaticXYZNB, GaussMLEFitInfo, fit
-- **SMLMBoxer**: getboxes
-- **SMLMFrameConnection**: frameconnect
-- **SMLMDriftCorrection**: driftcorrect
+- **SMLMBoxer**: getboxes (internal use; users call `analyze(data, DetectFitConfig(camera=cam))`)
+- **SMLMFrameConnection**: frameconnect (internal use; users call `analyze(smld, FrameConnectConfig())`)
+- **SMLMDriftCorrection**: driftcorrect (internal use; users call `analyze(smld, DriftCorrectConfig())`)
 - **SMLMRender**: render, save_image, HistogramRender, GaussianRender, CircleRender, EllipseRender, RenderConfig (aliased as `const RenderConfig = SMLMRender.RenderConfig`)
 - **SMLMSim**: StaticSMLMConfig, DiffusionSMLMConfig, simulate, gen_images, gen_image, Nmer2D, Nmer3D, GenericFluor
 

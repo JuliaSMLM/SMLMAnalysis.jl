@@ -102,6 +102,13 @@ function frameconnect_step(smld::BasicSMLD, cfg::FrameConnectConfig;
 end
 
 """
+    analyze(smld, cfg::FrameConnectConfig; kwargs...) -> (combined_smld, info)
+
+Run frame connection on localizations.
+"""
+analyze(smld::BasicSMLD, cfg::FrameConnectConfig; kwargs...) = frameconnect_step(smld, cfg; kwargs...)
+
+"""
     _filter_high_chi2_tracks(smld_connected, threshold) -> (filtered_connected, filtered_combined, n_removed)
 
 Remove tracks that have any frame-to-frame pair with chi² > threshold.

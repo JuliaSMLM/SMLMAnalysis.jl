@@ -20,19 +20,21 @@ Run complete SMLM analysis pipeline. Returns tuple of (AnalysisResult, AnalysisI
 
 For file-based workflows (MIC/SMART H5), use `analyze(config)` with `DetectFitConfig(path=...)`.
 
-### Pure Step Functions
+### Step Dispatch
+
+Individual steps use `analyze()` with typed configs:
 
 ```julia
-(smld, info) = detectfit(data, camera, cfg::DetectFitConfig; outdir, step_number, verbose)
-(smld, info) = detectfit(camera, cfg::DetectFitConfig; ...)  # file-based
-(smld, info) = filter_step(smld, cfg::FilterConfig; smld_raw, outdir, step_number, verbose)
-(smld, info) = frameconnect_step(smld, cfg::FrameConnectConfig; outdir, step_number, verbose)
-(smld, info) = driftcorrect_step(smld, cfg::DriftCorrectConfig; outdir, step_number, verbose)
-(smld, info) = densityfilter_step(smld, cfg::DensityFilterConfig; outdir, step_number, verbose)
-(image, info) = render_step(smld, cfg::RenderConfig; outdir, step_number, verbose)
+(smld, info) = analyze(data, cfg::DetectFitConfig; outdir, step_number, verbose)
+(smld, info) = analyze(cfg::DetectFitConfig; ...)  # file-based (requires camera in config)
+(smld, info) = analyze(smld, cfg::FilterConfig; smld_raw, outdir, step_number, verbose)
+(smld, info) = analyze(smld, cfg::FrameConnectConfig; outdir, step_number, verbose)
+(smld, info) = analyze(smld, cfg::DriftCorrectConfig; outdir, step_number, verbose)
+(smld, info) = analyze(smld, cfg::DensityFilterConfig; outdir, step_number, verbose)
+(image, info) = analyze(smld, cfg::RenderConfig; outdir, step_number, verbose)
 ```
 
-Each step function returns `(result, NamedTuple)` where the NamedTuple includes:
+Each returns `(result, NamedTuple)` where the NamedTuple includes:
 - `step_record::StepRecord` - timing, config, summary stats
 - Step-specific fields (e.g., `smld_raw` from detectfit, `smld_connected` from frameconnect, `drift_model` from driftcorrect)
 
@@ -133,6 +135,7 @@ Combined detection + fitting step.
 
 ```julia
 DetectFitConfig(;
+    camera=nothing,           # Required for analyze() dispatch; injected by AnalysisConfig pipeline
     boxsize=11,
     overlap=2.0,
     min_photons=500.0,

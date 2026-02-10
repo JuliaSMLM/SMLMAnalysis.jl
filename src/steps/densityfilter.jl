@@ -66,6 +66,13 @@ function densityfilter_step(smld::BasicSMLD, cfg::DensityFilterConfig;
     (filtered, (step_record=record, n_before=n_before, n_after=n_after, threshold=threshold))
 end
 
+"""
+    analyze(smld, cfg::DensityFilterConfig; kwargs...) -> (filtered_smld, info)
+
+Filter localizations by neighbor density.
+"""
+analyze(smld::BasicSMLD, cfg::DensityFilterConfig; kwargs...) = densityfilter_step(smld, cfg; kwargs...)
+
 function _filter_by_density(smld::BasicSMLD, cfg::DensityFilterConfig)
     emitters = smld.emitters
     n = length(emitters)

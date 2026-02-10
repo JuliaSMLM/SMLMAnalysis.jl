@@ -99,7 +99,7 @@ function generate_lines()
     psf_sigma = 0.13
 
     sim_params = StaticSMLMConfig(
-        density = 1.0,
+        density = 2.0,
         σ_psf = psf_sigma,
         nframes = n_frames,
         ndatasets = n_datasets,

@@ -27,13 +27,13 @@ config = AnalysisConfig(
 ### Step-by-step (exploration)
 
 ```julia
-(smld, df_info) = detectfit(image_stacks, camera, DetectFitConfig(boxsize=9))
+(smld, df_info) = analyze(image_stacks, DetectFitConfig(camera=camera, boxsize=9))
 smld_raw = df_info.smld_raw
 
-(smld, _) = filter_step(smld, FilterConfig(photons=(500.0, Inf)); smld_raw=smld_raw)
-(smld, _) = frameconnect_step(smld, FrameConnectConfig(max_frame_gap=5))
-(smld, _) = driftcorrect_step(smld, DriftCorrectConfig(degree=2))
-(img, _)  = render_step(smld, RenderConfig(zoom=20, colormap=:inferno))
+(smld, _) = analyze(smld, FilterConfig(photons=(500.0, Inf)); smld_raw=smld_raw)
+(smld, _) = analyze(smld, FrameConnectConfig(max_frame_gap=5))
+(smld, _) = analyze(smld, DriftCorrectConfig(degree=2))
+(img, _)  = analyze(smld, RenderConfig(zoom=20, colormap=:inferno))
 
 # Save intermediate state for later resume
 save_smld("after_detectfit.h5", smld)

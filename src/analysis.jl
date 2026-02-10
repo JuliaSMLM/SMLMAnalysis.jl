@@ -140,9 +140,10 @@ function analyze(data, config::AnalysisConfig)
             step_number += 1
 
             if cfg isa DetectFitConfig
-                # Normalize data for detectfit
+                # Normalize data for detectfit, inject camera from AnalysisConfig
                 data_vec = _normalize_data(data)
-                (smld, info) = detectfit(data_vec, camera, cfg;
+                cfg = _inject_camera(cfg, camera)
+                (smld, info) = detectfit(data_vec, cfg.camera, cfg;
                     outdir=outdir, step_number=step_number, verbose=v)
                 smld_raw = info.smld_raw
                 push!(step_records, info.step_record)
@@ -277,7 +278,8 @@ function analyze(config::AnalysisConfig)
             step_number += 1
 
             if cfg isa DetectFitConfig
-                (smld, info) = detectfit(camera, cfg;
+                cfg = _inject_camera(cfg, camera)
+                (smld, info) = detectfit(cfg.camera, cfg;
                     outdir=outdir, step_number=step_number, verbose=v)
                 smld_raw = info.smld_raw
                 push!(step_records, info.step_record)

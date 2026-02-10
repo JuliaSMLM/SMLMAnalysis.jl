@@ -161,6 +161,8 @@ function _save_config!(dir::String, cfg::SMLMData.AbstractSMLMConfig)
         println(io, "type = \"$(nameof(typeof(cfg)))\"")
         for f in fieldnames(typeof(cfg))
             v = getfield(cfg, f)
+            # Skip camera objects (not TOML-serializable)
+            v isa SMLMData.AbstractCamera && continue
             if v isa String
                 println(io, "$f = \"$v\"")
             elseif v isa Symbol

@@ -1,20 +1,20 @@
 """
     stepwise_example.jl
 
-SMLM analysis using step-by-step pure function calls.
+SMLM analysis using step-by-step analyze() calls.
 
 This example demonstrates:
 1. Generating realistic simulated SMLM data (4 datasets x 2000 frames)
-2. Calling each pipeline step as a pure function
+2. Calling analyze() with individual step configs
 3. Threading SMLD state through the pipeline manually
 4. Saving/loading intermediate SMLDs for iteration
 
-Pipeline steps:
-1. detectfit - combined detection and fitting
-2. filter_step - quality filtering
-3. frameconnect_step - link localizations across frames
-4. driftcorrect_step - correct sample drift
-5. render_step - generate super-resolution image
+Pipeline steps (all via analyze() dispatch):
+1. analyze(images, DetectFitConfig(...)) - detection and fitting
+2. analyze(smld, FilterConfig(...)) - quality filtering
+3. analyze(smld, FrameConnectConfig(...)) - link across frames
+4. analyze(smld, DriftCorrectConfig(...)) - correct sample drift
+5. analyze(smld, RenderConfig(...)) - super-resolution image
 
 The stepwise approach is best for:
 - Interactive parameter tuning
@@ -66,7 +66,8 @@ println("="^60)
 println("Step 1: Detection + Fitting")
 println("="^60)
 
-(smld, df_info) = detectfit(image_stacks, camera, DetectFitConfig(
+(smld, df_info) = analyze(image_stacks, DetectFitConfig(
+    camera = camera,
     boxsize = 7,
     min_photons = 500.0,
     psf_sigma = psf_sigma,
@@ -95,7 +96,7 @@ println("="^60)
 
 n_before = length(smld.emitters)
 
-(smld, f_info) = filter_step(smld, FilterConfig(
+(smld, f_info) = analyze(smld, FilterConfig(
     photons = (500.0, Inf),
     precision = (0.0, 0.015),
     pvalue = (1e-3, 1.0)
@@ -113,7 +114,7 @@ println("="^60)
 println("Step 3: Frame Connection")
 println("="^60)
 
-(smld, fc_info) = frameconnect_step(smld, FrameConnectConfig(
+(smld, fc_info) = analyze(smld, FrameConnectConfig(
     max_frame_gap = 5,
     max_sigma_dist = 5.0
 ); outdir=OUTPUT_DIR, step_number=3, verbose=Verbosity.STANDARD)
@@ -131,7 +132,7 @@ println("="^60)
 println("Step 4: Drift Correction")
 println("="^60)
 
-(smld, dc_info) = driftcorrect_step(smld, DriftCorrectConfig(
+(smld, dc_info) = analyze(smld, DriftCorrectConfig(
     degree = 2,
     continuous = false
 ); outdir=OUTPUT_DIR, step_number=4, verbose=Verbosity.STANDARD)
@@ -147,7 +148,7 @@ println("="^60)
 println("Step 5: Render")
 println("="^60)
 
-(_, r_info) = render_step(smld, RenderConfig(zoom=20, colormap=:inferno);
+(_, r_info) = analyze(smld, RenderConfig(zoom=20, colormap=:inferno);
     outdir=OUTPUT_DIR, step_number=5, verbose=Verbosity.STANDARD)
 
 println()
@@ -201,10 +202,10 @@ To iterate on parameters (in REPL):
   smld = load_smld("$(joinpath(OUTPUT_DIR, "after_detectfit.h5"))")
 
   # Try different filter settings
-  (smld2, _) = filter_step(smld, FilterConfig(photons=(300.0, Inf), precision=(0.0, 0.020)))
-  (smld2, _) = frameconnect_step(smld2, FrameConnectConfig(max_frame_gap=5))
-  (smld2, _) = driftcorrect_step(smld2, DriftCorrectConfig(degree=2))
-  (_, _) = render_step(smld2, RenderConfig(zoom=20, colormap=:inferno))
+  (smld2, _) = analyze(smld, FilterConfig(photons=(300.0, Inf), precision=(0.0, 0.020)))
+  (smld2, _) = analyze(smld2, FrameConnectConfig(max_frame_gap=5))
+  (smld2, _) = analyze(smld2, DriftCorrectConfig(degree=2))
+  (_, _) = analyze(smld2, RenderConfig(zoom=20, colormap=:inferno))
 
   # Or use the config for a full re-run:
   (result, info) = analyze(new_image_stacks, config)

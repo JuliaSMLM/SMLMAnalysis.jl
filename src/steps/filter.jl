@@ -71,6 +71,13 @@ function filter_step(smld::BasicSMLD, cfg::FilterConfig;
     (filtered, (step_record=record, n_before=n_before, n_after=n_after))
 end
 
+"""
+    analyze(smld, cfg::FilterConfig; kwargs...) -> (filtered_smld, info)
+
+Filter localizations by quality criteria.
+"""
+analyze(smld::BasicSMLD, cfg::FilterConfig; kwargs...) = filter_step(smld, cfg; kwargs...)
+
 function _filter_smld(smld::BasicSMLD, cfg::FilterConfig)
     emitters = smld.emitters
     mask = trues(length(emitters))

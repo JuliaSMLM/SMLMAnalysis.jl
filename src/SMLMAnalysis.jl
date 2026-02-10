@@ -3,16 +3,14 @@
 
 High-level integration package for the JuliaSMLM ecosystem.
 
-Provides a functional pipeline for SMLM analysis with:
-- Pure step functions: detectfit, filter_step, frameconnect_step, etc.
-- AnalysisConfig for declarative pipeline description
-- analyze() for one-shot execution
+Provides a unified `analyze()` API for SMLM analysis. The config type
+determines the operation via multiple dispatch:
 
 # Quick Start
 ```julia
 using SMLMAnalysis
 
-# One-liner with AnalysisConfig
+# Full pipeline with AnalysisConfig
 config = AnalysisConfig(
     camera = cam,
     steps = [
@@ -25,10 +23,11 @@ config = AnalysisConfig(
 )
 (result, info) = analyze(image_stacks, config)
 
-# Or use pure step functions directly
-(smld, detectfit_info) = detectfit(image_stacks, camera, DetectFitConfig(boxsize=9))
-(smld, filter_info) = filter_step(smld, FilterConfig(photons=(500.0, Inf)))
-(smld, drift_info) = driftcorrect_step(smld, DriftCorrectConfig(degree=2))
+# Individual steps via analyze() dispatch
+(smld, info) = analyze(image_stacks, DetectFitConfig(camera=cam, boxsize=9))
+(smld, info) = analyze(smld, FilterConfig(photons=(500.0, Inf)))
+(smld, info) = analyze(smld, DriftCorrectConfig(degree=2))
+(img, info)  = analyze(smld, RenderConfig(zoom=20, colormap=:inferno))
 ```
 
 # Re-exported Types
@@ -108,26 +107,29 @@ export step_name
 # ============================================================
 # Step configs and pure step functions
 # ============================================================
+
+# Forward-declare analyze so step files can add dispatch methods
+function analyze end
+
 include("steps/common.jl")  # Shared helpers for steps
 export step_outdir
 
 include("steps/detectfit.jl")
-export DetectFitConfig, detectfit
+export DetectFitConfig
 
 include("steps/filter.jl")
-export FilterConfig, filter_step
+export FilterConfig
 
 include("steps/frameconnect.jl")
-export FrameConnectConfig, frameconnect_step
+export FrameConnectConfig
 
 include("steps/driftcorrect.jl")
-export DriftCorrectConfig, driftcorrect_step
+export DriftCorrectConfig
 
 include("steps/densityfilter.jl")
-export DensityFilterConfig, densityfilter_step
+export DensityFilterConfig
 
 include("steps/render.jl")
-export render_step
 
 # ============================================================
 # I/O

@@ -23,7 +23,7 @@ image_stacks = [images1, images2, images3, images4]  # 4 datasets
 (result, info) = analyze(image_stacks, config)
 
 # Step-by-step: same Vector{Array} input
-(smld, info) = detectfit(image_stacks, camera, DetectFitConfig(boxsize=9))
+(smld, info) = analyze(image_stacks, DetectFitConfig(camera=camera, boxsize=9))
 
 # File-based: MIC format auto-detects blocks as datasets
 config = AnalysisConfig(
@@ -111,12 +111,12 @@ Save/load SMLD after expensive steps (detectfit) using HDF5:
 
 ```julia
 # Save after expensive detectfit
-(smld, info) = detectfit(image_stacks, camera, DetectFitConfig(boxsize=9))
+(smld, info) = analyze(image_stacks, DetectFitConfig(camera=camera, boxsize=9))
 save_smld("output/after_detectfit.h5", smld)
 
 # Resume later - try different filter parameters
 smld = load_smld("output/after_detectfit.h5")
-(smld, _) = filter_step(smld, FilterConfig(photons=(300.0, Inf)))
+(smld, _) = analyze(smld, FilterConfig(photons=(300.0, Inf)))
 ```
 
 ### Full pipeline state
@@ -153,7 +153,7 @@ Set via `AnalysisConfig` or step function keyword:
 config = AnalysisConfig(camera=cam, steps=[...], verbose=Verbosity.DETAILED)
 
 # Or per-step
-(smld, info) = detectfit(data, camera, cfg; verbose=Verbosity.DEBUG)
+(smld, info) = analyze(data, DetectFitConfig(camera=cam); verbose=Verbosity.DEBUG)
 ```
 
 ## Uncertainty Calibration

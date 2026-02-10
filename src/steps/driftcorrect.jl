@@ -122,6 +122,13 @@ function driftcorrect_step(smld::BasicSMLD, cfg::DriftCorrectConfig;
     (corrected_smld, (step_record=record, drift_model=drift_model, drift_info=drift_info))
 end
 
+"""
+    analyze(smld, cfg::DriftCorrectConfig; kwargs...) -> (corrected_smld, info)
+
+Run drift correction on localizations.
+"""
+analyze(smld::BasicSMLD, cfg::DriftCorrectConfig; kwargs...) = driftcorrect_step(smld, cfg; kwargs...)
+
 """Calculate inter-dataset shift magnitudes in nm (Euclidean distance)"""
 function _calc_inter_shifts(drift_model)
     n_datasets = drift_model.ndatasets
