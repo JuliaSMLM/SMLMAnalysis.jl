@@ -130,11 +130,16 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
     all_boxes_info = []
     all_fit_info = []
 
-    # Sample data for overlay plots (capture 12 frames from first dataset for 3x4 grid)
-    sample_images = nothing
-    sample_roi_batch = nothing
-    sample_original_frames = nothing  # Original frame numbers for display
+    # Sample data for overlay plots (capture 12 frames spread across all datasets for 3x4 grid)
     n_sample_frames = 12
+    sample_image_slices = []
+    sample_roi_data = []
+    sample_roi_x = Int[]
+    sample_roi_y = Int[]
+    sample_roi_frames = Int[]       # remapped to 1:n_total_samples for indexing sample_images
+    sample_abs_frames = Int[]       # absolute frame labels for display
+    samples_collected = 0
+    frame_offset = 0
 
     t = @elapsed begin
         for (ds, images) in enumerate(data)
@@ -163,36 +168,47 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
 
             v >= Verbosity.PROGRESS && @info "    $n_rois ROIs -> $n_fits fits (detect: $(round(boxes_info.elapsed_s, digits=2))s/$(boxes_info.backend), fit: $(round(fit_info.elapsed_s, digits=2))s/$(fit_info.backend))"
 
-            # Capture sample data from first dataset for overlay plots
-            # Sample frames spread across the whole dataset, not just the beginning
-            if ds == 1 && dir !== nothing
-                n_sample = min(n_sample_frames, n_frames_ds)
-                # Pick frames evenly spread across the dataset
-                sample_frame_indices = [round(Int, x) for x in range(1, n_frames_ds, length=n_sample)]
-                sample_images = collect(images[:, :, sample_frame_indices])
-                sample_original_frames = sample_frame_indices  # Store for display titles
+            # Capture sample data spread across all datasets for overlay plots
+            if dir !== nothing && samples_collected < n_sample_frames
+                remaining = n_sample_frames - samples_collected
+                remaining_ds = n_datasets_val - ds + 1
+                n_this = clamp(remaining ÷ remaining_ds, 1, min(n_frames_ds, remaining))
+                idxs = [round(Int, x) for x in range(1, n_frames_ds, length=n_this)]
 
-                # Create mapping from original frame index to sample index
-                frame_to_sample = Dict(f => i for (i, f) in enumerate(sample_frame_indices))
-
-                # Filter ROIs to only those in sample frames and remap frame indices
-                sample_mask = [f in keys(frame_to_sample) for f in roi_batch.frame_indices]
-                if any(sample_mask)
-                    # Remap frame indices to 1:n_sample for the sample_images array
-                    remapped_frames = [frame_to_sample[f] for f in roi_batch.frame_indices[sample_mask]]
-                    sample_roi_batch = ROIBatch(
-                        roi_batch.data[:, :, sample_mask],
-                        roi_batch.x_corners[sample_mask],
-                        roi_batch.y_corners[sample_mask],
-                        remapped_frames,
-                        roi_batch.camera
-                    )
+                for idx in idxs
+                    push!(sample_image_slices, collect(images[:, :, idx]))
+                    push!(sample_abs_frames, frame_offset + idx)
                 end
+
+                frame_to_sample = Dict(f => samples_collected + i for (i, f) in enumerate(idxs))
+                for (ri, f) in enumerate(roi_batch.frame_indices)
+                    if haskey(frame_to_sample, f)
+                        push!(sample_roi_data, roi_batch.data[:, :, ri])
+                        push!(sample_roi_x, roi_batch.x_corners[ri])
+                        push!(sample_roi_y, roi_batch.y_corners[ri])
+                        push!(sample_roi_frames, frame_to_sample[f])
+                    end
+                end
+                samples_collected += n_this
             end
+            frame_offset += n_frames_ds
 
             # Set dataset field and append
             for e in smld_ds.emitters
                 push!(all_emitters, _with_dataset(e, ds))
+            end
+        end
+
+        # Assemble sample data for overlay plots
+        sample_images = nothing
+        sample_roi_batch = nothing
+        sample_original_frames = nothing
+        if !isempty(sample_image_slices)
+            sample_images = cat(sample_image_slices..., dims=3)
+            sample_original_frames = sample_abs_frames
+            if !isempty(sample_roi_data)
+                sample_roi_batch = ROIBatch(cat(sample_roi_data..., dims=3),
+                    sample_roi_x, sample_roi_y, sample_roi_frames, camera)
             end
         end
     end
@@ -280,10 +296,16 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
     all_boxes_info = []
     all_fit_info = []
 
-    sample_images = nothing
-    sample_roi_batch = nothing
-    sample_original_frames = nothing
+    # Sample data for overlay plots (spread across all datasets)
     n_sample_frames = 12
+    sample_image_slices = []
+    sample_roi_data = []
+    sample_roi_x = Int[]
+    sample_roi_y = Int[]
+    sample_roi_frames = Int[]
+    sample_abs_frames = Int[]
+    samples_collected = 0
+    frame_offset = 0
 
     t = @elapsed begin
         for (ds, source) in enumerate(sources)
@@ -311,32 +333,49 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
 
             v >= Verbosity.PROGRESS && @info "    $n_rois ROIs -> $n_fits fits (detect: $(round(boxes_info.elapsed_s, digits=2))s/$(boxes_info.backend), fit: $(round(fit_info.elapsed_s, digits=2))s/$(fit_info.backend))"
 
-            # Capture sample data from first dataset for overlay plots
-            if ds == 1 && dir !== nothing
-                n_sample = min(n_sample_frames, n_frames_ds)
-                sample_frame_indices = [round(Int, x) for x in range(1, n_frames_ds, length=n_sample)]
-                sample_images = collect(images[:, :, sample_frame_indices])
-                sample_original_frames = sample_frame_indices
+            # Capture sample data spread across all datasets for overlay plots
+            if dir !== nothing && samples_collected < n_sample_frames
+                remaining = n_sample_frames - samples_collected
+                remaining_ds = n_datasets_val - ds + 1
+                n_this = clamp(remaining ÷ remaining_ds, 1, min(n_frames_ds, remaining))
+                idxs = [round(Int, x) for x in range(1, n_frames_ds, length=n_this)]
 
-                frame_to_sample = Dict(f => i for (i, f) in enumerate(sample_frame_indices))
-                sample_mask = [f in keys(frame_to_sample) for f in roi_batch.frame_indices]
-                if any(sample_mask)
-                    remapped_frames = [frame_to_sample[f] for f in roi_batch.frame_indices[sample_mask]]
-                    sample_roi_batch = ROIBatch(
-                        roi_batch.data[:, :, sample_mask],
-                        roi_batch.x_corners[sample_mask],
-                        roi_batch.y_corners[sample_mask],
-                        remapped_frames,
-                        roi_batch.camera
-                    )
+                for idx in idxs
+                    push!(sample_image_slices, collect(images[:, :, idx]))
+                    push!(sample_abs_frames, frame_offset + idx)
                 end
+
+                frame_to_sample = Dict(f => samples_collected + i for (i, f) in enumerate(idxs))
+                for (ri, f) in enumerate(roi_batch.frame_indices)
+                    if haskey(frame_to_sample, f)
+                        push!(sample_roi_data, roi_batch.data[:, :, ri])
+                        push!(sample_roi_x, roi_batch.x_corners[ri])
+                        push!(sample_roi_y, roi_batch.y_corners[ri])
+                        push!(sample_roi_frames, frame_to_sample[f])
+                    end
+                end
+                samples_collected += n_this
             end
+            frame_offset += n_frames_ds
 
             for e in smld_ds.emitters
                 push!(all_emitters, _with_dataset(e, ds))
             end
 
             # Images freed when loop iteration ends (GC)
+        end
+
+        # Assemble sample data for overlay plots
+        sample_images = nothing
+        sample_roi_batch = nothing
+        sample_original_frames = nothing
+        if !isempty(sample_image_slices)
+            sample_images = cat(sample_image_slices..., dims=3)
+            sample_original_frames = sample_abs_frames
+            if !isempty(sample_roi_data)
+                sample_roi_batch = ROIBatch(cat(sample_roi_data..., dims=3),
+                    sample_roi_x, sample_roi_y, sample_roi_frames, camera)
+            end
         end
     end
 
@@ -553,12 +592,14 @@ function _write_detectfit_stats(dir, smld, cfg, t, n_rois, n_fits, n_datasets, n
     σ_y = [e.σ_y for e in emitters]
     pvalue = [e.pvalue for e in emitters]
 
-    # Calculate photobleaching rate from localizations per frame
+    # Calculate photobleaching rate from localizations per frame (absolute frames)
     n_frames = smld.n_frames
-    frame_counts = zeros(Int, n_frames)
+    n_total = n_frames * smld.n_datasets
+    frame_counts = zeros(Int, n_total)
     for e in emitters
-        if e.frame >= 1 && e.frame <= n_frames
-            frame_counts[e.frame] += 1
+        abs_frame = (e.dataset - 1) * n_frames + e.frame
+        if abs_frame >= 1 && abs_frame <= n_total
+            frame_counts[abs_frame] += 1
         end
     end
     bleach_result = _estimate_bleaching_rate(frame_counts)
@@ -780,7 +821,7 @@ end
 
 """
 Generate overlay plots showing detection boxes colored by fit status.
-Uses sample frames from first dataset to avoid loading all data again.
+Uses sample frames spread across all datasets with absolute frame labels.
 """
 function _save_detectfit_overlays(dir, smld, sample_roi_batch, sample_images, cfg, sample_original_frames)
     isempty(sample_roi_batch) && return
@@ -789,8 +830,9 @@ function _save_detectfit_overlays(dir, smld, sample_roi_batch, sample_images, cf
     sample_to_original = Dict(i => f for (i, f) in enumerate(sample_original_frames))
     original_frame_set = Set(sample_original_frames)
 
-    # Get emitters only from the sampled frames (using original frame numbers)
-    sample_emitters = filter(e -> e.frame in original_frame_set, smld.emitters)
+    # Get emitters only from the sampled frames (using absolute frame numbers)
+    _abs_frame(e) = (e.dataset - 1) * smld.n_frames + e.frame
+    sample_emitters = filter(e -> _abs_frame(e) in original_frame_set, smld.emitters)
 
     # Detection overlay: all boxes yellow (detection view)
     box_colors = fill(:yellow, length(sample_roi_batch))
@@ -815,7 +857,7 @@ function _save_detectfit_overlays(dir, smld, sample_roi_batch, sample_images, cf
             best_emitter = nothing
             best_dist = Inf
             for e in sample_emitters
-                if e.frame == original_frame
+                if _abs_frame(e) == original_frame
                     # Convert emitter position (microns) to pixels, accounting for camera origin
                     ex_px = (e.x - x_origin) / pix_size
                     ey_px = (e.y - y_origin) / pix_size
@@ -944,12 +986,14 @@ function _save_detectfit_detailed(dir, smld)
     emitters = smld.emitters
     isempty(emitters) && return nothing
 
-    # ROIs per frame plot
+    # ROIs per frame plot (absolute frames across all datasets)
     n_frames = smld.n_frames
-    frame_counts = zeros(Int, n_frames)
+    n_total = n_frames * smld.n_datasets
+    frame_counts = zeros(Int, n_total)
     for e in emitters
-        if e.frame >= 1 && e.frame <= n_frames
-            frame_counts[e.frame] += 1
+        abs_frame = (e.dataset - 1) * n_frames + e.frame
+        if abs_frame >= 1 && abs_frame <= n_total
+            frame_counts[abs_frame] += 1
         end
     end
 
@@ -957,8 +1001,8 @@ function _save_detectfit_detailed(dir, smld)
     bleach_result = _estimate_bleaching_rate(frame_counts)
 
     fig = Figure(size=(900, 400))
-    ax = Axis(fig[1, 1], xlabel="Frame", ylabel="Localizations", title="Localizations per Frame")
-    lines!(ax, 1:n_frames, frame_counts, color=(:blue, 0.5), linewidth=0.5, label="Raw")
+    ax = Axis(fig[1, 1], xlabel="Absolute Frame", ylabel="Localizations", title="Localizations per Frame")
+    lines!(ax, 1:n_total, frame_counts, color=(:blue, 0.5), linewidth=0.5, label="Raw")
 
     # Add exponential decay + offset fit if successful
     if bleach_result !== nothing
@@ -971,7 +1015,7 @@ function _save_detectfit_detailed(dir, smld)
         tau = round(bleach_result.half_life, digits=0)
         a = round(Int, bleach_result.offset)
         R2 = round(bleach_result.r_squared, digits=3)
-        fit_frames = 1:n_frames
+        fit_frames = 1:n_total
         fit_counts = bleach_result.N_0 .* exp.(-bleach_result.k_bleach .* fit_frames) .+ bleach_result.offset
         lines!(ax, fit_frames, fit_counts, color=:red, linewidth=2, linestyle=:dash,
                label="Fit: k=$k/frame, t1/2=$(Int(tau)), a=$a, R^2=$R2")
@@ -984,6 +1028,14 @@ function _save_detectfit_detailed(dir, smld)
     end
 
     axislegend(ax, position=:rt, framevisible=false, labelsize=10)
+
+    # Add dataset boundary lines for multi-dataset
+    if smld.n_datasets > 1
+        for ds in 2:smld.n_datasets
+            vlines!(ax, [(ds - 1) * n_frames + 0.5], color=(:gray, 0.5), linestyle=:dash)
+        end
+    end
+
     save(joinpath(dir, "localizations_per_frame.png"), fig)
 
     return bleach_result
