@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Tutorial · SMLMAnalysis.jl</title><meta name="title" content="Tutorial · SMLMAnalysis.jl"/><meta property="og:title" content="Tutorial · SMLMAnalysis.jl"/><meta property="twitter:title" content="Tutorial · SMLMAnalysis.jl"/><meta name="description" content="Documentation for SMLMAnalysis.jl."/><meta property="og:description" content="Documentation for SMLMAnalysis.jl."/><meta property="twitter:description" content="Documentation for SMLMAnalysis.jl."/><meta property="og:url" content="https://JuliaSMLM.github.io/SMLMAnalysis.jl/tutorial/"/><meta property="twitter:url" content="https://JuliaSMLM.github.io/SMLMAnalysis.jl/tutorial/"/><link rel="canonical" href="https://JuliaSMLM.github.io/SMLMAnalysis.jl/tutorial/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">SMLMAnalysis.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li class="is-active"><a class="tocitem" href>Tutorial</a><ul class="internal"><li><a class="tocitem" href="#Setup"><span>Setup</span></a></li><li><a class="tocitem" href="#AnalysisConfig-Approach"><span>AnalysisConfig Approach</span></a></li><li><a class="tocitem" href="#Step-1:-Detection-Fitting"><span>Step 1: Detection + Fitting</span></a></li><li><a class="tocitem" href="#Step-2:-Filtering"><span>Step 2: Filtering</span></a></li><li><a class="tocitem" href="#Step-3:-Frame-Connection"><span>Step 3: Frame Connection</span></a></li><li><a class="tocitem" href="#Step-4:-Drift-Correction"><span>Step 4: Drift Correction</span></a></li><li><a class="tocitem" href="#Step-5:-Density-Filter"><span>Step 5: Density Filter</span></a></li><li><a class="tocitem" href="#Step-6:-Render"><span>Step 6: Render</span></a></li><li><a class="tocitem" href="#Step-by-Step-Workflow"><span>Step-by-Step Workflow</span></a></li><li><a class="tocitem" href="#Output-Directory-Structure"><span>Output Directory Structure</span></a></li></ul></li><li><a class="tocitem" href="../guide/">Guide</a></li><li><a class="tocitem" href="../api/">API Reference</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Tutorial</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Tutorial</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/JuliaSMLM/SMLMAnalysis.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/JuliaSMLM/SMLMAnalysis.jl/blob/main/docs/src/tutorial.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Tutorial"><a class="docs-heading-anchor" href="#Tutorial">Tutorial</a><a id="Tutorial-1"></a><a class="docs-heading-anchor-permalink" href="#Tutorial" title="Permalink"></a></h1><p>This walkthrough runs a complete SMLM analysis pipeline on simulated data, showing the output at every step. All figures are generated from the <code>examples/analysis_example.jl</code> and <code>examples/stepwise_example.jl</code> scripts.</p><h2 id="Setup"><a class="docs-heading-anchor" href="#Setup">Setup</a><a id="Setup-1"></a><a class="docs-heading-anchor-permalink" href="#Setup" title="Permalink"></a></h2><pre><code class="language-julia hljs">using SMLMAnalysis
+using MicroscopePSFs
+
+# Camera: 256x128 pixels @ 100nm
+camera = IdealCamera(256, 128, 0.1)
+
+# Simulate: 4 datasets x 2000 frames, 8-mer pattern
+sim_params = StaticSMLMConfig(density=2.0, sigma_psf=0.13, nframes=2000, ndatasets=4)
+pattern = Nmer2D(n=8, d=0.05)
+fluor = GenericFluor(photons=50000.0, k_off=20.0, k_on=0.02)
+
+(_, sim_info) = simulate(sim_params; pattern=pattern, molecule=fluor, camera=camera)</code></pre><p>Image generation uses <code>gen_images</code> from SMLMSim with a Gaussian PSF model. See the example scripts for the full setup including the per-dataset image generation workaround.</p><h2 id="AnalysisConfig-Approach"><a class="docs-heading-anchor" href="#AnalysisConfig-Approach">AnalysisConfig Approach</a><a id="AnalysisConfig-Approach-1"></a><a class="docs-heading-anchor-permalink" href="#AnalysisConfig-Approach" title="Permalink"></a></h2><p>The primary interface uses <code>AnalysisConfig</code> to define a complete pipeline:</p><pre><code class="language-julia hljs">config = AnalysisConfig(
+    camera = camera,
+    steps = [
+        DetectFitConfig(boxsize=7, psf_sigma=0.13, psf_model=:variable),
+        FilterConfig(photons=(500.0, Inf), precision=(0.0, 0.007), pvalue=(1e-3, 1.0)),
+        FrameConnectConfig(max_frame_gap=5),
+        DriftCorrectConfig(degree=2),
+        DensityFilterConfig(n_sigma=2.0),
+        RenderConfig(zoom=20, colormap=:inferno),
+    ],
+    outdir = &quot;output/&quot;,
+    verbose = Verbosity.STANDARD
+)
+
+# image_stacks is Vector{Array}: 4 datasets, each (height, width, 2000)
+(result, info) = analyze(image_stacks, config)</code></pre><p>The <code>analyze</code> function returns <code>(AnalysisResult, AnalysisInfo)</code> following the JuliaSMLM tuple-pattern. Each step produces diagnostic outputs in the output directory.</p><h2 id="Step-1:-Detection-Fitting"><a class="docs-heading-anchor" href="#Step-1:-Detection-Fitting">Step 1: Detection + Fitting</a><a id="Step-1:-Detection-Fitting-1"></a><a class="docs-heading-anchor-permalink" href="#Step-1:-Detection-Fitting" title="Permalink"></a></h2><p><code>DetectFitConfig</code> combines ROI detection (SMLMBoxer) and MLE fitting (GaussMLE) into a single step. For multi-dataset data (Vector{Array}), each dataset is processed independently.</p><pre><code class="language-julia hljs">DetectFitConfig(
+    boxsize = 7,          # ROI size in pixels
+    min_photons = 500.0,  # Detection threshold
+    psf_sigma = 0.13,     # Expected PSF width (um)
+    psf_model = :variable, # :fixed, :variable, or :anisotropic
+)</code></pre><p>Dataset boundaries come from the data structure: <code>Vector{Array}</code> of length 4 = 4 datasets.</p><h3 id="Detection-overlay"><a class="docs-heading-anchor" href="#Detection-overlay">Detection overlay</a><a id="Detection-overlay-1"></a><a class="docs-heading-anchor-permalink" href="#Detection-overlay" title="Permalink"></a></h3><p>Shows detected ROIs overlaid on raw camera frames. Yellow boxes mark each candidate molecule:</p><p><img src="../assets/detection_overlay.png" alt="Detection overlay"/></p><h3 id="Fit-overlay"><a class="docs-heading-anchor" href="#Fit-overlay">Fit overlay</a><a id="Fit-overlay-1"></a><a class="docs-heading-anchor-permalink" href="#Fit-overlay" title="Permalink"></a></h3><p>Boxes colored by fit quality – green passes all filters, red fails photon threshold, orange fails precision, purple fails p-value:</p><p><img src="../assets/fit_overlay.png" alt="Fit overlay"/></p><h3 id="Fit-quality-distributions"><a class="docs-heading-anchor" href="#Fit-quality-distributions">Fit quality distributions</a><a id="Fit-quality-distributions-1"></a><a class="docs-heading-anchor-permalink" href="#Fit-quality-distributions" title="Permalink"></a></h3><p>Histograms of photons, background, localization precision, p-value, and PSF width. Gray regions show what would be rejected by the specified filter thresholds:</p><p><img src="../assets/fit_quality.png" alt="Fit quality"/></p><h2 id="Step-2:-Filtering"><a class="docs-heading-anchor" href="#Step-2:-Filtering">Step 2: Filtering</a><a id="Step-2:-Filtering-1"></a><a class="docs-heading-anchor-permalink" href="#Step-2:-Filtering" title="Permalink"></a></h2><p><code>FilterConfig</code> applies quality-based filtering. All criteria use <code>(min, max)</code> tuples:</p><pre><code class="language-julia hljs">FilterConfig(
+    photons = (500.0, Inf),      # Minimum 500 photons
+    precision = (0.0, 0.007),    # Maximum 7nm precision
+    pvalue = (1e-3, 1.0),       # Goodness-of-fit threshold
+    psf_sigma = :auto            # Optional: mode +/- 10%
+)</code></pre><p>The acceptance rate (typically 60-90% for well-optimized detection) is reported in the step summary.</p><h2 id="Step-3:-Frame-Connection"><a class="docs-heading-anchor" href="#Step-3:-Frame-Connection">Step 3: Frame Connection</a><a id="Step-3:-Frame-Connection-1"></a><a class="docs-heading-anchor-permalink" href="#Step-3:-Frame-Connection" title="Permalink"></a></h2><p><code>FrameConnectConfig</code> links localizations of the same emitter across consecutive frames. This step also performs uncertainty calibration, comparing reported CRLB uncertainties against observed frame-to-frame scatter.</p><pre><code class="language-julia hljs">FrameConnectConfig(
+    max_frame_gap = 5,      # Allow gaps of up to 5 dark frames
+    max_sigma_dist = 5.0,   # Spatial matching threshold
+    calibrate = true,     # Run uncertainty calibration
+    clamp_k_to_one = true # Don&#39;t allow k &lt; 1 (CRLB is theoretical lower bound)
+)</code></pre><h3 id="Track-size-distribution"><a class="docs-heading-anchor" href="#Track-size-distribution">Track size distribution</a><a id="Track-size-distribution-1"></a><a class="docs-heading-anchor-permalink" href="#Track-size-distribution" title="Permalink"></a></h3><p>Shows the number of localizations per track. The mean track length reflects blinking kinetics (k_off):</p><p><img src="../assets/track_histogram.png" alt="Track histogram"/></p><h3 id="Uncertainty-calibration"><a class="docs-heading-anchor" href="#Uncertainty-calibration">Uncertainty calibration</a><a id="Uncertainty-calibration-1"></a><a class="docs-heading-anchor-permalink" href="#Uncertainty-calibration" title="Permalink"></a></h3><p>Compares reported variance (CRLB) against observed variance from frame-to-frame scatter. The fit gives <code>A</code> (motion variance in nm^2) and <code>B</code> (CRLB scale factor):</p><p><img src="../assets/uncertainty_calibration.png" alt="Uncertainty calibration"/></p><h3 id="Drift-jitter"><a class="docs-heading-anchor" href="#Drift-jitter">Drift jitter</a><a id="Drift-jitter-1"></a><a class="docs-heading-anchor-permalink" href="#Drift-jitter" title="Permalink"></a></h3><p>Frame-to-frame position shifts estimated from linked emitters. Shows both instantaneous jitter and cumulative drift across all datasets:</p><p><img src="../assets/drift_jitter.png" alt="Drift jitter"/></p><h2 id="Step-4:-Drift-Correction"><a class="docs-heading-anchor" href="#Step-4:-Drift-Correction">Step 4: Drift Correction</a><a id="Step-4:-Drift-Correction-1"></a><a class="docs-heading-anchor-permalink" href="#Step-4:-Drift-Correction" title="Permalink"></a></h2><p><code>DriftCorrectConfig</code> corrects sample drift using entropy-based optimization from SMLMDriftCorrection.</p><pre><code class="language-julia hljs">DriftCorrectConfig(
+    degree = 2,            # Polynomial degree
+    continuous = false,    # Registered mode (multi-dataset)
+    quality = :singlepass  # :singlepass or :iterative
+)</code></pre><h3 id="Drift-trajectory"><a class="docs-heading-anchor" href="#Drift-trajectory">Drift trajectory</a><a id="Drift-trajectory-1"></a><a class="docs-heading-anchor-permalink" href="#Drift-trajectory" title="Permalink"></a></h3><p>Shows the estimated X and Y drift over time and the XY path. For multi-dataset data, each dataset&#39;s trajectory is shown in a different color:</p><p><img src="../assets/drift_trajectory.png" alt="Drift trajectory"/></p><p>For details on continuous vs registered modes and chunking strategies, see the <a href="../guide/#Guide">Guide</a>.</p><h2 id="Step-5:-Density-Filter"><a class="docs-heading-anchor" href="#Step-5:-Density-Filter">Step 5: Density Filter</a><a id="Step-5:-Density-Filter-1"></a><a class="docs-heading-anchor-permalink" href="#Step-5:-Density-Filter" title="Permalink"></a></h2><p><code>DensityFilterConfig</code> removes isolated localizations that lack neighbors, which are likely false detections.</p><pre><code class="language-julia hljs">DensityFilterConfig(
+    n_sigma = 2.0,           # Search radius in sigma units
+    min_neighbors = :auto    # Auto-detect threshold via valley method
+)</code></pre><h3 id="Neighbor-histogram"><a class="docs-heading-anchor" href="#Neighbor-histogram">Neighbor histogram</a><a id="Neighbor-histogram-1"></a><a class="docs-heading-anchor-permalink" href="#Neighbor-histogram" title="Permalink"></a></h3><p>The valley between the isolated peak (low neighbors) and the clustered peak (high neighbors) determines the threshold:</p><p><img src="../assets/neighbor_histogram.png" alt="Neighbor histogram"/></p><h2 id="Step-6:-Render"><a class="docs-heading-anchor" href="#Step-6:-Render">Step 6: Render</a><a id="Step-6:-Render-1"></a><a class="docs-heading-anchor-permalink" href="#Step-6:-Render" title="Permalink"></a></h2><p><code>RenderConfig</code> generates super-resolution images using SMLMRender. Multiple renders can be added as separate pipeline steps.</p><pre><code class="language-julia hljs"># Gaussian blur rendering (publication quality)
+RenderConfig(zoom=20, colormap=:inferno)
+
+# Histogram binning colored by time
+RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame)
+
+# Circle rendering colored by time
+RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame)</code></pre><h3 id="Gaussian-render"><a class="docs-heading-anchor" href="#Gaussian-render">Gaussian render</a><a id="Gaussian-render-1"></a><a class="docs-heading-anchor-permalink" href="#Gaussian-render" title="Permalink"></a></h3><p><img src="../assets/render_gaussian.png" alt="Gaussian render"/></p><h3 id="Histogram-render"><a class="docs-heading-anchor" href="#Histogram-render">Histogram render</a><a id="Histogram-render-1"></a><a class="docs-heading-anchor-permalink" href="#Histogram-render" title="Permalink"></a></h3><p><img src="../assets/render_histogram.png" alt="Histogram render"/></p><h3 id="Circle-render"><a class="docs-heading-anchor" href="#Circle-render">Circle render</a><a id="Circle-render-1"></a><a class="docs-heading-anchor-permalink" href="#Circle-render" title="Permalink"></a></h3><p><img src="../assets/render_circles.png" alt="Circle render"/></p><h2 id="Step-by-Step-Workflow"><a class="docs-heading-anchor" href="#Step-by-Step-Workflow">Step-by-Step Workflow</a><a id="Step-by-Step-Workflow-1"></a><a class="docs-heading-anchor-permalink" href="#Step-by-Step-Workflow" title="Permalink"></a></h2><p>The <code>analyze()</code> dispatch enables iterative parameter tuning:</p><pre><code class="language-julia hljs"># Run detection + fitting (expensive step)
+(smld, df_info) = analyze(image_stacks, DetectFitConfig(camera=camera, boxsize=7);
+    outdir=&quot;output/&quot;, step_number=1, verbose=Verbosity.STANDARD)
+smld_raw = df_info.smld_raw
+
+# Save for later resume
+save_smld(&quot;output/after_detectfit.h5&quot;, smld)
+
+# Try filter parameters
+(smld_filtered, _) = analyze(smld, FilterConfig(photons=(500.0, Inf));
+    smld_raw=smld_raw, outdir=&quot;output/&quot;, step_number=2, verbose=Verbosity.STANDARD)
+
+# Not happy? Try looser filter on same smld (no re-detection needed)
+(smld_filtered, _) = analyze(smld, FilterConfig(photons=(300.0, Inf));
+    smld_raw=smld_raw)
+
+# Continue pipeline
+(smld_fc, fc_info) = analyze(smld_filtered, FrameConnectConfig(max_frame_gap=5))
+(smld_dc, dc_info) = analyze(smld_fc, DriftCorrectConfig(degree=2))
+(img, _) = analyze(smld_dc, RenderConfig(zoom=20, colormap=:inferno))
+
+# Resume from saved checkpoint in new session
+smld = load_smld(&quot;output/after_detectfit.h5&quot;)
+(smld, _) = analyze(smld, FilterConfig(photons=(400.0, Inf)))</code></pre><h2 id="Output-Directory-Structure"><a class="docs-heading-anchor" href="#Output-Directory-Structure">Output Directory Structure</a><a id="Output-Directory-Structure-1"></a><a class="docs-heading-anchor-permalink" href="#Output-Directory-Structure" title="Permalink"></a></h2><p>When <code>outdir</code> is set, each step writes to a numbered subdirectory:</p><pre><code class="nohighlight hljs">output/
+├── 01_detectfit/
+│   ├── config.toml
+│   ├── info.toml
+│   ├── stats.md
+│   ├── fit_quality.png
+│   ├── detection_overlay.png
+│   └── fit_overlay.png
+├── 02_filter/
+│   ├── config.toml
+│   └── stats.md
+├── 03_frameconnect/
+│   ├── config.toml
+│   ├── info.toml
+│   ├── stats.md
+│   ├── track_histogram.png
+│   ├── uncertainty_calibration.png
+│   └── drift_jitter.png
+├── 04_driftcorrect/
+│   ├── config.toml
+│   ├── info.toml
+│   ├── stats.md
+│   └── drift_trajectory.png
+├── 05_densityfilter/
+│   ├── config.toml
+│   ├── stats.md
+│   └── neighbor_histogram.png
+├── 06_render/
+│   ├── config.toml
+│   ├── info.toml
+│   └── gaussianrender_inferno_20x.png
+└── summary.md</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../guide/">Guide »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Tuesday 10 February 2026 20:38">Tuesday 10 February 2026</span>. Using Julia version 1.12.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
