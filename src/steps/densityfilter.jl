@@ -4,22 +4,50 @@ Density filter step - removes isolated localizations by neighbor count
 
 using NearestNeighbors
 
+"""
+    DensityFilterConfig <: AbstractSMLMConfig
+
+Density-based filtering that removes isolated localizations lacking nearby neighbors.
+
+# Keywords
+- `n_sigma`: Search radius in localization uncertainty units (default: 2.0)
+- `min_neighbors`: Minimum neighbor count. `:auto` uses valley detection between
+  isolated and clustered populations (default: `:auto`)
+"""
 @kwdef struct DensityFilterConfig <: SMLMData.AbstractSMLMConfig
     n_sigma::Float64 = 2.0
     min_neighbors::Union{Int, Symbol} = :auto  # :auto uses triangle method
 end
 
-function run_step!(a::Analysis, cfg::DensityFilterConfig)
-    a.smld === nothing && error("Must run Fit first")
-    a.step_counter += 1
-    v = a.verbose
-    dir = _stepdir(a, cfg)
+"""
+    densityfilter_step(smld, cfg; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)
 
-    v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(step_name(cfg))" n_sigma=cfg.n_sigma min_neighbors=cfg.min_neighbors
+Filter localizations by neighbor density. Returns `(filtered_smld, info)`.
 
-    n_before = length(a.smld.emitters)
-    t = @elapsed a.smld, neighbor_counts, threshold = _filter_by_density(a.smld, cfg)
-    n_after = length(a.smld.emitters)
+# Arguments
+- `smld::BasicSMLD`: Input localizations
+- `cfg::DensityFilterConfig`: Density filter parameters
+
+# Keyword Arguments
+- `outdir`: Output directory (nothing to skip file output)
+- `step_number`: Step number for output directory naming
+- `verbose`: Verbosity level
+
+# Returns
+`(filtered_smld, (step_record, n_before, n_after, threshold))`
+"""
+function densityfilter_step(smld::BasicSMLD, cfg::DensityFilterConfig;
+                            outdir::Union{String,Nothing}=nothing,
+                            step_number::Int=0,
+                            verbose::Int=Verbosity.STANDARD)
+    v = verbose
+    dir = step_outdir(outdir, step_number, cfg)
+
+    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_sigma=cfg.n_sigma min_neighbors=cfg.min_neighbors
+
+    n_before = length(smld.emitters)
+    t = @elapsed (filtered, neighbor_counts, threshold) = _filter_by_density(smld, cfg)
+    n_after = length(filtered.emitters)
     n_rejected = n_before - n_after
 
     summary = Dict{Symbol,Any}(
@@ -28,15 +56,14 @@ function run_step!(a::Analysis, cfg::DensityFilterConfig)
         :n_rejected => n_rejected,
         :threshold => threshold
     )
-    _record!(a, cfg, t, summary)
-    _checkpoint!(a; save=false)  # In-memory only; density filter is fast to recompute
+    record = StepRecord(step_number, cfg, t, summary)
 
     if dir !== nothing
-        _save_step_outputs!(dir, a, cfg, v, t, neighbor_counts, threshold, n_before, n_after)
+        _save_densityfilter_outputs!(dir, cfg, v, t, neighbor_counts, threshold, n_before, n_after)
     end
 
     v >= Verbosity.PROGRESS && @info "  → $n_rejected rejected (threshold=$threshold) ($(round(t, digits=2))s)"
-    a
+    (filtered, (step_record=record, n_before=n_before, n_after=n_after, threshold=threshold))
 end
 
 function _filter_by_density(smld::BasicSMLD, cfg::DensityFilterConfig)
@@ -170,8 +197,8 @@ function _valley_threshold(counts::Vector{Int})
     end
 end
 
-function _save_step_outputs!(dir::String, a::Analysis, cfg::DensityFilterConfig, v::Int, t::Float64,
-                             neighbor_counts::Vector{Int}, threshold::Int, n_before::Int, n_after::Int)
+function _save_densityfilter_outputs!(dir::String, cfg::DensityFilterConfig, v::Int, t::Float64,
+                                      neighbor_counts::Vector{Int}, threshold::Int, n_before::Int, n_after::Int)
     mkpath(dir)
     _save_config!(dir, cfg)
 

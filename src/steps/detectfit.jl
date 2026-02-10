@@ -1,29 +1,52 @@
 """
-Combined Detect+Fit step with per-dataset processing.
+Combined Detect+Fit step as a pure function.
 
-Supports two modes:
-1. **In-memory images**: When Analysis has loaded images (via constructor), processes
-   datasets by slicing the image array.
-2. **File-based loading**: When paths are specified, loads one dataset at a time
-   for memory efficiency with arbitrarily large acquisitions.
+Supports three calling modes:
+1. **Vector of image stacks**: `detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera, cfg)`
+   Each element is a dataset. Primary path.
+2. **Single image stack**: `detectfit(images::AbstractArray{<:Real,3}, camera, cfg)`
+   Wraps into a 1-element vector.
+3. **File-based**: `detectfit(camera, cfg)` with `cfg.path`/`cfg.paths` set.
+   Loads each dataset from file, processes, frees memory.
 
 For each dataset:
-1. Get images (slice from memory or load from file)
-2. Detect ROIs
-3. Fit localizations
-4. Append to combined SMLD
-5. (File mode only) Free images from memory
+1. Detect ROIs via SMLMBoxer.getboxes
+2. Fit localizations via GaussMLE.fit
+3. Append to combined SMLD
 """
 
+"""
+    DetectFitConfig <: AbstractSMLMConfig
+
+Combined detection and fitting step. Detects ROIs via SMLMBoxer and fits
+localizations via GaussMLE in a single step, with per-dataset processing.
+
+# Data Source Keywords (for file-based workflows)
+- `path`: Single H5 file path
+- `paths`: Vector of H5 file paths (one per dataset)
+- `dataset_frames`: Explicit frame ranges per dataset
+- `h5_format`: `:auto`, `:smart`, or `:mic`
+
+# Detection Keywords
+- `boxsize`: ROI size in pixels (default: 11)
+- `min_photons`: Detection threshold (default: 500.0)
+- `psf_sigma`: Expected PSF width in microns (default: 0.135)
+
+# Fitting Keywords
+- `psf_model`: `:fixed`, `:variable`, or `:anisotropic` (default: `:variable`)
+- `iterations`: MLE iterations (default: 20)
+- `backend`: `:auto`, `:gpu`, or `:cpu` (default: `:auto`)
+
+# Filter Preview
+- `filter_min_photons`, `filter_max_precision`, `filter_min_pvalue`: Thresholds
+  shown on fit quality plots (gray rejected regions). Set these to match your
+  intended `FilterConfig` settings.
+"""
 @kwdef struct DetectFitConfig <: SMLMData.AbstractSMLMConfig
-    # Data source (optional - use Analysis.data if not specified)
-    # Option 1: Single file with n_datasets (splits frames evenly)
+    # Data source (for file-based workflows)
     path::Union{String, Nothing} = nothing
-    n_datasets::Int = 1  # Number of datasets (for file-based: splits frames evenly)
-    # Option 2: Single file with explicit frame ranges
-    dataset_frames::Union{Vector{UnitRange{Int}}, Nothing} = nothing
-    # Option 3: Multiple files (one per dataset)
     paths::Union{Vector{String}, Nothing} = nothing
+    dataset_frames::Union{Vector{UnitRange{Int}}, Nothing} = nothing
 
     # H5 format: :auto (detect), :smart (SMART microscope), :mic (MATLAB Instrument Control)
     h5_format::Symbol = :auto
@@ -49,16 +72,38 @@ For each dataset:
     filter_min_pvalue::Float64 = 1e-6
 end
 
-function run_step!(a::Analysis, cfg::DetectFitConfig)
-    a.step_counter += 1
-    v = a.verbose
-    dir = _stepdir(a, cfg)
+"""
+    detectfit(data, camera, cfg; kwargs...) -> (smld, info)
 
-    # Determine data sources: use Analysis.data if available, else use file paths from config
-    sources, source_mode = _resolve_data_sources(a, cfg)
-    n_datasets = length(sources)
+Run combined detection and fitting on image data.
 
-    v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(step_name(cfg))" n_datasets=n_datasets psf_model=cfg.psf_model
+# Arguments
+- `data::Vector{<:AbstractArray{<:Real,3}}`: Vector of image stacks (one per dataset)
+- `camera::AbstractCamera`: Camera model
+- `cfg::DetectFitConfig`: Detection and fitting configuration
+
+# Keywords
+- `outdir::Union{String,Nothing}=nothing`: Output directory for results
+- `step_number::Int=1`: Step number in the pipeline
+- `verbose::Int=Verbosity.STANDARD`: Verbosity level
+
+# Returns
+`(smld::BasicSMLD, info::NamedTuple)` where info contains:
+- `step_record::StepRecord`: Step record with timing and summary
+- `boxes_info::Vector`: Per-dataset BoxesInfo from SMLMBoxer
+- `fit_info::Vector`: Per-dataset FitInfo from GaussMLE
+- `elapsed_s::Float64`: Total elapsed time
+- `smld_raw::BasicSMLD`: Reference to the raw SMLD (same as smld)
+"""
+function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
+                   outdir::Union{String,Nothing}=nothing,
+                   step_number::Int=1,
+                   verbose::Int=Verbosity.STANDARD)
+    v = verbose
+    dir = step_outdir(outdir, step_number, cfg)
+    n_datasets_val = length(data)
+
+    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_datasets=n_datasets_val psf_model=cfg.psf_model
 
     # Setup fitter
     psf = if cfg.psf_model == :fixed
@@ -89,16 +134,14 @@ function run_step!(a::Analysis, cfg::DetectFitConfig)
     n_sample_frames = 12
 
     t = @elapsed begin
-        for (ds, source) in enumerate(sources)
-            # Get images for this dataset (slice from memory or load from file)
-            images = _get_dataset_images(source, source_mode, v)
+        for (ds, images) in enumerate(data)
             n_frames_ds = size(images, 3)
             n_frames_per_dataset = max(n_frames_per_dataset, n_frames_ds)
 
-            v >= Verbosity.DETAILED && @info "  Dataset $ds: $(size(images)) images"
+            v >= Verbosity.PROGRESS && @info "  Dataset $ds: $(size(images)) images"
 
             # Detect (tuple-pattern: returns (ROIBatch, BoxesInfo))
-            (roi_batch, boxes_info) = SMLMBoxer.getboxes(images, a.camera;
+            (roi_batch, boxes_info) = SMLMBoxer.getboxes(images, camera;
                 boxsize = cfg.boxsize,
                 overlap = cfg.overlap,
                 min_photons = cfg.min_photons,
@@ -109,15 +152,13 @@ function run_step!(a::Analysis, cfg::DetectFitConfig)
             n_rois = length(roi_batch)
             total_rois += n_rois
 
-            v >= Verbosity.DETAILED && @info "    Detected $n_rois ROIs"
-
             # Fit (tuple-pattern: returns (BasicSMLD, FitInfo))
             (smld_ds, fit_info) = GaussMLE.fit(roi_batch, fitter)
             push!(all_fit_info, fit_info)
             n_fits = length(smld_ds.emitters)
             total_fits += n_fits
 
-            v >= Verbosity.DETAILED && @info "    Fitted $n_fits localizations"
+            v >= Verbosity.PROGRESS && @info "    $n_rois ROIs -> $n_fits fits (detect: $(round(boxes_info.elapsed_s, digits=2))s/$(boxes_info.backend), fit: $(round(fit_info.elapsed_s, digits=2))s/$(fit_info.backend))"
 
             # Capture sample data from first dataset for overlay plots
             # Sample frames spread across the whole dataset, not just the beginning
@@ -150,8 +191,6 @@ function run_step!(a::Analysis, cfg::DetectFitConfig)
             for e in smld_ds.emitters
                 push!(all_emitters, _with_dataset(e, ds))
             end
-
-            # Images freed when loop iteration ends (GC)
         end
     end
 
@@ -160,13 +199,10 @@ function run_step!(a::Analysis, cfg::DetectFitConfig)
         error("No localizations found across all datasets")
     end
 
-    a.smld_raw = BasicSMLD(all_emitters, a.camera, n_frames_per_dataset, n_datasets, Dict{String,Any}())
-    a.smld = a.smld_raw
-    a.n_datasets = n_datasets
-    a.n_frames_per_dataset = n_frames_per_dataset
+    smld = BasicSMLD(all_emitters, camera, n_frames_per_dataset, n_datasets_val, Dict{String,Any}())
 
     summary = Dict{Symbol,Any}(
-        :n_datasets => n_datasets,
+        :n_datasets => n_datasets_val,
         :n_rois => total_rois,
         :n_fits => total_fits,
         :n_frames_per_dataset => n_frames_per_dataset
@@ -178,16 +214,164 @@ function run_step!(a::Analysis, cfg::DetectFitConfig)
         fit_info = all_fit_info,
         elapsed_s = t
     )
-    _record!(a, cfg, t, summary; info=step_info)
-    _checkpoint!(a)
+    record = StepRecord(step_number, cfg, t, summary; info=step_info)
 
     if dir !== nothing
-        _save_detectfit_outputs!(dir, a, cfg, v, t, total_rois, total_fits, sample_images, sample_roi_batch, sample_original_frames, all_boxes_info, all_fit_info)
+        _save_detectfit_outputs!(dir, smld, camera, cfg, v, t, total_rois, total_fits,
+                                 n_datasets_val, n_frames_per_dataset,
+                                 sample_images, sample_roi_batch, sample_original_frames,
+                                 all_boxes_info, all_fit_info)
     end
 
-    v >= Verbosity.PROGRESS && @info "  → $total_fits fits from $total_rois ROIs across $n_datasets datasets ($(round(t, digits=2))s)"
-    a
+    v >= Verbosity.PROGRESS && @info "  -> $total_fits fits from $total_rois ROIs across $n_datasets_val datasets ($(round(t, digits=2))s)"
+
+    return (smld, (step_record=record, boxes_info=all_boxes_info, fit_info=all_fit_info, elapsed_s=t, smld_raw=smld))
 end
+
+"""
+    detectfit(images::AbstractArray{<:Real,3}, camera, cfg; kwargs...) -> (smld, info)
+
+Convenience method for a single image stack. Wraps into a 1-element vector.
+"""
+function detectfit(images::AbstractArray{<:Real,3}, camera::SMLMData.AbstractCamera, cfg::DetectFitConfig; kwargs...)
+    detectfit([images], camera, cfg; kwargs...)
+end
+
+"""
+    detectfit(camera, cfg; kwargs...) -> (smld, info)
+
+File-based detectfit. Loads image data from `cfg.path` or `cfg.paths`.
+Each data source is loaded one at a time for memory efficiency.
+"""
+function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
+                   outdir::Union{String,Nothing}=nothing,
+                   step_number::Int=1,
+                   verbose::Int=Verbosity.STANDARD)
+    (cfg.path !== nothing || cfg.paths !== nothing) || error("File-based detectfit requires path or paths in config")
+    sources = _resolve_file_sources(cfg)
+
+    v = verbose
+    dir = step_outdir(outdir, step_number, cfg)
+    n_datasets_val = length(sources)
+
+    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg)) [file-based]" n_datasets=n_datasets_val psf_model=cfg.psf_model
+
+    # Setup fitter
+    psf = if cfg.psf_model == :fixed
+        GaussianXYNB(cfg.psf_sigma_fit)
+    elseif cfg.psf_model == :variable
+        GaussianXYNBS()
+    elseif cfg.psf_model == :anisotropic
+        GaussianXYNBSXSY()
+    else
+        error("Unknown psf_model: $(cfg.psf_model)")
+    end
+    fitter = GaussMLEConfig(psf_model=psf, iterations=cfg.iterations, backend=cfg.backend)
+
+    # Process each dataset
+    all_emitters = AbstractEmitter[]
+    n_frames_per_dataset = 0
+    total_rois = 0
+    total_fits = 0
+
+    all_boxes_info = []
+    all_fit_info = []
+
+    sample_images = nothing
+    sample_roi_batch = nothing
+    sample_original_frames = nothing
+    n_sample_frames = 12
+
+    t = @elapsed begin
+        for (ds, source) in enumerate(sources)
+            images = _load_source(source, v)
+            n_frames_ds = size(images, 3)
+            n_frames_per_dataset = max(n_frames_per_dataset, n_frames_ds)
+
+            v >= Verbosity.PROGRESS && @info "  Dataset $ds: $(size(images)) images"
+
+            (roi_batch, boxes_info) = SMLMBoxer.getboxes(images, camera;
+                boxsize = cfg.boxsize,
+                overlap = cfg.overlap,
+                min_photons = cfg.min_photons,
+                psf_sigma = cfg.psf_sigma,
+                backend = cfg.backend
+            )
+            push!(all_boxes_info, boxes_info)
+            n_rois = length(roi_batch)
+            total_rois += n_rois
+
+            (smld_ds, fit_info) = GaussMLE.fit(roi_batch, fitter)
+            push!(all_fit_info, fit_info)
+            n_fits = length(smld_ds.emitters)
+            total_fits += n_fits
+
+            v >= Verbosity.PROGRESS && @info "    $n_rois ROIs -> $n_fits fits (detect: $(round(boxes_info.elapsed_s, digits=2))s/$(boxes_info.backend), fit: $(round(fit_info.elapsed_s, digits=2))s/$(fit_info.backend))"
+
+            # Capture sample data from first dataset for overlay plots
+            if ds == 1 && dir !== nothing
+                n_sample = min(n_sample_frames, n_frames_ds)
+                sample_frame_indices = [round(Int, x) for x in range(1, n_frames_ds, length=n_sample)]
+                sample_images = collect(images[:, :, sample_frame_indices])
+                sample_original_frames = sample_frame_indices
+
+                frame_to_sample = Dict(f => i for (i, f) in enumerate(sample_frame_indices))
+                sample_mask = [f in keys(frame_to_sample) for f in roi_batch.frame_indices]
+                if any(sample_mask)
+                    remapped_frames = [frame_to_sample[f] for f in roi_batch.frame_indices[sample_mask]]
+                    sample_roi_batch = ROIBatch(
+                        roi_batch.data[:, :, sample_mask],
+                        roi_batch.x_corners[sample_mask],
+                        roi_batch.y_corners[sample_mask],
+                        remapped_frames,
+                        roi_batch.camera
+                    )
+                end
+            end
+
+            for e in smld_ds.emitters
+                push!(all_emitters, _with_dataset(e, ds))
+            end
+
+            # Images freed when loop iteration ends (GC)
+        end
+    end
+
+    if isempty(all_emitters)
+        error("No localizations found across all datasets")
+    end
+
+    smld = BasicSMLD(all_emitters, camera, n_frames_per_dataset, n_datasets_val, Dict{String,Any}())
+
+    summary = Dict{Symbol,Any}(
+        :n_datasets => n_datasets_val,
+        :n_rois => total_rois,
+        :n_fits => total_fits,
+        :n_frames_per_dataset => n_frames_per_dataset
+    )
+
+    step_info = (
+        boxes_info = all_boxes_info,
+        fit_info = all_fit_info,
+        elapsed_s = t
+    )
+    record = StepRecord(step_number, cfg, t, summary; info=step_info)
+
+    if dir !== nothing
+        _save_detectfit_outputs!(dir, smld, camera, cfg, v, t, total_rois, total_fits,
+                                 n_datasets_val, n_frames_per_dataset,
+                                 sample_images, sample_roi_batch, sample_original_frames,
+                                 all_boxes_info, all_fit_info)
+    end
+
+    v >= Verbosity.PROGRESS && @info "  -> $total_fits fits from $total_rois ROIs across $n_datasets_val datasets ($(round(t, digits=2))s)"
+
+    return (smld, (step_record=record, boxes_info=all_boxes_info, fit_info=all_fit_info, elapsed_s=t, smld_raw=smld))
+end
+
+# ============================================================
+# File source resolution
+# ============================================================
 
 """Detect H5 file format by checking internal structure"""
 function _detect_h5_format(filepath::String)
@@ -203,121 +387,37 @@ function _detect_h5_format(filepath::String)
 end
 
 """
-Resolve data sources from Analysis and/or config.
+Resolve file-based sources from config options.
 
-Returns (sources, mode) where:
-- mode = :memory → sources are frame ranges into Analysis.data images
-- mode = :file → sources are file paths/ranges for loading
-
-Priority:
-1. If config specifies paths/path, use file-based loading
-2. If Analysis.data has images, use in-memory slicing
-3. Error if no data source available
+Returns a vector of NamedTuples describing each dataset to load.
+Dataset count is determined from the data structure, not from a config field.
 """
-function _resolve_data_sources(a::Analysis, cfg::DetectFitConfig)
-    # Check if config specifies file-based loading
-    if cfg.paths !== nothing || cfg.path !== nothing
-        return _resolve_file_sources(cfg), :file
-    end
-
-    # Check if Analysis has in-memory images
-    if a.data.images !== nothing
-        return _resolve_memory_sources(a), :memory
-    end
-
-    # Check if Analysis has a path in DataSource
-    if a.data.path !== nothing
-        # Create a config-like source from Analysis.data
-        return _resolve_datasource_path(a), :file
-    end
-
-    error("No data source: specify path/paths in DetectFitConfig or provide images to Analysis constructor")
-end
-
-"""Resolve file-based sources from config options"""
 function _resolve_file_sources(cfg::DetectFitConfig)
-    # Option 3: Multiple files
+    # Multiple files: one per dataset
     if cfg.paths !== nothing
         format = cfg.h5_format == :auto ? _detect_h5_format(cfg.paths[1]) : cfg.h5_format
         return [(path=p, frame_range=nothing, format=format) for p in cfg.paths]
     end
 
-    # Must have single path for options 1 & 2
+    # Must have single path
     cfg.path === nothing && error("Must specify path or paths")
 
     # Detect format
     format = cfg.h5_format == :auto ? _detect_h5_format(cfg.path) : cfg.h5_format
 
-    # Option 2: Explicit frame ranges
+    # Explicit frame ranges
     if cfg.dataset_frames !== nothing
         return [(path=cfg.path, frame_range=r, format=format) for r in cfg.dataset_frames]
     end
 
-    # Option 1: Single file with n_datasets
-    if cfg.n_datasets == 1
-        return [(path=cfg.path, frame_range=nothing, format=format)]
-    end
-
-    # Multiple datasets from single file - determine frame ranges
-    if format == :smart
-        info = load_smart_h5_info(cfg.path)
-        n_frames = info.nframes
-    else  # :mic
+    # MIC format: auto-detect blocks, each block is a dataset
+    if format == :mic
         info = load_lidkelab_h5_info(cfg.path)
-        n_frames = info.n_frames
-        # For MIC format: use block-based loading when n_datasets matches n_blocks
-        if cfg.n_datasets == info.n_blocks
-            return [(path=cfg.path, block=ds, format=format) for ds in 1:cfg.n_datasets]
-        end
+        return [(path=cfg.path, block=ds, format=format) for ds in 1:info.n_blocks]
     end
 
-    # Split frames evenly across datasets
-    frames_per_ds = div(n_frames, cfg.n_datasets)
-    sources = []
-    for ds in 1:cfg.n_datasets
-        start_frame = (ds - 1) * frames_per_ds + 1
-        end_frame = ds == cfg.n_datasets ? n_frames : ds * frames_per_ds
-        push!(sources, (path=cfg.path, frame_range=start_frame:end_frame, format=format))
-    end
-    return sources
-end
-
-"""Resolve in-memory sources by slicing Analysis.data into datasets"""
-function _resolve_memory_sources(a::Analysis)
-    n_datasets = a.n_datasets
-    n_frames_per_dataset = a.n_frames_per_dataset
-    images = a.data.images
-
-    sources = []
-    for ds in 1:n_datasets
-        frame_start = (ds - 1) * n_frames_per_dataset + 1
-        frame_end = ds * n_frames_per_dataset
-        push!(sources, (images=images, frame_range=frame_start:frame_end))
-    end
-    return sources
-end
-
-"""Resolve sources when Analysis.data has a path but config doesn't"""
-function _resolve_datasource_path(a::Analysis)
-    path = a.data.path
-    format = _detect_h5_format(path)
-
-    # Use frame_range from DataSource if specified
-    frame_range = a.data.frame_range
-
-    # For now, single dataset from the path
-    return [(path=path, frame_range=frame_range, format=format)]
-end
-
-"""Get images for a dataset from either memory or file"""
-function _get_dataset_images(source, mode::Symbol, v::Int)
-    if mode == :memory
-        # Slice from in-memory images
-        return @view source.images[:, :, source.frame_range]
-    else
-        # Load from file
-        return _load_source(source, v)
-    end
+    # Single dataset (SMART format or MIC with single block)
+    return [(path=cfg.path, frame_range=nothing, format=format)]
 end
 
 """Load images from a data source"""
@@ -352,7 +452,14 @@ function _load_source(source, v)
     end
 end
 
-function _save_detectfit_outputs!(dir, a, cfg, v, t, n_rois, n_fits, sample_images, sample_roi_batch, sample_original_frames, all_boxes_info, all_fit_info)
+# ============================================================
+# Output functions
+# ============================================================
+
+function _save_detectfit_outputs!(dir, smld, camera, cfg, v, t, n_rois, n_fits,
+                                  n_datasets, n_frames_per_dataset,
+                                  sample_images, sample_roi_batch, sample_original_frames,
+                                  all_boxes_info, all_fit_info)
     mkpath(dir)
     _save_config!(dir, cfg)
 
@@ -373,22 +480,22 @@ function _save_detectfit_outputs!(dir, a, cfg, v, t, n_rois, n_fits, sample_imag
     end
 
     if v >= Verbosity.STANDARD
-        _write_detectfit_stats(dir, a, cfg, t, n_rois, n_fits)
-        _save_detectfit_figures(dir, a.smld, cfg)
+        _write_detectfit_stats(dir, smld, cfg, t, n_rois, n_fits, n_datasets, n_frames_per_dataset)
+        _save_detectfit_figures(dir, smld, cfg)
 
         # Generate overlay plots if we have sample data
         if sample_images !== nothing && sample_roi_batch !== nothing
-            _save_detectfit_overlays(dir, a.smld, sample_roi_batch, sample_images, cfg, sample_original_frames)
+            _save_detectfit_overlays(dir, smld, sample_roi_batch, sample_images, cfg, sample_original_frames)
         end
     end
 
     if v >= Verbosity.DETAILED
-        _save_detectfit_detailed(dir, a.smld)
+        _save_detectfit_detailed(dir, smld)
     end
 end
 
-function _write_detectfit_stats(dir, a, cfg, t, n_rois, n_fits)
-    emitters = a.smld.emitters
+function _write_detectfit_stats(dir, smld, cfg, t, n_rois, n_fits, n_datasets, n_frames_per_dataset)
+    emitters = smld.emitters
     n = length(emitters)
 
     photons = [e.photons for e in emitters]
@@ -398,7 +505,7 @@ function _write_detectfit_stats(dir, a, cfg, t, n_rois, n_fits)
     pvalue = [e.pvalue for e in emitters]
 
     # Calculate photobleaching rate from localizations per frame
-    n_frames = a.smld.n_frames
+    n_frames = smld.n_frames
     frame_counts = zeros(Int, n_frames)
     for e in emitters
         if e.frame >= 1 && e.frame <= n_frames
@@ -411,8 +518,8 @@ function _write_detectfit_stats(dir, a, cfg, t, n_rois, n_fits)
     open(filepath, "w") do io
         println(io, "# DetectFit Statistics\n")
         println(io, "## Summary")
-        println(io, "- **Datasets**: $(a.n_datasets)")
-        println(io, "- **Frames/dataset**: $(a.n_frames_per_dataset)")
+        println(io, "- **Datasets**: $n_datasets")
+        println(io, "- **Frames/dataset**: $n_frames_per_dataset")
         println(io, "- **ROIs detected**: $n_rois")
         println(io, "- **Fits**: $n_fits")
         println(io, "- **Time**: $(round(t, digits=2))s ($(round(n_fits/t/1000, digits=1))k fits/s)")
@@ -421,14 +528,14 @@ function _write_detectfit_stats(dir, a, cfg, t, n_rois, n_fits)
         if bleach_result !== nothing && bleach_result.r_squared > 0.5
             println(io, "")
             println(io, "## Photobleaching (from loc/frame decay)")
-            println(io, "- **Model**: N(t) = a + b·exp(-k·t)")
+            println(io, "- **Model**: N(t) = a + b*exp(-k*t)")
             println(io, "- **k_observed**: $(round(bleach_result.k_bleach, sigdigits=3)) /frame")
             println(io, "- **Half-life**: $(round(bleach_result.half_life, digits=0)) frames")
             println(io, "- **a (offset)**: $(round(Int, bleach_result.offset)) loc/frame")
             println(io, "- **b (amplitude)**: $(round(Int, bleach_result.N_0)) loc/frame")
-            println(io, "- **R²**: $(round(bleach_result.r_squared, digits=3))")
+            println(io, "- **R^2**: $(round(bleach_result.r_squared, digits=3))")
             println(io, "")
-            println(io, "*Note: k_observed = k_bleach × P_on. For GenericFluor, divide by duty cycle.*")
+            println(io, "*Note: k_observed = k_bleach * P_on. For GenericFluor, divide by duty cycle.*")
         end
 
         println(io, "")
@@ -501,7 +608,7 @@ function _save_detectfit_figures(dir, smld, cfg)
           align=(:right, :top), space=:relative, fontsize=10)
 
     # Row 2: Precision and P-value
-    prec_hi = cfg.filter_max_precision * 1000  # convert μm to nm
+    prec_hi = cfg.filter_max_precision * 1000  # convert um to nm
     prec_data = vcat(σ_x, σ_y)
     prec98 = quantile(prec_data, 0.98)
     # Ensure rejected region is at least 30% of plot width for visibility
@@ -517,7 +624,7 @@ function _save_detectfit_figures(dir, smld, cfg)
     text!(ax3, 0.97, 0.70, text="σ_x: $(round(median(σ_x), digits=1)) nm\nσ_y: $(round(median(σ_y), digits=1)) nm",
           align=(:right, :top), space=:relative, fontsize=10)
 
-    ax4 = Axis(fig[2, 2], xlabel="log₁₀(p-value)", ylabel="Density", title="P-value Distribution")
+    ax4 = Axis(fig[2, 2], xlabel="log10(p-value)", ylabel="Density", title="P-value Distribution")
     pval_nonzero = pvalue[pvalue .> 0]
     pval_thresh = cfg.filter_min_pvalue
 
@@ -537,7 +644,7 @@ function _save_detectfit_figures(dir, smld, cfg)
             counts[idx] += 1
         end
         max_density = maximum(counts) / (length(log_pval_filtered) * bin_width)
-        # Theory curve (uniform p-values → exponential in log space)
+        # Theory curve (uniform p-values -> exponential in log space)
         u_range = range(0, -pval_lo, length=100)
         theory_pdf = log(10) .* (10.0 .^ (-u_range))
         lines!(ax4, -u_range, theory_pdf, color=:red, linewidth=2, label="Uniform theory")
@@ -571,7 +678,7 @@ function _save_detectfit_figures(dir, smld, cfg)
         vlines!(ax5, [mode_avg * (1 - tol), mode_avg * (1 + tol)], color=THRESHOLD_COLOR, linestyle=:dot, linewidth=2)
         xlims!(ax5, psf02, psf98)
         axislegend(ax5, position=:rt, framevisible=false, labelsize=9)
-        text!(ax5, 0.97, 0.70, text="mode σx: $(round(mode_x, digits=1)) nm\nmode σy: $(round(mode_y, digits=1)) nm\ntol: ±$(round(Int, tol*100))%",
+        text!(ax5, 0.97, 0.70, text="mode σx: $(round(mode_x, digits=1)) nm\nmode σy: $(round(mode_y, digits=1)) nm\ntol: +/-$(round(Int, tol*100))%",
               align=(:right, :top), space=:relative, fontsize=10)
 
     elseif has_psf_iso
@@ -593,7 +700,7 @@ function _save_detectfit_figures(dir, smld, cfg)
         vlines!(ax5, [median(psf_σ)], color=MEDIAN_COLOR, linestyle=:dash, linewidth=2)
         vlines!(ax5, [lo_bound, hi_bound], color=THRESHOLD_COLOR, linestyle=:dot, linewidth=2)
         xlims!(ax5, psf_xmin, psf_xmax)
-        text!(ax5, 0.97, 0.95, text="mode: $(round(mode_σ, digits=1)) nm\nmean: $(round(mean(psf_σ), digits=1)) nm\ntol: ±$(round(Int, tol*100))%",
+        text!(ax5, 0.97, 0.95, text="mode: $(round(mode_σ, digits=1)) nm\nmean: $(round(mean(psf_σ), digits=1)) nm\ntol: +/-$(round(Int, tol*100))%",
               align=(:right, :top), space=:relative, fontsize=10)
     else
         ax5 = Axis(fig[3, 1], xlabel="PSF σ (nm)", ylabel="", title="PSF Width (Fixed)")
@@ -701,7 +808,7 @@ end
 
 """
 Estimate observed bleaching rate from localizations per frame decay.
-Fits N(t) = a + b·exp(-k·t) using Nelder-Mead optimization.
+Fits N(t) = a + b*exp(-k*t) using Nelder-Mead optimization.
 
 Initial guess from linearized fit: estimate offset from tail, then linear regression
 on log(N - offset) to get b and k. Nelder-Mead refines all three parameters.
@@ -773,7 +880,7 @@ function _estimate_bleaching_rate(frame_counts::Vector{Int})
 
     half_life = log(2) / k_fit
 
-    # R² on smoothed data
+    # R^2 on smoothed data
     y_pred = a_fit .+ b_fit .* exp.(-k_fit .* t)
     ss_res = sum((smoothed .- y_pred) .^ 2)
     ss_tot = sum((smoothed .- mean(smoothed)) .^ 2)
@@ -810,15 +917,15 @@ function _save_detectfit_detailed(dir, smld)
         lines!(ax, bleach_result.valid_frames, bleach_result.smoothed,
                color=:blue, linewidth=1.5, label="Smoothed")
 
-        # Plot fitted model: a + b·exp(-k·t)
+        # Plot fitted model: a + b*exp(-k*t)
         k = round(bleach_result.k_bleach, sigdigits=3)
-        τ = round(bleach_result.half_life, digits=0)
+        tau = round(bleach_result.half_life, digits=0)
         a = round(Int, bleach_result.offset)
-        R² = round(bleach_result.r_squared, digits=3)
+        R2 = round(bleach_result.r_squared, digits=3)
         fit_frames = 1:n_frames
         fit_counts = bleach_result.N_0 .* exp.(-bleach_result.k_bleach .* fit_frames) .+ bleach_result.offset
         lines!(ax, fit_frames, fit_counts, color=:red, linewidth=2, linestyle=:dash,
-               label="Fit: k=$k/frame, τ½=$(Int(τ)), a=$a, R²=$R²")
+               label="Fit: k=$k/frame, t1/2=$(Int(tau)), a=$a, R^2=$R2")
 
         # Plot offset line
         hlines!(ax, [bleach_result.offset], color=(:red, 0.3), linestyle=:dot, linewidth=1)

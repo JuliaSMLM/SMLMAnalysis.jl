@@ -3,29 +3,32 @@
 
 High-level integration package for the JuliaSMLM ecosystem.
 
-Provides a step-based pipeline for SMLM analysis with:
-- Typed step configs that mirror upstream package kwargs
-- Checkpointing and reset for interactive exploration
-- Verbosity levels for controlling output detail
+Provides a functional pipeline for SMLM analysis with:
+- Pure step functions: detectfit, filter_step, frameconnect_step, etc.
+- AnalysisConfig for declarative pipeline description
+- analyze() for one-shot execution
 
 # Quick Start
 ```julia
 using SMLMAnalysis
 
-# One-liner with defaults
-result = analyze(images, camera; outdir="output/", n_datasets=4)
+# One-liner with AnalysisConfig
+config = AnalysisConfig(
+    camera = cam,
+    steps = [
+        DetectFitConfig(boxsize=9, psf_model=:variable),
+        FilterConfig(photons=(500.0, Inf)),
+        DriftCorrectConfig(degree=2),
+        RenderConfig(zoom=20, colormap=:inferno),
+    ],
+    outdir = "output/",
+)
+(result, info) = analyze(image_stacks, config)
 
-# Or interactive step-by-step
-a = Analysis(images, camera; outdir="output/", n_datasets=4)
-run_step!(a, DetectFitConfig(boxsize=9, psf_model=:variable))
-run_step!(a, FilterConfig(photons=(500.0, Inf)))
-run_step!(a, FrameConnectConfig(maxframegap=5))
-run_step!(a, DriftCorrectConfig(degree=2))
-run_step!(a, RenderConfig(zoom=20, colormap=:inferno))
-
-# Reset and try different params
-reset!(a, 1)  # Go back to after detectfit
-run_step!(a, FilterConfig(photons=(300.0, Inf)))  # Try looser filter
+# Or use pure step functions directly
+(smld, detectfit_info) = detectfit(image_stacks, camera, DetectFitConfig(boxsize=9))
+(smld, filter_info) = filter_step(smld, FilterConfig(photons=(500.0, Inf)))
+(smld, drift_info) = driftcorrect_step(smld, DriftCorrectConfig(degree=2))
 ```
 
 # Re-exported Types
@@ -37,6 +40,7 @@ Key types from ecosystem packages are re-exported for convenience:
 module SMLMAnalysis
 
 using Dates
+using Logging
 using Statistics
 using TOML
 
@@ -49,7 +53,6 @@ using SMLMFrameConnection
 using SMLMRender
 using SMLMDriftCorrection
 using MicroscopePSFs
-using SMLMBaGoL
 using HDF5
 using JLD2
 using CairoMakie
@@ -65,7 +68,7 @@ export AbstractSMLMConfig, AbstractSMLMInfo
 # Re-export from SMLMSim
 export StaticSMLMConfig, DiffusionSMLMConfig
 export simulate, gen_images, gen_image
-export Nmer2D, Nmer3D, GenericFluor
+export Nmer2D, Nmer3D, Line2D, GenericFluor
 
 # Re-export from SMLMBoxer
 export getboxes
@@ -91,47 +94,43 @@ export HistogramRender, GaussianRender, CircleRender, EllipseRender
 const RenderConfig = SMLMRender.RenderConfig
 export RenderConfig
 
-# Re-export from SMLMBaGoL
-export MAPNResult, run_bagol, estimate_mapn
-
 # ============================================================
 # Core types
 # ============================================================
 include("types.jl")
 export Verbosity
-export DataSource, get_images
-export AnalysisConfig, StepRecord, AnalysisInfo
-export AnalysisCheckpoint, Analysis
+export DataSource, get_images, n_datasets, n_frames_per_dataset
+export AnalysisConfig, AnalysisResult, AnalysisInfo, StepRecord
+export MultiTargetConfig, MultiTargetResult, MultiTargetInfo
 export crop_camera, crop_images
 export step_name
 
 # ============================================================
-# Step configs and run_step! implementations
+# Step configs and pure step functions
 # ============================================================
 include("steps/common.jl")  # Shared helpers for steps
+export step_outdir
 
 include("steps/detectfit.jl")
-export DetectFitConfig
+export DetectFitConfig, detectfit
 
 include("steps/filter.jl")
-export FilterConfig
+export FilterConfig, filter_step
 
 include("steps/frameconnect.jl")
-export FrameConnectConfig
+export FrameConnectConfig, frameconnect_step
 
 include("steps/driftcorrect.jl")
-export DriftCorrectConfig
+export DriftCorrectConfig, driftcorrect_step
 
 include("steps/densityfilter.jl")
-export DensityFilterConfig
+export DensityFilterConfig, densityfilter_step
 
 include("steps/render.jl")
-
-include("steps/bagol.jl")
-export BaGoLConfig
+export render_step
 
 # ============================================================
-# I/O (before analysis.jl - checkpoint_io is used by analysis.jl)
+# I/O
 # ============================================================
 include("io/smld_io.jl")
 export save_smld, load_smld, smld_info
@@ -144,14 +143,17 @@ export load_lidkelab_h5, load_lidkelab_h5_info, load_lidkelab_h5_block
 export load_lidkelab_h5_calibration, load_lidkelab_h5_calibration_for_scmos
 
 include("io/checkpoint_io.jl")
-export resume_analysis
 
 # ============================================================
-# Analysis functions
+# Analysis orchestrator
 # ============================================================
 include("analysis.jl")
-export run_step!, reset!, checkpoint!, debug!
-export analyze, get_analysis_info, get_config
+export analyze
+
+# ============================================================
+# Multi-target orchestration
+# ============================================================
+include("multitarget.jl")
 
 # ============================================================
 # Calibration (used by frameconnect step)

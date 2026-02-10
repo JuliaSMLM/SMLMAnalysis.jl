@@ -137,3 +137,92 @@ function _with_dataset(e::GaussMLE.Emitter2DFitSigmaXY{T}, ds::Int) where T
         e.pvalue, e.frame, ds, e.track_id, e.id
     )
 end
+
+# ============================================================
+# Output helpers (used by all step save functions)
+# ============================================================
+
+"""
+    step_outdir(outdir, step_number, cfg) -> Union{String, Nothing}
+
+Compute output directory for a step: `outdir/02_filter/`.
+Returns nothing if outdir is nothing.
+"""
+function step_outdir(outdir::Union{String,Nothing}, step_number::Int, cfg::SMLMData.AbstractSMLMConfig)
+    outdir === nothing && return nothing
+    joinpath(outdir, "$(lpad(step_number, 2, '0'))_$(step_name(cfg))")
+end
+
+"""Save step config to `config.toml` in the step output directory."""
+function _save_config!(dir::String, cfg::SMLMData.AbstractSMLMConfig)
+    filepath = joinpath(dir, "config.toml")
+    open(filepath, "w") do io
+        println(io, "# $(nameof(typeof(cfg)))")
+        println(io, "type = \"$(nameof(typeof(cfg)))\"")
+        for f in fieldnames(typeof(cfg))
+            v = getfield(cfg, f)
+            if v isa String
+                println(io, "$f = \"$v\"")
+            elseif v isa Symbol
+                println(io, "$f = \"$v\"")
+            elseif v !== nothing
+                println(io, "$f = $v")
+            end
+        end
+    end
+end
+
+"""
+    _save_info!(dir::String, info; section::String="")
+
+Write upstream Info struct fields to `info.toml` in TOML format.
+
+Writes scalar fields (numbers, bools, strings, symbols, tuples of scalars).
+Skips complex fields (arrays, dicts, structs like BasicSMLD, models).
+
+When `section` is empty, writes a fresh file with type header.
+When `section` is provided, appends a `[section]` block.
+"""
+function _save_info!(dir::String, info; section::String="")
+    filepath = joinpath(dir, "info.toml")
+    open(filepath, section == "" ? "w" : "a") do io
+        if section == ""
+            println(io, "# Upstream package info")
+            println(io, "type = \"$(nameof(typeof(info)))\"")
+        else
+            println(io, "\n[$section]")
+        end
+        for f in fieldnames(typeof(info))
+            v = getfield(info, f)
+            _write_info_field!(io, f, v)
+        end
+    end
+end
+
+"""Write a single field to info.toml, skipping complex types."""
+function _write_info_field!(io::IO, name::Symbol, v::Number)
+    println(io, "$name = $v")
+end
+function _write_info_field!(io::IO, name::Symbol, v::Bool)
+    println(io, "$name = $v")
+end
+function _write_info_field!(io::IO, name::Symbol, v::String)
+    println(io, "$name = \"$v\"")
+end
+function _write_info_field!(io::IO, name::Symbol, v::Symbol)
+    println(io, "$name = \"$v\"")
+end
+function _write_info_field!(io::IO, name::Symbol, v::Nothing)
+    println(io, "$name = \"nothing\"")
+end
+function _write_info_field!(io::IO, name::Symbol, v::Tuple)
+    # Only write tuples of scalars
+    if all(x -> x isa Union{Number, Bool, String, Symbol}, v)
+        vals = join([x isa String || x isa Symbol ? "\"$x\"" : "$x" for x in v], ", ")
+        println(io, "$name = [$vals]")
+    end
+    # Skip tuples containing complex types
+end
+function _write_info_field!(io::IO, ::Symbol, ::Any)
+    # Skip: AbstractVector, AbstractArray, AbstractDict, complex structs
+end

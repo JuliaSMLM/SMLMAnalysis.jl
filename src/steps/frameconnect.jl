@@ -2,12 +2,27 @@
 Frame connection step - wraps SMLMFrameConnection.frameconnect
 """
 
+"""
+    FrameConnectConfig <: AbstractSMLMConfig
+
+Frame connection step. Links localizations of the same emitter across
+consecutive frames using SMLMFrameConnection, then optionally calibrates
+uncertainties.
+
+# Keywords
+- `max_frame_gap`: Maximum dark frames allowed in a track (default: 5)
+- `max_sigma_dist`: Spatial matching threshold in sigma (default: 5.0)
+- `calibrate`: Run uncertainty calibration after connection (default: `true`)
+- `clamp_k_to_one`: Prevent CRLB scale factor k < 1 (default: `true`)
+- `filter_high_chi2`: Remove tracks with high chi-squared pairs (default: `false`)
+- `chi2_filter_threshold`: Chi-squared threshold for track removal (default: 6.0)
+"""
 @kwdef struct FrameConnectConfig <: SMLMData.AbstractSMLMConfig
     # SMLMFrameConnection.frameconnect kwargs
-    maxframegap::Int = 5
-    nsigmadev::Float64 = 5.0
-    nnearestclusters::Int = 2
-    nmaxnn::Int = 2
+    max_frame_gap::Int = 5
+    max_sigma_dist::Float64 = 5.0
+    n_density_neighbors::Int = 2
+    max_neighbors::Int = 2
     # Extra options
     calibrate::Bool = true  # Run uncertainty calibration after
     clamp_k_to_one::Bool = true  # Don't allow k < 1 (CRLB is theoretical lower bound)
@@ -16,43 +31,48 @@ Frame connection step - wraps SMLMFrameConnection.frameconnect
     chi2_filter_threshold::Float64 = 6.0  # ~99.7% of chi²(2) is below this
 end
 
-function run_step!(a::Analysis, cfg::FrameConnectConfig)
-    a.smld === nothing && error("Must run Fit first")
-    a.step_counter += 1
-    v = a.verbose
-    dir = _stepdir(a, cfg)
+"""
+    frameconnect_step(smld, cfg; outdir, step_number, verbose) -> (combined_smld, info_nt)
 
-    v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(step_name(cfg))" maxframegap=cfg.maxframegap
+Run frame connection on `smld`, returning the combined (recombined) SMLD as the
+primary result, plus a NamedTuple with step metadata.
 
-    n_before = length(a.smld.emitters)
+# Returns
+`(combined_smld, (step_record, smld_connected, calibration_result, connect_info))`
+"""
+function frameconnect_step(smld::BasicSMLD, cfg::FrameConnectConfig;
+                           outdir::Union{String,Nothing}=nothing,
+                           step_number::Int=0,
+                           verbose::Int=Verbosity.STANDARD)
+    v = verbose
+    dir = step_outdir(outdir, step_number, cfg)
 
-    # Tuple-pattern: returns (combined, ConnectInfo) where ConnectInfo contains .connected
-    t = @elapsed (combined, connect_info) = SMLMFrameConnection.frameconnect(a.smld;
-        maxframegap = cfg.maxframegap,
-        nsigmadev = cfg.nsigmadev,
-        nnearestclusters = cfg.nnearestclusters,
-        nmaxnn = cfg.nmaxnn
+    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" max_frame_gap=cfg.max_frame_gap
+
+    n_before = length(smld.emitters)
+
+    # Tuple-pattern: returns (combined, FrameConnectInfo) where FrameConnectInfo contains .connected
+    t = @elapsed (combined, connect_info) = SMLMFrameConnection.frameconnect(smld;
+        max_frame_gap = cfg.max_frame_gap,
+        max_sigma_dist = cfg.max_sigma_dist,
+        n_density_neighbors = cfg.n_density_neighbors,
+        max_neighbors = cfg.max_neighbors
     )
 
-    a.smld_connected = connect_info.connected
-    a.smld = combined
+    smld_connected = connect_info.connected
 
     # Optional chi² filtering to remove tracks with high chi² pairs (likely double-emitter fits)
     n_tracks_filtered = 0
     n_locs_filtered = 0
     if cfg.filter_high_chi2
-        n_tracks_before = length(a.smld.emitters)
-        n_locs_before = length(a.smld_connected.emitters)
-
-        a.smld_connected, a.smld, n_tracks_filtered = _filter_high_chi2_tracks(
-            a.smld_connected, cfg.chi2_filter_threshold)
-
-        n_locs_filtered = n_locs_before - length(a.smld_connected.emitters)
-
+        n_locs_before = length(smld_connected.emitters)
+        smld_connected, combined, n_tracks_filtered = _filter_high_chi2_tracks(
+            smld_connected, cfg.chi2_filter_threshold)
+        n_locs_filtered = n_locs_before - length(smld_connected.emitters)
         v >= Verbosity.PROGRESS && @info "  Chi² filter: removed $n_tracks_filtered tracks ($n_locs_filtered localizations)"
     end
 
-    n_after = length(a.smld.emitters)
+    n_after = length(combined.emitters)
     compression = n_before / n_after
 
     summary = Dict{Symbol,Any}(
@@ -66,19 +86,19 @@ function run_step!(a::Analysis, cfg::FrameConnectConfig)
     # Optional uncertainty calibration
     calibration_result = nothing
     if cfg.calibrate
-        calibration_result = _analyze_and_calibrate!(a, cfg, summary)
+        combined, calibration_result = _analyze_and_calibrate(smld_connected, combined, cfg, summary)
     end
 
-    # Include connect_info in step record (tuple-pattern)
-    _record!(a, cfg, t, summary; info=connect_info)
-    _checkpoint!(a)
+    record = StepRecord(step_number, cfg, t, summary; info=connect_info)
 
     if dir !== nothing
-        _save_step_outputs!(dir, a, cfg, v, t, n_before, n_after, calibration_result, summary, connect_info)
+        _save_frameconnect_outputs!(dir, cfg, v, t, n_before, n_after,
+                                    smld_connected, smld.n_frames,
+                                    calibration_result, summary, connect_info)
     end
 
     v >= Verbosity.PROGRESS && @info "  → $n_after tracks ($(round(compression, digits=1))x) ($(round(t, digits=2))s)"
-    a
+    (combined, (step_record=record, smld_connected=smld_connected, calibration_result=calibration_result, connect_info=connect_info))
 end
 
 """
@@ -148,11 +168,20 @@ function _filter_high_chi2_tracks(smld_connected, threshold::Float64)
     return filtered_connected, filtered_combined, n_removed
 end
 
-function _analyze_and_calibrate!(a::Analysis, cfg::FrameConnectConfig, summary::Dict{Symbol,Any})
-    drift_analysis = analyze_frameconnect_drift(a.smld_connected)
+"""
+    _analyze_and_calibrate(smld_connected, smld_combined, cfg, summary) -> (calibrated_smld, drift_analysis)
+
+Run uncertainty calibration on connected tracks. Pure function -- returns the
+calibrated SMLD and drift analysis result without mutating anything except the
+`summary` dict (for logging).
+"""
+function _analyze_and_calibrate(smld_connected::BasicSMLD, smld_combined::BasicSMLD,
+                                 cfg::FrameConnectConfig, summary::Dict{Symbol,Any})
+    drift_analysis = analyze_frameconnect_drift(smld_connected)
     summary[:mean_chi2] = round(drift_analysis.mean_chi2, digits=2)
 
     cal = drift_analysis.calibration
+    calibrated_smld = smld_combined
     if !isnan(cal.A) && !isnan(cal.B)
         # σ_motion: always clamp A >= 0 (negative motion variance is unphysical)
         A_clamped = cal.A < 0.0
@@ -167,7 +196,7 @@ function _analyze_and_calibrate!(a::Analysis, cfg::FrameConnectConfig, summary::
 
         σ_motion = σ_motion_nm / 1000.0
 
-        _, a.smld = apply_uncertainty_calibration(a.smld_connected, σ_motion, k_scale)
+        _, calibrated_smld = apply_uncertainty_calibration(smld_connected, σ_motion, k_scale)
 
         summary[:k_scale] = round(k_scale, digits=2)
         summary[:sigma_motion_nm] = round(σ_motion_nm, digits=1)
@@ -176,22 +205,24 @@ function _analyze_and_calibrate!(a::Analysis, cfg::FrameConnectConfig, summary::
         summary[:A_raw] = cal.A
     end
 
-    drift_analysis
+    (calibrated_smld, drift_analysis)
 end
 
-function _save_step_outputs!(dir::String, a::Analysis, cfg::FrameConnectConfig, v::Int, t::Float64,
-                             n_before::Int, n_after::Int, cal_result, summary, connect_info)
+function _save_frameconnect_outputs!(dir::String, cfg::FrameConnectConfig, v::Int, t::Float64,
+                             n_before::Int, n_after::Int,
+                             smld_connected::BasicSMLD, n_frames_per_dataset::Int,
+                             cal_result, summary, connect_info)
     mkpath(dir)
     _save_config!(dir, cfg)
     _save_info!(dir, connect_info)
 
     if v >= Verbosity.STANDARD
-        koff_stats = _save_frameconnect_figures(dir, a.smld_connected, cal_result)
+        koff_stats = _save_frameconnect_figures(dir, smld_connected, cal_result)
         _write_frameconnect_stats(dir, cfg, n_before, n_after, t, cal_result, summary, koff_stats)
         # Calibration and drift plots at STANDARD level
         if cal_result !== nothing
             _save_calibration_plot(dir, cal_result, summary)
-            _save_drift_jitter_plot(dir, cal_result, a.smld.n_frames)
+            _save_drift_jitter_plot(dir, cal_result, n_frames_per_dataset)
         end
     end
 
@@ -221,8 +252,8 @@ function _write_frameconnect_stats(dir, cfg, n_before, n_after, t, cal_result, s
         end
         println(io, "")
         println(io, "## Parameters")
-        println(io, "- maxframegap: $(cfg.maxframegap)")
-        println(io, "- nsigmadev: $(cfg.nsigmadev)")
+        println(io, "- max_frame_gap: $(cfg.max_frame_gap)")
+        println(io, "- max_sigma_dist: $(cfg.max_sigma_dist)")
 
         # Chi² filtering info
         if cfg.filter_high_chi2

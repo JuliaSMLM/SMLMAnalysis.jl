@@ -2,6 +2,19 @@
 Filtering step - filters localizations by various criteria
 """
 
+"""
+    FilterConfig <: AbstractSMLMConfig
+
+Quality-based filtering of localizations. All criteria use `(min, max)` tuples.
+
+# Keywords
+- `photons`: Photon count range, e.g. `(500.0, Inf)`
+- `precision`: Localization precision range in microns, e.g. `(0.0, 0.007)`
+- `pvalue`: Goodness-of-fit p-value range, e.g. `(1e-3, 1.0)`
+- `psf_sigma`: PSF width filter. `:auto` uses mode ± 10%, or explicit `(min, max)` in microns
+
+All filters default to `nothing` (disabled).
+"""
 @kwdef struct FilterConfig <: SMLMData.AbstractSMLMConfig
     # All filters use (min, max) tuples. Use -Inf/Inf for unbounded.
     photons::Union{Tuple{Float64, Float64}, Nothing} = nothing      # (min, max)
@@ -11,32 +24,51 @@ Filtering step - filters localizations by various criteria
     psf_sigma::Union{Symbol, Tuple{Float64, Float64}, Nothing} = nothing
 end
 
-function run_step!(a::Analysis, cfg::FilterConfig)
-    a.smld === nothing && error("Must run Fit first")
-    a.step_counter += 1
-    v = a.verbose
-    dir = _stepdir(a, cfg)
+"""
+    filter_step(smld, cfg; smld_raw=nothing, outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)
 
-    v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(step_name(cfg))" photons=cfg.photons precision=cfg.precision
+Filter localizations by quality criteria. Returns `(filtered_smld, info)`.
 
-    n_before = length(a.smld.emitters)
-    t = @elapsed a.smld = _filter_smld(a.smld, cfg)
-    n_after = length(a.smld.emitters)
+# Arguments
+- `smld::BasicSMLD`: Input localizations
+- `cfg::FilterConfig`: Filter criteria
+
+# Keyword Arguments
+- `smld_raw`: Original unfiltered SMLD for detailed output diagnostics
+- `outdir`: Output directory (nothing to skip file output)
+- `step_number`: Step number for output directory naming
+- `verbose`: Verbosity level
+
+# Returns
+`(filtered_smld, (step_record, n_before, n_after))`
+"""
+function filter_step(smld::BasicSMLD, cfg::FilterConfig;
+                     smld_raw::Union{BasicSMLD,Nothing}=nothing,
+                     outdir::Union{String,Nothing}=nothing,
+                     step_number::Int=0,
+                     verbose::Int=Verbosity.STANDARD)
+    v = verbose
+    dir = step_outdir(outdir, step_number, cfg)
+
+    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" photons=cfg.photons precision=cfg.precision
+
+    n_before = length(smld.emitters)
+    t = @elapsed filtered = _filter_smld(smld, cfg)
+    n_after = length(filtered.emitters)
 
     summary = Dict{Symbol,Any}(
         :n_before => n_before,
         :n_after => n_after,
         :acceptance => round(n_after / n_before, digits=3)
     )
-    _record!(a, cfg, t, summary)
-    _checkpoint!(a; save=false)  # In-memory only; filter is fast to recompute
+    record = StepRecord(step_number, cfg, t, summary)
 
     if dir !== nothing
-        _save_step_outputs!(dir, a, cfg, v, t, n_before, n_after)
+        _save_filter_outputs!(dir, cfg, v, t, n_before, n_after, smld_raw, filtered)
     end
 
     v >= Verbosity.PROGRESS && @info "  → $n_after / $n_before ($(round(t, digits=2))s)"
-    a
+    (filtered, (step_record=record, n_before=n_before, n_after=n_after))
 end
 
 function _filter_smld(smld::BasicSMLD, cfg::FilterConfig)
@@ -97,7 +129,9 @@ function _get_psf_sigma_bounds(range_spec, values::Vector)
     end
 end
 
-function _save_step_outputs!(dir::String, a::Analysis, cfg::FilterConfig, v::Int, t::Float64, n_before::Int, n_after::Int)
+function _save_filter_outputs!(dir::String, cfg::FilterConfig, v::Int, t::Float64,
+                               n_before::Int, n_after::Int,
+                               smld_raw::Union{BasicSMLD,Nothing}, smld_filtered::BasicSMLD)
     mkpath(dir)
     _save_config!(dir, cfg)
 
@@ -105,8 +139,8 @@ function _save_step_outputs!(dir::String, a::Analysis, cfg::FilterConfig, v::Int
         _write_filter_stats(dir, cfg, n_before, n_after, t)
     end
 
-    if v >= Verbosity.DETAILED
-        _save_filter_detailed(dir, a.smld_raw, a.smld, cfg)
+    if v >= Verbosity.DETAILED && smld_raw !== nothing
+        _save_filter_detailed(dir, smld_raw, smld_filtered, cfg)
     end
 end
 

@@ -2,6 +2,22 @@
 Drift correction step - wraps SMLMDriftCorrection.driftcorrect
 """
 
+"""
+    DriftCorrectConfig <: AbstractSMLMConfig
+
+Drift correction step using entropy-based optimization from SMLMDriftCorrection.
+
+# Keywords
+- `degree`: Polynomial degree for drift model (default: 2)
+- `continuous`: `true` for continuous acquisition, `false` for registered multi-dataset (default: `false`)
+- `n_chunks`: Split continuous data into N chunks, 0 = no chunking (default: 0)
+- `chunk_frames`: Alternative chunking by frames per chunk (default: 0)
+- `quality`: `:singlepass` (fast) or `:iterative` (default: `:singlepass`)
+- `auto_roi`: Automatically select dense ROI for estimation (default: `true`)
+- `intershift_threshold_nm`: Warning threshold for inter-dataset shifts (default: 500.0)
+
+See the [Guide](@ref) for details on continuous vs registered modes.
+"""
 @kwdef struct DriftCorrectConfig <: SMLMData.AbstractSMLMConfig
     # SMLMDriftCorrection.driftcorrect kwargs
     degree::Int = 2
@@ -21,11 +37,21 @@ Drift correction step - wraps SMLMDriftCorrection.driftcorrect
     intershift_threshold_nm::Float64 = 500.0  # nm threshold for warning
 end
 
-function run_step!(a::Analysis, cfg::DriftCorrectConfig)
-    a.smld === nothing && error("Must run Fit first")
-    a.step_counter += 1
-    v = a.verbose
-    dir = _stepdir(a, cfg)
+"""
+    driftcorrect_step(smld, cfg; outdir, step_number, verbose) -> (corrected_smld, info_nt)
+
+Run drift correction on `smld`, returning the corrected SMLD as the primary
+result, plus a NamedTuple with step metadata.
+
+# Returns
+`(corrected_smld, (step_record, drift_model, drift_info))`
+"""
+function driftcorrect_step(smld::BasicSMLD, cfg::DriftCorrectConfig;
+                           outdir::Union{String,Nothing}=nothing,
+                           step_number::Int=0,
+                           verbose::Int=Verbosity.STANDARD)
+    v = verbose
+    dir = step_outdir(outdir, step_number, cfg)
 
     # Determine dataset mode
     dataset_mode = cfg.continuous ? :continuous : :registered
@@ -33,13 +59,13 @@ function run_step!(a::Analysis, cfg::DriftCorrectConfig)
     # Log info
     if cfg.n_chunks > 0 || cfg.chunk_frames > 0
         chunks_info = cfg.n_chunks > 0 ? "$(cfg.n_chunks) chunks" : "$(cfg.chunk_frames) frames/chunk"
-        v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(step_name(cfg))" degree=cfg.degree continuous=cfg.continuous chunks=chunks_info
+        v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" degree=cfg.degree continuous=cfg.continuous chunks=chunks_info
     else
-        v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] $(step_name(cfg))" degree=cfg.degree continuous=cfg.continuous
+        v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" degree=cfg.degree continuous=cfg.continuous
     end
 
     # Tuple-pattern: returns (corrected_smld, DriftInfo) where DriftInfo contains .model
-    t = @elapsed (corrected_smld, drift_info) = SMLMDriftCorrection.driftcorrect(a.smld;
+    t = @elapsed (corrected_smld, drift_info) = SMLMDriftCorrection.driftcorrect(smld;
         degree = cfg.degree,
         dataset_mode = dataset_mode,
         n_chunks = cfg.n_chunks,
@@ -50,18 +76,16 @@ function run_step!(a::Analysis, cfg::DriftCorrectConfig)
         verbose = v >= Verbosity.DETAILED ? 1 : 0
     )
 
-    a.smld = corrected_smld
-    a.drift_model = drift_info.model
-
-    n_datasets = a.drift_model.ndatasets
-    n_frames = a.smld.n_frames
+    drift_model = drift_info.model
+    n_datasets_val = drift_model.ndatasets
+    n_frames = smld.n_frames
 
     # Calculate inter-shift magnitudes (in nm)
-    inter_shifts = _calc_inter_shifts(a.drift_model)
-    max_intershift = n_datasets > 1 ? maximum(inter_shifts[2:end]) : 0.0
+    inter_shifts = _calc_inter_shifts(drift_model)
+    max_intershift = n_datasets_val > 1 ? maximum(inter_shifts[2:end]) : 0.0
 
     # Calculate max intra-dataset drift
-    max_drift = _calc_max_drift(a.drift_model, n_frames; n_chunks=cfg.n_chunks)
+    max_drift = _calc_max_drift(drift_model, n_frames; n_chunks=cfg.n_chunks)
 
     # Diagnostic warnings
     if cfg.warn_large_intershift && !cfg.continuous && max_intershift > cfg.intershift_threshold_nm
@@ -80,23 +104,22 @@ function run_step!(a::Analysis, cfg::DriftCorrectConfig)
     summary = Dict{Symbol,Any}(
         :max_drift_nm => round(max_drift, digits=1),
         :max_intershift_nm => round(max_intershift, digits=1),
-        :n_datasets => n_datasets,
+        :n_datasets => n_datasets_val,
         :n_frames => n_frames,
         :continuous => cfg.continuous,
         :quality => cfg.quality,
         :converged => converged,
         :iterations => iterations
     )
-    # Include drift_info in step record (tuple-pattern)
-    _record!(a, cfg, t, summary; info=drift_info)
-    _checkpoint!(a)
+
+    record = StepRecord(step_number, cfg, t, summary; info=drift_info)
 
     if dir !== nothing
-        _save_step_outputs!(dir, a, cfg, v, t, max_drift, inter_shifts, n_frames, converged, iterations, drift_info)
+        _save_driftcorrect_outputs!(dir, drift_model, cfg, v, t, max_drift, inter_shifts, n_frames, converged, iterations, drift_info)
     end
 
     v >= Verbosity.PROGRESS && @info "  → max drift $(round(max_drift, digits=1))nm, inter-shift $(round(max_intershift, digits=1))nm ($(round(t, digits=2))s)"
-    a
+    (corrected_smld, (step_record=record, drift_model=drift_model, drift_info=drift_info))
 end
 
 """Calculate inter-dataset shift magnitudes in nm (Euclidean distance)"""
@@ -126,7 +149,7 @@ function _calc_max_drift(drift_model, n_frames; n_chunks::Int=0)
     max_drift
 end
 
-function _save_step_outputs!(dir::String, a::Analysis, cfg::DriftCorrectConfig, v::Int, t::Float64,
+function _save_driftcorrect_outputs!(dir::String, drift_model, cfg::DriftCorrectConfig, v::Int, t::Float64,
                              max_drift::Float64, inter_shifts::Vector{Float64}, n_frames::Int,
                              converged::Union{Bool,Nothing}, iterations::Union{Int,Nothing}, drift_info)
     mkpath(dir)
@@ -134,12 +157,12 @@ function _save_step_outputs!(dir::String, a::Analysis, cfg::DriftCorrectConfig, 
     _save_info!(dir, drift_info)
 
     if v >= Verbosity.STANDARD
-        _write_drift_stats(dir, cfg, a.drift_model, t, max_drift, inter_shifts, n_frames, converged, iterations)
-        _save_drift_figures(dir, a.drift_model, n_frames, cfg.continuous; n_chunks=cfg.n_chunks)
+        _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n_frames, converged, iterations)
+        _save_drift_figures(dir, drift_model, n_frames, cfg.continuous; n_chunks=cfg.n_chunks)
     end
 
     if v >= Verbosity.DETAILED
-        _save_drift_detailed(dir, a.drift_model, n_frames, inter_shifts; n_chunks=cfg.n_chunks)
+        _save_drift_detailed(dir, drift_model, n_frames, inter_shifts; n_chunks=cfg.n_chunks)
     end
 end
 

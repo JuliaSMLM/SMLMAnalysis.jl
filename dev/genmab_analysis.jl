@@ -5,9 +5,9 @@
 # stage registration.
 #
 # Data: A431 cells + IgG (2F8 wild-type, E345R, E430G, RGY mutants) + C1q
-# 20 datasets × 5000 frames = 100k frames per cell
+# 20 datasets x 5000 frames = 100k frames per cell
 #
-# Pipeline: detectfit → filter → frameconnect → drift → densityfilter → render
+# Pipeline: detectfit -> filter -> frameconnect -> drift -> densityfilter -> render
 
 using SMLMAnalysis
 
@@ -24,7 +24,7 @@ h5file = "/mnt/nas/cellpath/Genmab/Data/20250603_A431_SaturatingIgG10min+C1q/A43
 info = load_lidkelab_h5_info(h5file)
 println("Data: $(info.n_frames) frames in $(info.n_blocks) datasets")
 println("Frames per dataset: $(info.frames_per_block[1])")
-println("Image size: $(info.width)×$(info.height)")
+println("Image size: $(info.width)x$(info.height)")
 println("File size: $(round(info.file_size_gb, digits=2)) GB")
 
 # =============================================================================
@@ -42,85 +42,59 @@ println("Calibration: gain=$(round(median(cal.gain), digits=3)), offset=$(round(
 # SCMOSCamera(nx, ny, pixel_size, readnoise; offset, gain, qe)
 camera = SCMOSCamera(info.width, info.height, pixel_size, cal.readnoise;
     offset = cal.offset, gain = cal.gain, qe = 0.82f0)
-println("Camera: $(info.width)×$(info.height), $(pixel_size*1000)nm pixels (per-pixel calibration)")
+println("Camera: $(info.width)x$(info.height), $(pixel_size*1000)nm pixels (per-pixel calibration)")
 
 # =============================================================================
-# Analysis Setup
+# Analysis Setup - File-based (MIC format auto-detects blocks as datasets)
 # =============================================================================
 outdir = joinpath(@__DIR__, "output", "hexabody_dstorm")
 
-# Create Analysis without data (data comes from DetectFitConfig)
-a = Analysis(camera; outdir, verbose=Verbosity.DETAILED, checkpoint=true)  # Disk checkpoints after detectfit/frameconnect/drift only
+config = AnalysisConfig(
+    camera = camera,
+    steps = [
+        DetectFitConfig(
+            path = h5file,
+            h5_format = :mic,
+            boxsize = 9,
+            min_photons = 500.0,
+            psf_sigma = 0.130,
+            backend = :auto,
+            psf_model = :variable,
+            iterations = 20,
+            filter_min_photons = 500.0,
+            filter_max_precision = 0.007,
+            filter_min_pvalue = 1e-6
+        ),
+        FilterConfig(
+            photons = (500.0, Inf),
+            precision = (0.0, 0.007),
+            pvalue = (1e-6, 1.0)
+        ),
+        FrameConnectConfig(
+            max_frame_gap = 5,
+            max_sigma_dist = 5.0,
+            calibrate = true
+        ),
+        DriftCorrectConfig(
+            degree = 2,
+            continuous = false,
+            quality = :iterative
+        ),
+        DensityFilterConfig(
+            n_sigma = 2.0,
+            min_neighbors = :auto
+        ),
+        RenderConfig(zoom=20, colormap=:inferno),
+    ],
+    outdir = outdir,
+    verbose = Verbosity.DETAILED,
+)
+
 println("Output: $outdir")
 println()
 
-# =============================================================================
-# DetectFit - Multi-dataset registered acquisition
-# =============================================================================
-println("--- DETECTFIT ---")
-run_step!(a, DetectFitConfig(
-    path = h5file,
-    h5_format = :mic,
-    n_datasets = info.n_blocks,  # 20 datasets
-    # Detection
-    boxsize = 9,
-    min_photons = 500.0,
-    psf_sigma = 0.130,  # ~1.3 pixels at 97.8nm
-    backend = :auto,
-    # Fitting - variable sigma for dSTORM
-    psf_model = :variable,
-    iterations = 20,
-    # Filter preview (for fit_quality plot)
-    filter_min_photons = 500.0,
-    filter_max_precision = 0.007,  # 7nm
-    filter_min_pvalue = 1e-6
-))
-
-# =============================================================================
-# Filter - Strict filtering with per-pixel calibration
-# =============================================================================
-println("\n--- FILTER ---")
-run_step!(a, FilterConfig(
-    photons = (500.0, Inf),    # 500 photon minimum
-    precision = (0.0, 0.007),  # max 7nm precision (tight filter)
-    pvalue = (1e-6, 1.0),      # p-value filter (per-pixel cal should work)
-    psf_sigma = nothing        # No PSF filter
-))
-
-# =============================================================================
-# Frame Connection + Uncertainty Calibration
-# =============================================================================
-println("\n--- FRAMECONNECT ---")
-run_step!(a, FrameConnectConfig(
-    maxframegap = 5,
-    nsigmadev = 5.0,
-    calibrate = true
-))
-
-# =============================================================================
-# Drift Correction - Registered mode (TYPE 2)
-# =============================================================================
-println("\n--- DRIFTCORRECT ---")
-run_step!(a, DriftCorrectConfig(
-    degree = 2,
-    continuous = false,  # TYPE 2: registered acquisitions
-    quality = :iterative
-))
-
-# =============================================================================
-# Density Filter
-# =============================================================================
-println("\n--- DENSITYFILTER ---")
-run_step!(a, DensityFilterConfig(
-    n_sigma = 2.0,
-    min_neighbors = :auto
-))
-
-# =============================================================================
-# Render
-# =============================================================================
-println("\n--- RENDER ---")
-run_step!(a, RenderConfig(zoom=20, colormap=:inferno))
+# File-based: analyze(config) loads data from DetectFitConfig.path
+(result, analysis_info) = analyze(config)
 
 # =============================================================================
 # Summary
@@ -128,12 +102,10 @@ run_step!(a, RenderConfig(zoom=20, colormap=:inferno))
 println("\n" * "="^60)
 println("ANALYSIS COMPLETE")
 println("="^60)
-println(a)
 
 # Quick stats
-if a.smld !== nothing && length(a.smld.emitters) > 0
-    using Statistics
-    emitters = a.smld.emitters
+if length(result.smld.emitters) > 0
+    emitters = result.smld.emitters
     photons = [e.photons for e in emitters]
     σ_x = [e.σ_x for e in emitters]
     σ_y = [e.σ_y for e in emitters]

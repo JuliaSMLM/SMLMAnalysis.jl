@@ -3,21 +3,39 @@ Render step - dispatches directly on SMLMRender.RenderConfig.
 
 Each render is one step call with its own numbered output folder:
 ```julia
-run_step!(a, RenderConfig(zoom=20, colormap=:inferno))
-run_step!(a, RenderConfig(zoom=10, colormap=:turbo, color_by=:absolute_frame))
+render_step(smld, RenderConfig(zoom=20, colormap=:inferno))
+render_step(smld, RenderConfig(zoom=10, colormap=:turbo, color_by=:absolute_frame))
 ```
 """
 
 # Override step_name so dirs are "07_render" not "07_renderconfig"
 step_name(::SMLMRender.RenderConfig) = "render"
 
-function run_step!(a::Analysis, cfg::SMLMRender.RenderConfig)
-    a.smld === nothing && error("Must run Fit first")
-    a.step_counter += 1
-    v = a.verbose
-    dir = _stepdir(a, cfg)
+"""
+    render_step(smld, cfg; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)
 
-    v >= Verbosity.PROGRESS && @info "[$(a.step_counter)] render" zoom=cfg.zoom colormap=cfg.colormap
+Render localizations to a super-resolution image. Returns `(render_image, info)`.
+
+# Arguments
+- `smld::BasicSMLD`: Input localizations
+- `cfg::SMLMRender.RenderConfig`: Render configuration
+
+# Keyword Arguments
+- `outdir`: Output directory (nothing to skip file output)
+- `step_number`: Step number for output directory naming
+- `verbose`: Verbosity level
+
+# Returns
+`(render_image, (step_record, render_info))`
+"""
+function render_step(smld::BasicSMLD, cfg::SMLMRender.RenderConfig;
+                     outdir::Union{String,Nothing}=nothing,
+                     step_number::Int=0,
+                     verbose::Int=Verbosity.STANDARD)
+    v = verbose
+    dir = step_outdir(outdir, step_number, cfg)
+
+    v >= Verbosity.PROGRESS && @info "[$step_number] render" zoom=cfg.zoom colormap=cfg.colormap
 
     # Set filename into config if output dir exists and user didn't set one
     render_cfg = if dir !== nothing && cfg.filename === nothing
@@ -40,19 +58,18 @@ function run_step!(a::Analysis, cfg::SMLMRender.RenderConfig)
     end
 
     # Tuple-pattern: returns (image, RenderInfo)
-    local render_info
+    local render_info, render_image
     t = @elapsed begin
-        (_, render_info) = SMLMRender.render(a.smld, render_cfg)
+        (render_image, render_info) = SMLMRender.render(smld, render_cfg)
     end
 
-    n_locs = length(a.smld.emitters)
+    n_locs = length(smld.emitters)
     summary = Dict{Symbol,Any}(
         :n_locs => n_locs,
         :strategy => render_info.strategy,
         :output_size => render_info.output_size
     )
-
-    _record!(a, cfg, t, summary; info=render_info)
+    record = StepRecord(step_number, cfg, t, summary; info=render_info)
 
     if dir !== nothing
         mkpath(dir)
@@ -64,7 +81,7 @@ function run_step!(a::Analysis, cfg::SMLMRender.RenderConfig)
     end
 
     v >= Verbosity.PROGRESS && @info "  → render $(render_info.output_size) ($(round(t, digits=2))s)"
-    a
+    (render_image, (step_record=record, render_info=render_info))
 end
 
 function _write_render_stats(dir, cfg::SMLMRender.RenderConfig, render_info, n_locs, t)
