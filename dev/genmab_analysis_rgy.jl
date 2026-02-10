@@ -24,7 +24,7 @@ println("="^60)
 h5file = "/mnt/nas/cellpath/Genmab/Data/20250603_A431_SaturatingIgG10min+C1q/A431_IgG1-2F8-RGY-AF647_5ugml_10min+C1q/Cell_01/Label_01/Data_2025-6-9-19-40-7.h5"
 
 # Check file info
-info = load_lidkelab_h5_info(h5file)
+info = load_mic_h5_info(h5file)
 println("Data: $(info.n_frames) frames in $(info.n_blocks) datasets")
 println("Frames per dataset: $(info.frames_per_block[1])")
 println("Image size: $(info.width)x$(info.height)")
@@ -36,7 +36,7 @@ println("File size: $(round(info.file_size_gb, digits=2)) GB")
 pixel_size = 0.0978f0  # 97.8nm pixels
 
 # Load per-pixel calibration from H5 file
-cal = load_lidkelab_h5_calibration_for_scmos(h5file)
+cal = load_mic_h5_calibration_for_scmos(h5file)
 using Statistics
 println("Calibration: gain=$(round(median(cal.gain), digits=3)), offset=$(round(median(cal.offset), digits=1))")
 

@@ -66,11 +66,11 @@ load_smart_h5
 load_smart_h5_info
 load_smart_h5_frame
 smart_h5_to_array
-load_lidkelab_h5
-load_lidkelab_h5_info
-load_lidkelab_h5_block
-load_lidkelab_h5_calibration
-load_lidkelab_h5_calibration_for_scmos
+load_mic_h5
+load_mic_h5_info
+load_mic_h5_block
+load_mic_h5_calibration
+load_mic_h5_calibration_for_scmos
 ```
 
 ## Calibration

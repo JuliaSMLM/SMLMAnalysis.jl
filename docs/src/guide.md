@@ -218,14 +218,14 @@ images, info = load_smart_h5("acquisition.h5")
 info = load_smart_h5_info("acquisition.h5")  # Metadata only
 ```
 
-### LidkeLab MIC format
+### MIC format
 
-Import data from LidkeLab MATLAB Instrument Control:
+Import data from MIC (MATLAB Instrument Control):
 
 ```julia
-images, metadata = load_lidkelab_h5("experiment.h5")
-info = load_lidkelab_h5_info("experiment.h5")  # Metadata only
-block = load_lidkelab_h5_block("experiment.h5", 1)  # Single block (memory efficient)
+images, metadata = load_mic_h5("experiment.h5")
+info = load_mic_h5_info("experiment.h5")  # Metadata only
+block = load_mic_h5_block("experiment.h5", 1)  # Single block (memory efficient)
 ```
 
 Block-based loading is automatic when using `DetectFitConfig(path=..., h5_format=:mic)`.

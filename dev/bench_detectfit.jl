@@ -25,7 +25,7 @@ if !isfile(h5file)
     error("Data file not found: $h5file")
 end
 
-info = load_lidkelab_h5_info(h5file)
+info = load_mic_h5_info(h5file)
 println("Data file: $(basename(h5file))")
 println("  Total frames: $(info.n_frames)")
 println("  Datasets (blocks): $(info.n_blocks)")
@@ -38,7 +38,7 @@ println()
 # Camera Setup
 # =============================================================================
 pixel_size = 0.0978f0  # microns
-cal = load_lidkelab_h5_calibration_for_scmos(h5file)
+cal = load_mic_h5_calibration_for_scmos(h5file)
 camera = SCMOSCamera(info.width, info.height, pixel_size, cal.readnoise;
     offset = cal.offset, gain = cal.gain, qe = 0.82f0)
 println("Camera: $(info.width)×$(info.height), $(pixel_size*1000)nm pixels")
@@ -92,7 +92,7 @@ println("--- WARMUP (compiling) ---")
 frames_per_ds = info.frames_per_block[1]
 
 t_warmup = @elapsed begin
-    warmup_images = load_lidkelab_h5_block(h5file, 1)
+    warmup_images = load_mic_h5_block(h5file, 1)
     (warmup_roi, _) = getboxes(warmup_images, camera;
         boxsize=boxsize, overlap=2.0, min_photons=min_photons, psf_sigma=psf_sigma, backend=backend)
     (warmup_smld, _) = fit(warmup_roi, fitter)
@@ -117,7 +117,7 @@ for ds in 1:n_datasets_bench
 
     # 1. Load - USE BLOCK-BASED LOADING (efficient)
     t_load = @elapsed begin
-        images = load_lidkelab_h5_block(h5file, ds)
+        images = load_mic_h5_block(h5file, ds)
     end
     push!(load_times, t_load)
 

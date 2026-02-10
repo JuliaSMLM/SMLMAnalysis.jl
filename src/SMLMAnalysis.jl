@@ -140,9 +140,9 @@ export save_smld, load_smld, smld_info
 include("io/smart_h5.jl")
 export load_smart_h5, load_smart_h5_info, load_smart_h5_frame, smart_h5_to_array
 
-include("io/lidkelab_h5.jl")
-export load_lidkelab_h5, load_lidkelab_h5_info, load_lidkelab_h5_block
-export load_lidkelab_h5_calibration, load_lidkelab_h5_calibration_for_scmos
+include("io/mic_h5.jl")
+export load_mic_h5, load_mic_h5_info, load_mic_h5_block
+export load_mic_h5_calibration, load_mic_h5_calibration_for_scmos
 
 include("io/checkpoint_io.jl")
 export save_pipeline_state, load_pipeline_state

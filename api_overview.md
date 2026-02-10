@@ -375,8 +375,8 @@ JLD2-based full pipeline state save/restore.
 data, info = load_smart_h5(path)
 info = load_smart_h5_info(path)
 
-# LidkeLab MIC format
-images, metadata = load_lidkelab_h5(path)
-info = load_lidkelab_h5_info(path)
-block = load_lidkelab_h5_block(path, block_index)
+# MIC (MATLAB Instrument Control) format
+images, metadata = load_mic_h5(path)
+info = load_mic_h5_info(path)
+block = load_mic_h5_block(path, block_index)
 ```

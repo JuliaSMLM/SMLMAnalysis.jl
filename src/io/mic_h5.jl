@@ -1,4 +1,4 @@
-# Lidke Lab custom H5 format loader
+# MIC (MATLAB Instrument Control) H5 format loader
 # Structure varies:
 #   Old format: Channel01/Zposition001/DataXXXX (Dataset directly)
 #   New format: Channel01/Zposition001/DataXXXX/DataXXXX (Group with nested Dataset)
@@ -27,9 +27,9 @@ function _resolve_data_path(f, dk::String)
 end
 
 """
-    load_lidkelab_h5_info(filepath) -> NamedTuple
+    load_mic_h5_info(filepath) -> NamedTuple
 
-Get info about Lidke Lab H5 file without loading all data.
+Get info about MIC H5 file without loading all data.
 
 Returns NamedTuple with fields:
 - height, width: image dimensions
@@ -38,7 +38,7 @@ Returns NamedTuple with fields:
 - frames_per_block: Vector of frame counts per block
 - has_calibration: whether calibration data exists
 """
-function load_lidkelab_h5_info(filepath::String)
+function load_mic_h5_info(filepath::String)
     h5open(filepath, "r") do f
         # Find data blocks
         zpos = f["Channel01/Zposition001"]
@@ -77,18 +77,18 @@ function load_lidkelab_h5_info(filepath::String)
 end
 
 """
-    load_lidkelab_h5_calibration(filepath) -> NamedTuple
+    load_mic_h5_calibration(filepath) -> NamedTuple
 
-Load calibration data from Lidke Lab H5 file.
+Load calibration data from MIC H5 file.
 
 Returns NamedTuple with (offset, variance, gain) as 2D arrays.
 
-NOTE: The gain in Lidke Lab H5 files is INVERTED compared to our convention.
+NOTE: The gain in MIC H5 files is INVERTED compared to our convention.
 Our convention: ADU = photons * gain, so gain ≈ 0.24 e-/ADU
-Lidke Lab H5: gain stored as ~4, which is 1/gain in our convention
-Use load_lidkelab_h5_calibration_for_scmos() to get corrected values.
+MIC H5: gain stored as ~4, which is 1/gain in our convention
+Use load_mic_h5_calibration_for_scmos() to get corrected values.
 """
-function load_lidkelab_h5_calibration(filepath::String)
+function load_mic_h5_calibration(filepath::String)
     h5open(filepath, "r") do f
         offset = read(f["Calibration/CCDOffset"])
         variance = read(f["Calibration/CCDVar"])
@@ -98,7 +98,7 @@ function load_lidkelab_h5_calibration(filepath::String)
 end
 
 """
-    load_lidkelab_h5_calibration_for_scmos(filepath) -> NamedTuple
+    load_mic_h5_calibration_for_scmos(filepath) -> NamedTuple
 
 Load calibration data and convert to SCMOSCamera convention.
 
@@ -107,8 +107,8 @@ Returns NamedTuple with:
 - readnoise: per-pixel readnoise (sqrt of variance)
 - gain: per-pixel gain (INVERTED from stored value)
 """
-function load_lidkelab_h5_calibration_for_scmos(filepath::String)
-    cal = load_lidkelab_h5_calibration(filepath)
+function load_mic_h5_calibration_for_scmos(filepath::String)
+    cal = load_mic_h5_calibration(filepath)
     return (
         offset = Float32.(cal.offset),
         readnoise = Float32.(sqrt.(cal.variance)),
@@ -117,12 +117,12 @@ function load_lidkelab_h5_calibration_for_scmos(filepath::String)
 end
 
 """
-    load_lidkelab_h5_block(filepath, block_num::Int) -> Array{Float32,3}
+    load_mic_h5_block(filepath, block_num::Int) -> Array{Float32,3}
 
-Load a single data block from Lidke Lab H5 file.
+Load a single data block from MIC H5 file.
 block_num is 1-indexed.
 """
-function load_lidkelab_h5_block(filepath::String, block_num::Int)
+function load_mic_h5_block(filepath::String, block_num::Int)
     h5open(filepath, "r") do f
         zpos = f["Channel01/Zposition001"]
         data_keys = sort([k for k in keys(zpos) if startswith(k, "Data")])
@@ -138,15 +138,15 @@ function load_lidkelab_h5_block(filepath::String, block_num::Int)
 end
 
 """
-    load_lidkelab_h5(filepath; max_frames=nothing, max_blocks=nothing) -> images, dataset_indices
+    load_mic_h5(filepath; max_frames=nothing, max_blocks=nothing) -> images, dataset_indices
 
-Load Lidke Lab dSTORM H5 file. Each block becomes a "dataset".
+Load MIC dSTORM H5 file. Each block becomes a "dataset".
 
 Returns:
 - images: 3D array (height × width × n_frames)
 - dataset_indices: Vector{Int} mapping each frame to its block (1-indexed)
 """
-function load_lidkelab_h5(filepath::String;
+function load_mic_h5(filepath::String;
                           max_frames::Union{Int,Nothing}=nothing,
                           max_blocks::Union{Int,Nothing}=nothing)
     h5open(filepath, "r") do f

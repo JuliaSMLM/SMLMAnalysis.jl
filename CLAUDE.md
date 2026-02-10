@@ -132,7 +132,7 @@ src/
 └── io/
     ├── smld_io.jl       # HDF5 serialization (save_smld, load_smld)
     ├── smart_h5.jl      # SMART microscope HDF5 import
-    ├── lidkelab_h5.jl   # LidkeLab/MIC H5 format import (block-based loading)
+    ├── mic_h5.jl        # MIC (MATLAB Instrument Control) H5 format import (block-based loading)
     └── checkpoint_io.jl # save_pipeline_state/load_pipeline_state (JLD2)
 ```
 

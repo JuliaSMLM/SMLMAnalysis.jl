@@ -202,8 +202,8 @@ smld_info("results.h5")  # Print file summary without loading
 
 # Load microscope data
 images, info = load_smart_h5("smart_data.h5")           # SMART microscope format
-images, info = load_lidkelab_h5("mic_data.h5")           # LidkeLab MIC format
-block_images = load_lidkelab_h5_block("mic_data.h5", 1)  # Load single block
+images, info = load_mic_h5("mic_data.h5")              # MIC format
+block_images = load_mic_h5_block("mic_data.h5", 1)  # Load single block
 ```
 
 ## Multi-Target (Multi-Color)

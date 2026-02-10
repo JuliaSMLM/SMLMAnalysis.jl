@@ -461,7 +461,7 @@ function _resolve_file_sources(cfg::DetectFitConfig)
 
     # MIC format: auto-detect blocks, each block is a dataset
     if format == :mic
-        info = load_lidkelab_h5_info(cfg.path)
+        info = load_mic_h5_info(cfg.path)
         return [(path=cfg.path, block=ds, format=format) for ds in 1:info.n_blocks]
     end
 
@@ -486,14 +486,14 @@ function _load_source(source, v)
     elseif source.format == :mic
         if haskey(source, :block)
             # Block-based loading (efficient for MIC format)
-            return load_lidkelab_h5_block(source.path, source.block)
+            return load_mic_h5_block(source.path, source.block)
         elseif source.frame_range === nothing
             # Load all frames
-            images, _ = load_lidkelab_h5(source.path)
+            images, _ = load_mic_h5(source.path)
             return images
         else
             # Load specific frame range (less efficient, but needed for custom ranges)
-            images, _ = load_lidkelab_h5(source.path; max_frames=last(source.frame_range))
+            images, _ = load_mic_h5(source.path; max_frames=last(source.frame_range))
             return images[:, :, source.frame_range]
         end
     else
