@@ -11,6 +11,7 @@ High-level integration package for the [JuliaSMLM](https://github.com/JuliaSMLM)
 ### Config-driven (production)
 
 ```julia
+# Steps are composable — reorder, repeat, or omit freely after DetectFitConfig
 config = AnalysisConfig(
     camera = cam,
     steps = [

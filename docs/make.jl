@@ -18,7 +18,7 @@ makedocs(;
         "Guide" => "guide.md",
         "API Reference" => "api.md",
     ],
-    warnonly=[:missing_docs],
+    warnonly=false,
 )
 
 deploydocs(;

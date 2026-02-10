@@ -4,6 +4,10 @@
 CurrentModule = SMLMAnalysis
 ```
 
+```@docs
+SMLMAnalysis
+```
+
 ## Core Functions
 
 ```@docs
@@ -88,4 +92,13 @@ crop_camera
 crop_images
 step_name
 step_outdir
+n_datasets
+n_frames_per_dataset
+```
+
+## Internals
+
+```@autodocs
+Modules = [SMLMAnalysis]
+Public = false
 ```

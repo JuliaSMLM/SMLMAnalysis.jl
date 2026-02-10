@@ -2,6 +2,72 @@
 
 Conceptual reference for topics that need more explanation than a docstring provides.
 
+## Pipeline Architecture
+
+### The `steps` vector
+
+`AnalysisConfig.steps` is a composable list of `AbstractSMLMConfig` subtypes. The orchestrator in `analysis.jl` iterates through them sequentially, threading state between steps:
+
+```
+DetectFitConfig (required first)
+        │ produces smld
+        ▼
+  ┌─────────────────────────────┐
+  │ FilterConfig       (0+ times)│
+  │ FrameConnectConfig (0-1)     │  ← Any order,
+  │ DriftCorrectConfig (0-1)     │    any combination
+  │ DensityFilterConfig(0+ times)│
+  │ RenderConfig       (0+ times)│
+  └─────────────────────────────┘
+```
+
+The only ordering constraint: `DetectFitConfig` must be first because it is the only step that produces a `BasicSMLD` from raw image data. All other steps receive and return an existing `smld`.
+
+### Two-level dispatch
+
+The pipeline operates at two levels:
+
+1. **Orchestrator** (`analyze(data, AnalysisConfig)`): Loops over `steps`, calls each step, threads `smld` state, and collects `StepRecord`s into `AnalysisInfo`
+2. **Step dispatch** (`analyze(smld, StepConfig)`): Each step config type has its own `analyze()` method that does the actual work
+
+The step-by-step workflow (`analyze(smld, cfg)`) already supports any config in any order — the orchestrator just automates the loop and collects metadata.
+
+### State threading
+
+The orchestrator maintains `smld` as the working state. Each step receives the current `smld` and returns an updated one. Additional state captured from specific steps:
+
+- `smld_raw` — from `DetectFitConfig` (pre-filter SMLD)
+- `smld_connected` — from `FrameConnectConfig` (tracks with multi-frame info)
+- `drift_model` — from `DriftCorrectConfig` (fitted drift polynomial)
+
+### Repeatable and optional steps
+
+- **`FilterConfig`**: Can appear multiple times (coarse filter early, tighter filter after connection)
+- **`RenderConfig`**: Can appear multiple times (different zooms, colormaps, or strategies)
+- **`DensityFilterConfig`**: Can appear multiple times
+- **`FrameConnectConfig`** and **`DriftCorrectConfig`**: Typically used once, but not enforced
+
+### Config provenance
+
+| Config | Defined in | Notes |
+|--------|-----------|-------|
+| `DetectFitConfig` | SMLMAnalysis | Wraps SMLMBoxer + GaussMLE internally |
+| `FilterConfig` | SMLMAnalysis | Pure SMLMAnalysis logic |
+| `FrameConnectConfig` | SMLMAnalysis | Wraps SMLMFrameConnection internally |
+| `DriftCorrectConfig` | SMLMAnalysis | Wraps SMLMDriftCorrection internally |
+| `DensityFilterConfig` | SMLMAnalysis | Pure SMLMAnalysis logic |
+| `RenderConfig` | SMLMRender | Re-exported via `const RenderConfig = SMLMRender.RenderConfig` |
+
+SMLMAnalysis defines most step configs as thin wrappers that delegate to ecosystem packages. `RenderConfig` is the exception — it's used directly from SMLMRender. Extending the pipeline with a new upstream package follows the same wrapper pattern.
+
+### Adding a new step
+
+1. Define `@kwdef struct YourConfig <: AbstractSMLMConfig` in `src/steps/yourstep.jl`
+2. Implement internal function `yourstep(smld, cfg; outdir, step_number, verbose)` returning `(result, info_namedtuple)`
+3. Add dispatch: `analyze(smld::BasicSMLD, cfg::YourConfig; kw...) = yourstep(smld, cfg; kw...)`
+4. Add `elseif cfg isa YourConfig` in **both** `analyze()` methods in `analysis.jl` (data-based and file-based)
+5. Export `YourConfig` from `SMLMAnalysis.jl`
+
 ## Multi-Dataset Architecture
 
 SMLM acquisitions are often split into multiple datasets -- either multiple files from the same sample or a single long movie divided into segments. SMLMAnalysis handles this natively.

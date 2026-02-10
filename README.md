@@ -73,6 +73,48 @@ save_smld("checkpoint.h5", smld)
 smld = load_smld("checkpoint.h5")
 ```
 
+## Composable Pipeline
+
+The `steps` vector is composable — after `DetectFitConfig` (which must be first since it produces localizations from raw images), you can use any combination, order, or repetition of steps.
+
+**Minimal pipeline** — detect+fit and render, skipping all intermediate processing:
+
+```julia
+config = AnalysisConfig(
+    camera = cam,
+    steps = [DetectFitConfig(boxsize=9), RenderConfig(zoom=20)],
+)
+```
+
+**Multiple renders** — different zooms or colormaps in one pipeline:
+
+```julia
+steps = [
+    DetectFitConfig(boxsize=9),
+    FilterConfig(photons=(500.0, Inf)),
+    DriftCorrectConfig(degree=2),
+    RenderConfig(zoom=10, colormap=:viridis),
+    RenderConfig(zoom=20, colormap=:inferno),
+]
+```
+
+**Repeated filtering** — filter, process, filter again:
+
+```julia
+steps = [
+    DetectFitConfig(boxsize=9),
+    FilterConfig(photons=(500.0, Inf)),           # coarse filter
+    FrameConnectConfig(max_frame_gap=5),
+    FilterConfig(precision=(0.0, 0.005)),          # tighter filter after connection
+    DriftCorrectConfig(degree=2),
+    RenderConfig(zoom=20),
+]
+```
+
+**Config provenance**: `DetectFitConfig`, `FilterConfig`, `FrameConnectConfig`, `DriftCorrectConfig`, and `DensityFilterConfig` are defined in SMLMAnalysis as wrappers around ecosystem packages. `RenderConfig` is the exception — re-exported directly from SMLMRender.
+
+**Extensibility**: Define a new `struct YourConfig <: AbstractSMLMConfig`, implement `analyze(smld, YourConfig)`, and add it to the steps vector.
+
 ### Rendered output
 
 ![Super-resolution render](docs/src/assets/render_gaussian.png)
