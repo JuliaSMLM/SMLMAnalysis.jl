@@ -77,6 +77,8 @@ julia --project=. -e 'using Pkg; Pkg.develop(path="../SMLMData")'
 cd examples && julia -t auto --project=. stepwise_example.jl
 ```
 
+**Test coverage note**: Tests are minimal (type construction and `analyze()` dispatch method existence checks). No integration tests with actual image data or GPU. The examples serve as de facto integration tests.
+
 ## Architecture
 
 ### Functional Pipeline
@@ -180,6 +182,8 @@ Each step internally handles tuple returns from upstream packages:
 - Dataset boundaries encoded in data structure: `Vector{Array}` = N datasets, single `Array` = 1 dataset
 - Each step function optionally writes outputs to `outdir/{step_number}_{step_name}/`
 - Save/resume via `save_smld`/`load_smld` (HDF5) or `save_pipeline_state`/`load_pipeline_state` (JLD2)
+- `smld_info(path)` prints file summary without loading data
+- FilterConfig `precision` filter uses `max(e.σ_x, e.σ_y)`, not average or RMS
 
 ### Multi-Dataset Architecture
 
@@ -211,7 +215,7 @@ For multi-dataset data:
 
 ### Drift Correction Modes
 
-DriftCorrectConfig supports two primary use cases:
+DriftCorrectConfig supports two primary use cases. The `continuous` field maps to `dataset_mode` in SMLMDriftCorrection: `continuous=true` → `:continuous`, `continuous=false` → `:registered`.
 
 **Continuous single acquisition** (one long movie):
 ```julia
@@ -219,11 +223,12 @@ DriftCorrectConfig supports two primary use cases:
 DriftCorrectConfig(
     degree = 3,
     continuous = true,
-    chunk_frames = 4000,
+    chunk_frames = 4000,   # frames per chunk (alternative: n_chunks=N)
     auto_roi = true
 )
 ```
 - Consider chunking when >4000 frames; use `chunk_frames=4000` as reasonable max
+- Chunking: `chunk_frames` (frames per chunk) OR `n_chunks` (number of chunks), not both
 - `auto_roi=true` selects dense regions for better entropy signal
 
 **Registered multi-dataset** (multiple files with stage registration):
@@ -236,6 +241,7 @@ DriftCorrectConfig(
 ```
 - Each dataset treated independently, then aligned via entropy optimization
 - Requires spatial overlap between datasets for inter-dataset alignment
+- `warn_large_intershift=true` warns if inter-dataset shifts exceed `intershift_threshold_nm` (500nm default)
 
 ### DetectFitConfig Data Sources
 
@@ -247,6 +253,18 @@ The combined detection+fitting step supports three data source modes:
 
 H5 formats auto-detected: `:smart` (SMART microscope), `:mic` (LidkeLab MIC format with block-based loading)
 
+### Internal Step Functions
+
+Each step has an internal function (NOT exported) called by the pipeline orchestrator in `analysis.jl`:
+- `detectfit(data, camera, cfg)` / `detectfit(camera, cfg)` (file-based)
+- `filter_step(smld, cfg)`
+- `frameconnect_step(smld, cfg)`
+- `driftcorrect_step(smld, cfg)`
+- `densityfilter_step(smld, cfg)`
+- `render_step(smld, cfg)`
+
+The public API is always `analyze()` dispatch. The orchestrator in `analysis.jl` has two nearly-identical `analyze()` methods (data-based and file-based) with an if/elseif chain dispatching to these internal functions.
+
 ### Adding a New Step
 
 1. Create `src/steps/yourstep.jl` with:
@@ -254,7 +272,7 @@ H5 formats auto-detected: `:smart` (SMART microscope), `:mic` (LidkeLab MIC form
    - Internal function: `yourstep(smld, cfg; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)` returning `(result, (step_record=..., ...))`
    - Dispatch method: `analyze(smld::BasicSMLD, cfg::YourStepConfig; kw...) = yourstep(smld, cfg; kw...)`
 2. Include it in `SMLMAnalysis.jl` and export the config type
-3. Add dispatch case in `analyze()` loop in `analysis.jl`
+3. Add `elseif cfg isa YourStepConfig` case in BOTH `analyze()` methods in `analysis.jl` (data-based and file-based)
 
 ### Re-exported Types
 
@@ -265,7 +283,7 @@ From ecosystem packages (available after `using SMLMAnalysis`):
 - **SMLMFrameConnection**: frameconnect (internal use; users call `analyze(smld, FrameConnectConfig())`)
 - **SMLMDriftCorrection**: driftcorrect (internal use; users call `analyze(smld, DriftCorrectConfig())`)
 - **SMLMRender**: render, save_image, HistogramRender, GaussianRender, CircleRender, EllipseRender, RenderConfig (aliased as `const RenderConfig = SMLMRender.RenderConfig`)
-- **SMLMSim**: StaticSMLMConfig, DiffusionSMLMConfig, simulate, gen_images, gen_image, Nmer2D, Nmer3D, GenericFluor
+- **SMLMSim**: StaticSMLMConfig, DiffusionSMLMConfig, simulate, gen_images, gen_image, Nmer2D, Nmer3D, Line2D, GenericFluor
 
 ## Calibration Module
 
