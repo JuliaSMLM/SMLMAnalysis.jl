@@ -58,7 +58,7 @@ SMLMSim = "0.7"
 Statistics = "1.11.1"
 StatsBase = "0.34"
 TOML = "1"
-julia = "1.11"
+julia = "1.12"
 
 [sources]
 SMLMDriftCorrection = {url = "https://github.com/JuliaSMLM/SMLMDriftCorrection.jl"}
