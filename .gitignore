@@ -3,6 +3,8 @@
 *.jl.mem
 /Manifest.toml
 /docs/Manifest.toml
+/dev/Manifest.toml
+/examples/Manifest.toml
 /docs/build/
 .vscode/
 examples/output/

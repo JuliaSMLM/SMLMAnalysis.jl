@@ -86,6 +86,8 @@ config = AnalysisConfig(
             min_neighbors = :auto
         ),
         RenderConfig(zoom=20, colormap=:inferno),
+        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame),
+        RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),
     ],
     outdir = outdir,
     verbose = Verbosity.DETAILED,
