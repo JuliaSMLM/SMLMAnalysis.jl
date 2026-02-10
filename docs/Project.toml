@@ -1,3 +1,7 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 SMLMAnalysis = "5ba66956-a7ba-489c-b260-90fb8f3af39c"
+SMLMDriftCorrection = "34bda2d1-2fff-475a-a8c4-7f53d4251312"
+
+[sources]
+SMLMDriftCorrection = {url = "https://github.com/JuliaSMLM/SMLMDriftCorrection.jl"}
