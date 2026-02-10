@@ -347,6 +347,7 @@ then results are composited into multi-channel renders.
 - `colors::Vector{Symbol}`: Colors per channel (default: automatic palette)
 - `render_zoom::Float64`: Zoom factor for composite renders
 - `render_strategies::Vector{SMLMRender.RenderingStrategy}`: Rendering strategies for composites
+- `clip_percentile::Union{Float64, Nothing}`: Intensity clipping for composite renders (default: 0.99). Lower values (e.g., 0.95) increase contrast for sparse data. `nothing` for saturate mode.
 - `outdir::String`: Output directory
 - `verbose::Int`: Verbosity level
 
@@ -365,6 +366,7 @@ mt = MultiTargetConfig(
     colors::Vector{Symbol} = _default_colors(length(labels))
     render_zoom::Float64 = 20.0
     render_strategies::Vector{SMLMRender.RenderingStrategy} = [GaussianRender(), CircleRender()]
+    clip_percentile::Union{Float64, Nothing} = 0.99
     outdir::String
     verbose::Int = Verbosity.STANDARD
 end

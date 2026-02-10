@@ -99,12 +99,12 @@ function generate_lines()
     psf_sigma = 0.13
 
     sim_params = StaticSMLMConfig(
-        density = 2.0,
+        density = 5.0,
         σ_psf = psf_sigma,
         nframes = n_frames,
         ndatasets = n_datasets,
     )
-    pattern = Line2D(λ=20.0, endpoints=[(-0.4, 0.0), (0.4, 0.0)])
+    pattern = Line2D(λ=50.0, endpoints=[(-0.4, 0.0), (0.4, 0.0)])
     fluor = GenericFluor(photons=50000.0, k_off=20.0, k_on=0.02)
 
     t = @elapsed begin

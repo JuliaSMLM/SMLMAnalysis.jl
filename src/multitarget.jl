@@ -97,10 +97,18 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
 
         v >= Verbosity.PROGRESS && @info "Composite render: $strategy_name $(zoom_str)"
 
+        # Histogram overlays: saturate mode (count=1 = full brightness, clamp handles >1)
+        # Other strategies: clip+normalize for smooth intensity scaling
+        is_histogram = strategy isa HistogramRender
+        cp = is_histogram ? nothing : config.clip_percentile
+        ne = is_histogram ? false : true
+
         (_, render_info) = SMLMRender.render(smlds;
             colors = config.colors,
             strategy = strategy,
             zoom = config.render_zoom,
+            clip_percentile = cp,
+            normalize_each = ne,
             filename = filename,
         )
         push!(composite_render_infos, render_info)
