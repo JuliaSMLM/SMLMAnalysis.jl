@@ -1,106 +1,35 @@
-# SMLMAnalysis
+# SMLMAnalysis.jl
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://JuliaSMLM.github.io/SMLMAnalysis.jl/stable/)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://JuliaSMLM.github.io/SMLMAnalysis.jl/dev/)
 [![Build Status](https://github.com/JuliaSMLM/SMLMAnalysis.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/JuliaSMLM/SMLMAnalysis.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Coverage](https://codecov.io/gh/JuliaSMLM/SMLMAnalysis.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/JuliaSMLM/SMLMAnalysis.jl)
 
-## Overview
+High-level integration package for the [JuliaSMLM](https://github.com/JuliaSMLM) ecosystem. Orchestrates detection, fitting, filtering, frame connection, drift correction, density filtering, rendering, and Bayesian grouping into reproducible SMLM analysis pipelines.
 
-SMLMAnalysis is a high-level umbrella package that organizes and provides a unified interface to the JuliaSMLM ecosystem for Single Molecule Localization Microscopy (SMLM) data analysis. This package streamlines common SMLM workflows by connecting specialized packages into integrated pipelines.
+## Philosophy
 
-## Package Architecture
+- **Functional pipeline** -- pure step functions returning `(result, info)` tuples
+- **Typed configs** for every step -- reproducible, serializable, shareable
+- **Dataset boundaries from data structure** -- `Vector{Array}` encodes multi-dataset boundaries
+- **All coordinates in microns** -- consistent across the ecosystem
 
-SMLMAnalysis integrates several specialized SMLM packages to provide complete analysis workflows:
+## Ecosystem
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  MicroscopePSFs │    │    SMLMSim      │    │PSFConvolutions  │
-│  (PSF Models)   │    │  (Simulations)  │    │ (PSF Operations)│
-└────────┬────────┘    └────────┬────────┘    └────────┬────────┘
-         │                      │                      │
-         └──────────────────────┼──────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────┐
-│             SMLMDeepFit                 │
-│     (Deep Learning Localization)        │
-└────────────────────┬───────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────┐
-│          SMLMDriftCorrection            │
-│      (Spatiotemporal Stabilization)     │
-└────────────────────┬───────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────┐
-│              SMLMBaGoL                  │
-│      (Bayesian Grouping of Localizations)│
-└───────────┬────────────────────┬────────┘
-            │                    │
-            ▼                    ▼
-┌────────────────┐      ┌────────────────┐
-│   SMLMVis      │      │  SMLMMetrics   │
-│(Visualization) │      │   (Analysis)   │
-└────────────────┘      └────────────────┘
-
-
-┌─────────────┐     ┌─────────────┐
-│    Boxer    │     │  GaussMLE   │
-│ (Detection) │────▶│ (Fitting)   │───┐
-└─────────────┘     └─────────────┘   │
-                                       │
-                                       ▼
-                    ┌─────────────────────────────┐
-                    │    SMLMDriftCorrection     │
-                    └───────────────┬─────────────┘
-                                    │
-                                    ▼
-                    ┌─────────────────────────────┐
-                    │        SMLMBaGoL           │
-                    └──────────┬─────────┬────────┘
-                               │         │
-                               ▼         ▼
-                    ┌────────────────┐  ┌────────────────┐
-                    │   SMLMVis      │  │  SMLMMetrics   │
-                    │(Visualization) │  │   (Analysis)   │
-                    └────────────────┘  └────────────────┘
+SMLMData (core types)
+    |
+    +-- SMLMBoxer (ROI detection)
+    +-- GaussMLE (GPU-accelerated MLE fitting)
+    +-- SMLMFrameConnection (linking across frames)
+    +-- SMLMDriftCorrection (entropy-based drift correction)
+    +-- SMLMRender (super-resolution rendering)
+    +-- SMLMSim (simulation + image generation)
+    +-- MicroscopePSFs (PSF models)
+    +-- SMLMBaGoL (Bayesian grouping)
+    |
+    +-- SMLMAnalysis (integrates all)
 ```
-
-## Key Components
-
-### Workflow 1: Deep Learning Pipeline
-
-- **Input Preparation**: 
-  - `MicroscopePSFs.jl` - Provides accurate PSF models for training and simulation
-  - `SMLMSim.jl` - Generates realistic SMLM data with ground truth positions
-  - `PSFConvolutions.jl` - Provides efficient convolution operations for PSF modeling
-
-- **Localization**:
-  - `SMLMDeepFit.jl` - Performs deep learning-based localization of single molecules
-
-- **Post-Processing**:
-  - `SMLMDriftCorrection.jl` - Corrects for sample drift and stage movement
-  - `SMLMBaGoL.jl` - Performs Bayesian grouping of localizations for super-resolution reconstruction
-
-- **Output & Analysis**:
-  - `SMLMVis.jl` - Visualizes localization data and super-resolution reconstructions
-  - `SMLMMetrics.jl` - Provides quantitative metrics for evaluating localization and reconstruction quality
-
-### Workflow 2: Traditional Analysis Pipeline
-
-- **Detection & Fitting**:
-  - `Boxer.jl` - Detects candidate single-molecule spots in raw images
-  - `GaussMLE.jl` - Performs Maximum Likelihood Estimation fitting with Gaussian PSF model
-
-- **Post-Processing**:
-  - `SMLMDriftCorrection.jl` - Corrects for sample drift and stage movement
-  - `SMLMBaGoL.jl` - Performs Bayesian grouping of localizations for super-resolution reconstruction
-
-- **Output & Analysis**:
-  - `SMLMVis.jl` - Visualizes localization data and super-resolution reconstructions
-  - `SMLMMetrics.jl` - Provides quantitative metrics for evaluating localization and reconstruction quality
 
 ## Installation
 
@@ -109,26 +38,77 @@ using Pkg
 Pkg.add("SMLMAnalysis")
 ```
 
-This will automatically install all the required components of the JuliaSMLM ecosystem.
+## Quick Start
 
-## Basic Usage
+### One-liner with AnalysisConfig
 
-SMLMAnalysis provides a simplified interface to common SMLM workflows. The package offers:
+```julia
+using SMLMAnalysis
 
-- Configuration interfaces for setting up analysis parameters
-- Data loading and conversion utilities
-- Pipeline management for both deep learning and traditional analysis workflows
-- Unified data structures for storing and passing results between components
-- Automated handling of file and data formats
+config = AnalysisConfig(
+    camera = cam,
+    steps = [
+        DetectFitConfig(boxsize=9, psf_model=:variable),
+        FilterConfig(photons=(500.0, Inf), precision=(0.0, 0.007)),
+        FrameConnectConfig(max_frame_gap=5),
+        DriftCorrectConfig(degree=2),
+        DensityFilterConfig(n_sigma=2.0),
+        RenderConfig(zoom=20, colormap=:inferno),
+    ],
+    outdir = "output/",
+)
 
-## Contributing
+(result, info) = analyze(image_stacks, config)
+result.smld                # Final SMLD
+info.steps[:detectfit]     # Per-step info from upstream packages
+```
 
-Contributions to SMLMAnalysis are welcome! Please feel free to:
+### Step-by-step with pure functions
 
-1. Report bugs and request features via GitHub issues
-2. Submit pull requests with bug fixes or enhancements
-3. Improve documentation or examples
+```julia
+(smld, df_info) = detectfit(image_stacks, camera, DetectFitConfig(boxsize=9, psf_model=:variable))
+smld_raw = df_info.smld_raw
+
+(smld, _) = filter_step(smld, FilterConfig(photons=(500.0, Inf)); smld_raw=smld_raw)
+(smld, _) = frameconnect_step(smld, FrameConnectConfig(max_frame_gap=5))
+(smld, _) = driftcorrect_step(smld, DriftCorrectConfig(degree=2))
+(img, _)  = render_step(smld, RenderConfig(zoom=20, colormap=:inferno))
+
+# Save intermediate state for resume
+save_smld("after_detectfit.h5", smld)
+smld = load_smld("after_detectfit.h5")
+```
+
+### Rendered output
+
+![Super-resolution render](docs/src/assets/render_gaussian.png)
+
+## Pipeline Steps
+
+| Step | Config | Description |
+|------|--------|-------------|
+| Detection + Fitting | `DetectFitConfig` | ROI detection and GPU-accelerated MLE fitting |
+| Filtering | `FilterConfig` | Filter by photons, precision, p-value, PSF width |
+| Frame Connection | `FrameConnectConfig` | Link localizations across frames, uncertainty calibration |
+| Drift Correction | `DriftCorrectConfig` | Entropy-based drift correction (continuous or registered) |
+| Density Filter | `DensityFilterConfig` | Remove isolated localizations by neighbor count |
+| Render | `RenderConfig` | Gaussian, histogram, circle, or ellipse rendering |
+| BaGoL | `BaGoLConfig` | Bayesian grouping of localizations |
+
+## Related Packages
+
+| Package | Description |
+|---------|-------------|
+| [SMLMData.jl](https://github.com/JuliaSMLM/SMLMData.jl) | Core types: Emitter, Camera, BasicSMLD |
+| [SMLMBoxer.jl](https://github.com/JuliaSMLM/SMLMBoxer.jl) | ROI detection from raw images |
+| [GaussMLE.jl](https://github.com/JuliaSMLM/GaussMLE.jl) | GPU-accelerated MLE fitting |
+| [SMLMFrameConnection.jl](https://github.com/JuliaSMLM/SMLMFrameConnection.jl) | Linking localizations across frames |
+| [SMLMDriftCorrection.jl](https://github.com/JuliaSMLM/SMLMDriftCorrection.jl) | Entropy-based drift correction |
+| [SMLMRender.jl](https://github.com/JuliaSMLM/SMLMRender.jl) | Super-resolution image rendering |
+| [SMLMSim.jl](https://github.com/JuliaSMLM/SMLMSim.jl) | SMLM data simulation |
+| [MicroscopePSFs.jl](https://github.com/JuliaSMLM/MicroscopePSFs.jl) | PSF models |
+| [SMLMBaGoL.jl](https://github.com/JuliaSMLM/SMLMBaGoL.jl) | Bayesian grouping of localizations |
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License. See [LICENSE](LICENSE) for details.

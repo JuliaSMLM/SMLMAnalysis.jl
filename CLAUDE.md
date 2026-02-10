@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Package Overview
 
-SMLMAnalysis.jl is the high-level integration package for the JuliaSMLM ecosystem. It orchestrates all SMLM (Single Molecule Localization Microscopy) analysis packages into unified workflows with checkpointing and provenance tracking.
+SMLMAnalysis.jl is the high-level integration package for the JuliaSMLM ecosystem. It orchestrates all SMLM (Single Molecule Localization Microscopy) analysis packages into unified workflows with provenance tracking.
 
 ## JuliaSMLM Ecosystem
 
@@ -14,15 +14,15 @@ SMLMAnalysis depends on and orchestrates these JuliaSMLM packages. Each package 
 
 ```
 SMLMData (core types - no deps)
-    ↓
-┌───┴───┬───────────┬──────────────┬─────────────────┬─────────┐
-│       │           │              │                 │         │
-SMLMBoxer  GaussMLE  SMLMRender  SMLMFrameConnection  SMLMSim  SMLMBaGoL
-│           │                                         │
-└─────┬─────┘                                    MicroscopePSFs
-      │
+    |
++---+---+-----------+--------------+-----------------+---------+
+|       |           |              |                 |         |
+SMLMBoxer  GaussMLE  SMLMRender  SMLMFrameConnection  SMLMSim
+|           |                                         |
++-----+-----+                                    MicroscopePSFs
+      |
 SMLMDriftCorrection (also depends on SMLMSim)
-      │
+      |
 SMLMAnalysis (integrates all)
 ```
 
@@ -38,7 +38,6 @@ SMLMAnalysis (integrates all)
 | SMLMRender | `../SMLMRender` | @render | Super-resolution image rendering |
 | SMLMSim | `../SMLMSim` | @sim | SMLM data simulation, fluorophore kinetics |
 | MicroscopePSFs | `../MicroscopePSFs` | @psf | PSF models (Gaussian, Airy, etc.) |
-| SMLMBaGoL | `../SMLMBaGoL` | @bagol | Bayesian grouping of localizations |
 
 ### Agent Communication
 
@@ -80,28 +79,35 @@ cd examples && julia -t auto --project=. stepwise_example.jl
 
 ## Architecture
 
-### Step-Based Pipeline
+### Functional Pipeline
 
-The package uses a step-based architecture where each analysis step is configured via a typed `StepConfig` struct that maps directly to upstream package kwargs:
+The package uses a functional pipeline architecture where each analysis step is a pure function returning `(result, info)` tuples. Steps are configured via typed config structs (`<: SMLMData.AbstractSMLMConfig`):
 
 ```julia
-# Interactive step-by-step (multi-dataset support)
-a = Analysis(images, camera; n_datasets=4, outdir="output/")
-run_step!(a, DetectFitConfig(boxsize=9, psf_model=:variable))
-run_step!(a, FilterConfig(photons=(500.0, Inf)))
-run_step!(a, FrameConnectConfig(maxframegap=5))
-run_step!(a, DriftCorrectConfig(degree=2))
-run_step!(a, RenderConfig(zoom=20))
+# Primary interface: AnalysisConfig with ordered steps
+config = AnalysisConfig(
+    camera = cam,
+    steps = [
+        DetectFitConfig(boxsize=9, psf_model=:variable),
+        FilterConfig(photons=(500.0, Inf)),
+        FrameConnectConfig(max_frame_gap=5),
+        DriftCorrectConfig(degree=2),
+        RenderConfig(zoom=20, colormap=:inferno),
+    ],
+    outdir = "output/",
+)
+(result, info) = analyze(image_stacks, config)
 
-# One-liner with defaults
-result = analyze(images, camera; outdir="output/", n_datasets=4)
+# Step-by-step with pure functions
+(smld, df_info) = detectfit(image_stacks, camera, DetectFitConfig(boxsize=9))
+(smld, f_info) = filter_step(smld, FilterConfig(photons=(500.0, Inf)))
+(smld, fc_info) = frameconnect_step(smld, FrameConnectConfig(max_frame_gap=5))
+(smld, dc_info) = driftcorrect_step(smld, DriftCorrectConfig(degree=2))
+(img, r_info) = render_step(smld, RenderConfig(zoom=20))
 
-# Reset and try different params (checkpoints auto-created after detectfit)
-reset!(a, 1)  # Go back to after detectfit
-run_step!(a, FilterConfig(photons=(300.0, Inf)))  # Try looser filter
-
-# Resume from disk checkpoint (cross-session)
-a = resume_analysis("output/"; images=images)
+# Save intermediate state for later resume
+save_smld("output/after_detectfit.h5", smld)
+smld = load_smld("output/after_detectfit.h5")
 ```
 
 ### Module Structure
@@ -109,77 +115,98 @@ a = resume_analysis("output/"; images=images)
 ```
 src/
 ├── SMLMAnalysis.jl      # Main module, re-exports ecosystem types
-├── types.jl             # Analysis, StepConfig, StepRecord, Verbosity, DataSource
-├── analysis.jl          # run_step!, reset!, checkpoint!, debug!, analyze()
-├── steps/               # One file per step type
-│   ├── common.jl        # Shared helpers (_save_box_overlay, _calculate_mode)
-│   ├── detectfit.jl     # DetectFitConfig → combined SMLMBoxer.getboxes + GaussMLE.fit
-│   ├── filter.jl        # FilterConfig → photon/precision/pvalue/psf filtering
-│   ├── frameconnect.jl  # FrameConnectConfig → SMLMFrameConnection.frameconnect
-│   ├── driftcorrect.jl  # DriftCorrectConfig → SMLMDriftCorrection.driftcorrect
-│   ├── densityfilter.jl  # DensityFilterConfig → density-based neighbor filtering
-│   └── render.jl        # RenderConfig → SMLMRender.render
+├── types.jl             # AnalysisConfig, AnalysisResult, AnalysisInfo, DataSource, Verbosity
+├── analysis.jl          # analyze() pipeline orchestrator
+├── multitarget.jl       # MultiTargetConfig, multi-channel composite analysis
+├── steps/               # One file per step type (pure functions)
+│   ├── common.jl        # Shared helpers (step_outdir, _save_config!, _save_info!)
+│   ├── detectfit.jl     # DetectFitConfig, detectfit() → (smld, info)
+│   ├── filter.jl        # FilterConfig, filter_step() → (smld, info)
+│   ├── frameconnect.jl  # FrameConnectConfig, frameconnect_step() → (smld, info)
+│   ├── driftcorrect.jl  # DriftCorrectConfig, driftcorrect_step() → (smld, info)
+│   ├── densityfilter.jl # DensityFilterConfig, densityfilter_step() → (smld, info)
+│   ├── render.jl        # render_step() → (image, info) (uses SMLMRender.RenderConfig)
 ├── calibration.jl       # Uncertainty calibration from frame connection
 └── io/
     ├── smld_io.jl       # HDF5 serialization (save_smld, load_smld)
     ├── smart_h5.jl      # SMART microscope HDF5 import
     ├── lidkelab_h5.jl   # LidkeLab/MIC H5 format import (block-based loading)
-    └── checkpoint_io.jl # JLD2 checkpoint persistence for cross-session resume
+    └── checkpoint_io.jl # save_pipeline_state/load_pipeline_state (JLD2)
 ```
 
 ### Key Types
 
-- **`Analysis`**: Mutable state container holding DataSource, camera, multi-dataset info (`n_datasets`, `n_frames_per_dataset`), intermediate products (roi_batch, roi_datasets, smld_raw, smld, smld_connected, drift_model), checkpoints, and step history
-- **`DataSource`**: Lazy loading wrapper - can hold images directly or a file path for deferred loading
-- **`StepConfig`**: Abstract type; each step has a concrete config with kwargs mirroring upstream packages
+- **`AnalysisConfig`**: Complete pipeline description with camera, ordered steps vector, optional ROI, outdir, verbosity. Primary input to `analyze(data, config)`
+- **`AnalysisResult`**: Immutable result from `analyze()` holding final `smld`, optional `smld_connected`, and `drift_model`
+- **`AnalysisInfo`**: Aggregated metadata from all steps with `elapsed_s`, `steps` dict (step name → upstream info), and `step_records` vector
+- **`DataSource`**: Lazy loading wrapper - holds `images` (single array), `images_vec` (Vector of arrays for multi-dataset), or `path` (file for deferred loading)
 - **`StepRecord`**: Logged after each step with timing, config, summary statistics, and upstream info struct
-- **`AnalysisInfo`**: Aggregated metadata from all steps, containing per-step info structs from upstream packages
 - **`Verbosity`**: Output detail levels (SILENT=0, PROGRESS=1, STANDARD=2, DETAILED=3, DEBUG=4)
+- **`MultiTargetConfig`**: Multi-channel analysis config with per-channel labels, colors, composite rendering
+- **`MultiTargetResult`**: Multi-channel result with per-channel `AnalysisResult` access via `result[:label]`
 
 ### Tuple-Pattern API
 
-SMLMAnalysis follows the JuliaSMLM tuple-pattern where functions return `(result, Info)` tuples:
+SMLMAnalysis follows the JuliaSMLM tuple-pattern where functions return `(result, info)` tuples:
 
 ```julia
-# analyze() returns (Analysis, AnalysisInfo)
-(result, info) = analyze(images, camera; outdir="output/")
+# analyze() returns (AnalysisResult, AnalysisInfo)
+(result, info) = analyze(image_stacks, config)
 result.smld               # Final SMLD
-info.elapsed_ns           # Total time in nanoseconds
+info.elapsed_s            # Total elapsed time in seconds
 info.steps[:detectfit]    # Per-step info from upstream packages
 info.steps[:driftcorrect] # DriftInfo from SMLMDriftCorrection
 
-# Interactive usage - extract info after running steps
-a = Analysis(images, camera)
-run_step!(a, DetectFitConfig())
-run_step!(a, FilterConfig(photons=(500.0, Inf)))
-info = get_analysis_info(a)  # Builds AnalysisInfo from step records
+# Pure step functions return (result, NamedTuple)
+(smld, df_info) = detectfit(image_stacks, camera, DetectFitConfig())
+df_info.smld_raw          # Pre-filter SMLD
+df_info.step_record       # StepRecord with timing/summary
+
+(smld, fc_info) = frameconnect_step(smld, FrameConnectConfig())
+fc_info.smld_connected    # Connected SMLD with track info
 ```
 
 Each step internally handles tuple returns from upstream packages:
 - `getboxes()` → `(ROIBatch, BoxesInfo)`
 - `fit()` → `(BasicSMLD, FitInfo)`
-- `frameconnect()` → `(combined, ConnectInfo)` with `.connected` in info
+- `frameconnect()` → `(combined, FrameConnectInfo)` with `.connected` in info
 - `driftcorrect()` → `(corrected_smld, DriftInfo)` with `.model` in info
 - `render()` → `(image, RenderInfo)`
-
-Step records store upstream info in `step.info` field for later access.
 
 ### Data Flow
 
 - All packages use SMLMData.jl types (BasicSMLD, Emitter2DFit, etc.)
 - Coordinates are in microns
-- Each step's `run_step!` mutates the Analysis in place and optionally writes outputs to `outdir/{step_number}_{step_name}/`
-- Checkpoints auto-created after expensive steps (detectfit) for interactive `reset!`
-- Checkpoints can be persisted to disk via `checkpoint=true` constructor arg for cross-session resume
+- Dataset boundaries encoded in data structure: `Vector{Array}` = N datasets, single `Array` = 1 dataset
+- Each step function optionally writes outputs to `outdir/{step_number}_{step_name}/`
+- Save/resume via `save_smld`/`load_smld` (HDF5) or `save_pipeline_state`/`load_pipeline_state` (JLD2)
 
 ### Multi-Dataset Architecture
 
-For large acquisitions split into multiple datasets (e.g., 4 datasets × 2000 frames = 8000 total frames):
+Dataset boundaries are encoded in the data structure, not user-specified integers:
 
-- **Per-dataset processing**: Detection and fitting loop over datasets individually, enabling memory-efficient analysis of arbitrarily large acquisitions
-- **Frame numbering**: Frames are per-dataset (1 to `n_frames_per_dataset`), NOT global. This is required for LegendrePoly drift correction which normalizes frames to [-1, 1]
+- **`Vector{Array}`**: Pass `[dataset1, dataset2, ...]` where each element is a 3D image stack. The length determines `n_datasets`.
+- **Single `Array`**: Treated as 1 dataset
+- **MIC H5 format**: Blocks auto-detected as separate datasets
+- **Multiple file paths**: `DetectFitConfig(paths=["d1.h5", "d2.h5"])` loads one file per dataset
+
+```julia
+# In-memory: data structure defines dataset boundaries
+image_stacks = [images[:,:,1:2000], images[:,:,2001:4000]]  # 2 datasets
+(result, info) = analyze(image_stacks, config)
+
+# File-based: MIC format auto-detects blocks
+config = AnalysisConfig(
+    camera = cam,
+    steps = [DetectFitConfig(path="data.h5", h5_format=:mic), ...],
+)
+(result, info) = analyze(config)  # No data arg needed
+```
+
+For multi-dataset data:
+- **Per-dataset processing**: Detection and fitting loop over datasets individually
+- **Frame numbering**: Frames are per-dataset (1 to `n_frames_per_dataset`), NOT global. Required for LegendrePoly drift correction normalization to [-1, 1]
 - **Dataset tracking**: `emitter.dataset` field tracks which dataset each emitter belongs to
-- **Global frames for plots only**: Drift correction plots convert to global frame indices for visualization, but internal data stays per-dataset
 - **SMLD structure**: `smld.n_frames` = frames per dataset, `smld.n_datasets` = number of datasets
 
 ### Drift Correction Modes
@@ -189,32 +216,23 @@ DriftCorrectConfig supports two primary use cases:
 **Continuous single acquisition** (one long movie):
 ```julia
 # Chunked for long acquisitions (>4000 frames)
-run_step!(a, DriftCorrectConfig(
+DriftCorrectConfig(
     degree = 3,
     continuous = true,
-    chunk_frames = 4000,  # ~4000 frames per chunk is reasonable
-    auto_roi = true       # Dense ROI subset for faster estimation
-))
-
-# Or single polynomial for shorter acquisitions
-run_step!(a, DriftCorrectConfig(
-    degree = 5,           # Higher degree for complex drift patterns
-    continuous = true,
-    n_chunks = 0          # Single polynomial
-))
+    chunk_frames = 4000,
+    auto_roi = true
+)
 ```
 - Consider chunking when >4000 frames; use `chunk_frames=4000` as reasonable max
-- Shorter acquisitions can use single polynomial with moderate degree (4-5)
 - `auto_roi=true` selects dense regions for better entropy signal
 
 **Registered multi-dataset** (multiple files with stage registration):
 ```julia
-# Multiple datasets with spatial overlap
-run_step!(a, DriftCorrectConfig(
+DriftCorrectConfig(
     degree = 2,
-    continuous = false,   # Registered mode
+    continuous = false,
     quality = :singlepass
-))
+)
 ```
 - Each dataset treated independently, then aligned via entropy optimization
 - Requires spatial overlap between datasets for inter-dataset alignment
@@ -223,8 +241,8 @@ run_step!(a, DriftCorrectConfig(
 
 The combined detection+fitting step supports three data source modes:
 
-1. **In-memory images**: Pass images to `Analysis(images, camera; n_datasets=N)` constructor
-2. **Single file, multiple datasets**: `DetectFitConfig(path="data.h5", n_datasets=4)` splits frames evenly
+1. **In-memory images**: Pass `Vector{Array}` to `analyze(image_stacks, config)` or `detectfit(image_stacks, camera, cfg)`
+2. **Single file with blocks**: `DetectFitConfig(path="data.h5", h5_format=:mic)` auto-detects MIC blocks as datasets
 3. **Multiple files**: `DetectFitConfig(paths=["d1.h5", "d2.h5"])` loads one file per dataset
 
 H5 formats auto-detected: `:smart` (SMART microscope), `:mic` (LidkeLab MIC format with block-based loading)
@@ -232,29 +250,25 @@ H5 formats auto-detected: `:smart` (SMART microscope), `:mic` (LidkeLab MIC form
 ### Adding a New Step
 
 1. Create `src/steps/yourstep.jl` with:
-   - `@kwdef struct YourStepConfig <: StepConfig` with `name::String` and `verbose::Int` fields
-   - `run_step!(a::Analysis, cfg::YourStepConfig)` that calls upstream package and updates `a`
-   - Optional `_save_step_outputs!` for verbosity-gated figures/stats
-2. Include it in `SMLMAnalysis.jl` and export the config
-3. Each step must:
-   - Increment `a.step_counter` first
-   - Call `_record!(a, cfg, timing, summary)` after execution
-   - Call `_checkpoint!(a)` after expensive operations
+   - `@kwdef struct YourStepConfig <: SMLMData.AbstractSMLMConfig` with relevant fields
+   - Pure function: `yourstep(smld, cfg; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)` returning `(result, (step_record=..., ...))`
+2. Include it in `SMLMAnalysis.jl` and export the config and function
+3. Add dispatch case in `analyze()` loop in `analysis.jl`
 
 ### Re-exported Types
 
 From ecosystem packages (available after `using SMLMAnalysis`):
-- **SMLMData**: AbstractCamera, IdealCamera, SCMOSCamera, Emitter2D/3D, BasicSMLD, ROIBatch
-- **GaussMLE**: GaussMLEFitter, GaussianXYNB/S/SXSY, LocalizationResult, fit
+- **SMLMData**: AbstractCamera, IdealCamera, SCMOSCamera, Emitter2D/3D/2DFit/3DFit, BasicSMLD, ROIBatch, AbstractSMLMConfig, AbstractSMLMInfo
+- **GaussMLE**: GaussMLEConfig, GaussianXYNB/S/SXSY, AstigmaticXYZNB, GaussMLEFitInfo, fit
 - **SMLMBoxer**: getboxes
 - **SMLMFrameConnection**: frameconnect
 - **SMLMDriftCorrection**: driftcorrect
-- **SMLMRender**: render, save_image, HistogramRender, GaussianRender, CircleRender
-- **SMLMSim**: StaticSMLMParams, DiffusionSMLMParams, simulate, gen_images, Nmer2D, Nmer3D, GenericFluor
+- **SMLMRender**: render, save_image, HistogramRender, GaussianRender, CircleRender, EllipseRender, RenderConfig (aliased as `const RenderConfig = SMLMRender.RenderConfig`)
+- **SMLMSim**: StaticSMLMConfig, DiffusionSMLMConfig, simulate, gen_images, gen_image, Nmer2D, Nmer3D, GenericFluor
 
 ## Calibration Module
 
 The calibration.jl module provides uncertainty calibration from frame connection analysis:
-- `analyze_frameconnect_drift(smld_connected)`: Analyzes frame-to-frame drift, returns χ² statistics and calibration model
-- `apply_uncertainty_calibration(smld, σ_motion, k_scale)`: Applies calibration: σ²_corrected = σ²_motion + k² × σ²_CRLB
+- `analyze_frameconnect_drift(smld_connected)`: Analyzes frame-to-frame drift, returns chi-squared statistics and calibration model
+- `apply_uncertainty_calibration(smld, sigma_motion, k_scale)`: Applies calibration: sigma_corrected^2 = sigma_motion^2 + k^2 * sigma_CRLB^2
 - `recombine_tracks(smld_connected)`: Weighted average of track localizations with calibrated uncertainties
