@@ -32,7 +32,8 @@ using Test
         @test hasmethod(analyze, Tuple{DetectFitConfig})
         @test hasmethod(analyze, Tuple{BasicSMLD, FilterConfig})
         @test hasmethod(analyze, Tuple{BasicSMLD, FrameConnectConfig})
-        @test hasmethod(analyze, Tuple{BasicSMLD, DriftCorrectConfig})
+        @test hasmethod(analyze, Tuple{BasicSMLD, CalibrationConfig})
+        @test hasmethod(analyze, Tuple{BasicSMLD, DriftConfig})
         @test hasmethod(analyze, Tuple{BasicSMLD, DensityFilterConfig})
         @test hasmethod(analyze, Tuple{BasicSMLD, RenderConfig})
 
@@ -48,8 +49,9 @@ using Test
         cfg = DetectFitConfig()
         @test cfg.camera === nothing
         cam = IdealCamera(64, 64, 0.1)
-        cfg2 = DetectFitConfig(camera=cam, boxsize=7)
+        cfg2 = DetectFitConfig(camera=cam, boxer=BoxerConfig(boxsize=7))
         @test cfg2.camera === cam
-        @test cfg2.boxsize == 7
+        @test cfg2.boxer.boxsize == 7
+        @test cfg2.fitter.psf_model isa GaussianXYNBS
     end
 end

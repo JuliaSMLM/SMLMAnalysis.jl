@@ -6,7 +6,7 @@ In the functional pipeline, users save intermediate SMLDs directly:
 
 ```julia
 # Save after expensive detectfit
-(smld, info) = analyze(image_stacks, DetectFitConfig(camera=cam, boxsize=9))
+(smld, info) = analyze(image_stacks, DetectFitConfig(camera=cam, boxer=BoxerConfig(boxsize=9)))
 save_smld("output/detectfit.h5", smld)
 
 # Resume later

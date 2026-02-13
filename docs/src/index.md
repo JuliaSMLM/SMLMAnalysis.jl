@@ -15,9 +15,11 @@ High-level integration package for the [JuliaSMLM](https://github.com/JuliaSMLM)
 config = AnalysisConfig(
     camera = cam,
     steps = [
-        DetectFitConfig(boxsize=9, psf_model=:variable),
+        DetectFitConfig(
+            boxer=BoxerConfig(boxsize=9, psf_sigma=0.130),
+            fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20)),
         FilterConfig(photons=(500.0, Inf)),
-        DriftCorrectConfig(degree=2),
+        DriftConfig(degree=2),
         RenderConfig(zoom=20, colormap=:inferno),
     ],
     outdir = "output/",
@@ -28,12 +30,14 @@ config = AnalysisConfig(
 ### Step-by-step (exploration)
 
 ```julia
-(smld, df_info) = analyze(image_stacks, DetectFitConfig(camera=camera, boxsize=9))
+(smld, df_info) = analyze(image_stacks, DetectFitConfig(
+    camera=camera, boxer=BoxerConfig(boxsize=9, psf_sigma=0.130)))
 smld_raw = df_info.smld_raw
 
 (smld, _) = analyze(smld, FilterConfig(photons=(500.0, Inf)); smld_raw=smld_raw)
 (smld, _) = analyze(smld, FrameConnectConfig(max_frame_gap=5))
-(smld, _) = analyze(smld, DriftCorrectConfig(degree=2))
+(smld, _) = analyze(smld, CalibrationConfig())
+(smld, _) = analyze(smld, DriftConfig(degree=2))
 (img, _)  = analyze(smld, RenderConfig(zoom=20, colormap=:inferno))
 
 # Save intermediate state for later resume

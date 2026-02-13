@@ -56,15 +56,8 @@ config = AnalysisConfig(
     camera = camera,
     steps = [
         DetectFitConfig(
-            boxsize = 11,
-            min_photons = 1000.0,
-            psf_sigma = 0.135,
-            backend = :auto,
-            psf_model = :variable,
-            iterations = 20,
-            filter_min_photons = 500.0,
-            filter_max_precision = 0.007,
-            filter_min_pvalue = 1e-6
+            boxer = BoxerConfig(boxsize=11, min_photons=1000.0, psf_sigma=0.135),
+            fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20),
         ),
         FilterConfig(
             photons = (500.0, Inf),
@@ -75,11 +68,11 @@ config = AnalysisConfig(
         FrameConnectConfig(
             max_frame_gap = 5,
             max_sigma_dist = 5.0,
-            calibrate = true
         ),
-        DriftCorrectConfig(
+        CalibrationConfig(),
+        DriftConfig(
             degree = 3,
-            continuous = true,
+            dataset_mode = :continuous,
             n_chunks = 4,
             quality = :iterative
         ),

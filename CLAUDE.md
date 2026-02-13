@@ -90,10 +90,13 @@ The package uses a unified `analyze()` dispatch architecture where the config ty
 config = AnalysisConfig(
     camera = cam,
     steps = [
-        DetectFitConfig(boxsize=9, psf_model=:variable),
+        DetectFitConfig(
+            boxer=BoxerConfig(boxsize=9, psf_sigma=0.130),
+            fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20)),
         FilterConfig(photons=(500.0, Inf)),
         FrameConnectConfig(max_frame_gap=5),
-        DriftCorrectConfig(degree=2),
+        CalibrationConfig(clamp_k_to_one=true),
+        DriftConfig(degree=2, dataset_mode=:registered),
         RenderConfig(zoom=20, colormap=:inferno),
     ],
     outdir = "output/",
@@ -101,10 +104,12 @@ config = AnalysisConfig(
 (result, info) = analyze(image_stacks, config)
 
 # Step-by-step with analyze() dispatch
-(smld, df_info) = analyze(image_stacks, DetectFitConfig(camera=cam, boxsize=9))
+(smld, df_info) = analyze(image_stacks, DetectFitConfig(
+    camera=cam, boxer=BoxerConfig(boxsize=9, psf_sigma=0.130)))
 (smld, f_info) = analyze(smld, FilterConfig(photons=(500.0, Inf)))
 (smld, fc_info) = analyze(smld, FrameConnectConfig(max_frame_gap=5))
-(smld, dc_info) = analyze(smld, DriftCorrectConfig(degree=2))
+(smld, cal_info) = analyze(smld, CalibrationConfig(); smld_connected=fc_info.smld_connected)
+(smld, dc_info) = analyze(smld, DriftConfig(degree=2))
 (img, r_info) = analyze(smld, RenderConfig(zoom=20))
 
 # Save intermediate state for later resume
@@ -124,8 +129,9 @@ src/
 │   ├── common.jl        # Shared helpers (step_outdir, _save_config!, _save_info!)
 │   ├── detectfit.jl     # DetectFitConfig, analyze(data, cfg) → (smld, info)
 │   ├── filter.jl        # FilterConfig, analyze(smld, cfg) → (smld, info)
-│   ├── frameconnect.jl  # FrameConnectConfig, analyze(smld, cfg) → (smld, info)
-│   ├── driftcorrect.jl  # DriftCorrectConfig, analyze(smld, cfg) → (smld, info)
+│   ├── frameconnect.jl  # Uses SMLMFrameConnection.FrameConnectConfig directly
+│   ├── calibration_step.jl # CalibrationConfig, analyze(smld, cfg) → (smld, info)
+│   ├── driftcorrect.jl  # Uses SMLMDriftCorrection.DriftConfig directly
 │   ├── densityfilter.jl # DensityFilterConfig, analyze(smld, cfg) → (smld, info)
 │   ├── render.jl        # analyze(smld, RenderConfig) → (image, info)
 ├── calibration.jl       # Uncertainty calibration from frame connection
@@ -160,7 +166,8 @@ info.steps[:detectfit]    # Per-step info from upstream packages
 info.steps[:driftcorrect] # DriftInfo from SMLMDriftCorrection
 
 # Step dispatch returns (result, NamedTuple)
-(smld, df_info) = analyze(image_stacks, DetectFitConfig(camera=cam))
+(smld, df_info) = analyze(image_stacks, DetectFitConfig(
+    camera=cam, boxer=BoxerConfig(boxsize=9)))
 df_info.smld_raw          # Pre-filter SMLD
 df_info.step_record       # StepRecord with timing/summary
 
@@ -202,7 +209,8 @@ image_stacks = [images[:,:,1:2000], images[:,:,2001:4000]]  # 2 datasets
 # File-based: MIC format auto-detects blocks
 config = AnalysisConfig(
     camera = cam,
-    steps = [DetectFitConfig(path="data.h5", h5_format=:mic), ...],
+    steps = [DetectFitConfig(path="data.h5", h5_format=:mic,
+        boxer=BoxerConfig(boxsize=9, psf_sigma=0.130)), ...],
 )
 (result, info) = analyze(config)  # No data arg needed
 ```
@@ -215,14 +223,14 @@ For multi-dataset data:
 
 ### Drift Correction Modes
 
-DriftCorrectConfig supports two primary use cases. The `continuous` field maps to `dataset_mode` in SMLMDriftCorrection: `continuous=true` → `:continuous`, `continuous=false` → `:registered`.
+DriftConfig (from SMLMDriftCorrection) supports two primary use cases via the `dataset_mode` field.
 
 **Continuous single acquisition** (one long movie):
 ```julia
 # Chunked for long acquisitions (>4000 frames)
-DriftCorrectConfig(
+DriftConfig(
     degree = 3,
-    continuous = true,
+    dataset_mode = :continuous,
     chunk_frames = 4000,   # frames per chunk (alternative: n_chunks=N)
     auto_roi = true
 )
@@ -233,21 +241,21 @@ DriftCorrectConfig(
 
 **Registered multi-dataset** (multiple files with stage registration):
 ```julia
-DriftCorrectConfig(
+DriftConfig(
     degree = 2,
-    continuous = false,
+    dataset_mode = :registered,
     quality = :singlepass
 )
 ```
 - Each dataset treated independently, then aligned via entropy optimization
 - Requires spatial overlap between datasets for inter-dataset alignment
-- `warn_large_intershift=true` warns if inter-dataset shifts exceed `intershift_threshold_nm` (500nm default)
+- Warns at PROGRESS verbosity if inter-dataset shifts exceed 500nm
 
 ### DetectFitConfig Data Sources
 
 The combined detection+fitting step supports three data source modes:
 
-1. **In-memory images**: Pass `Vector{Array}` to `analyze(image_stacks, config)` or `analyze(image_stacks, DetectFitConfig(camera=cam))`
+1. **In-memory images**: Pass `Vector{Array}` to `analyze(image_stacks, config)` or `analyze(image_stacks, DetectFitConfig(camera=cam, boxer=BoxerConfig(boxsize=9)))`
 2. **Single file with blocks**: `DetectFitConfig(path="data.h5", h5_format=:mic)` auto-detects MIC blocks as datasets
 3. **Multiple files**: `DetectFitConfig(paths=["d1.h5", "d2.h5"])` loads one file per dataset
 
@@ -259,6 +267,7 @@ Each step has an internal function (NOT exported) called by the pipeline orchest
 - `detectfit(data, camera, cfg)` / `detectfit(camera, cfg)` (file-based)
 - `filter_step(smld, cfg)`
 - `frameconnect_step(smld, cfg)`
+- `calibration_step(smld, cfg; smld_connected)`
 - `driftcorrect_step(smld, cfg)`
 - `densityfilter_step(smld, cfg)`
 - `render_step(smld, cfg)`
@@ -279,9 +288,9 @@ The public API is always `analyze()` dispatch. The orchestrator in `analysis.jl`
 From ecosystem packages (available after `using SMLMAnalysis`):
 - **SMLMData**: AbstractCamera, IdealCamera, SCMOSCamera, Emitter2D/3D/2DFit/3DFit, BasicSMLD, ROIBatch, AbstractSMLMConfig, AbstractSMLMInfo
 - **GaussMLE**: GaussMLEConfig, GaussianXYNB/S/SXSY, AstigmaticXYZNB, GaussMLEFitInfo, fit
-- **SMLMBoxer**: getboxes (internal use; users call `analyze(data, DetectFitConfig(camera=cam))`)
-- **SMLMFrameConnection**: frameconnect (internal use; users call `analyze(smld, FrameConnectConfig())`)
-- **SMLMDriftCorrection**: driftcorrect (internal use; users call `analyze(smld, DriftCorrectConfig())`)
+- **SMLMBoxer**: getboxes, BoxerConfig (embedded in DetectFitConfig)
+- **SMLMFrameConnection**: frameconnect, FrameConnectConfig (aliased as `const FrameConnectConfig = SMLMFrameConnection.FrameConnectConfig`)
+- **SMLMDriftCorrection**: driftcorrect, DriftConfig (aliased as `const DriftConfig = SMLMDriftCorrection.DriftConfig`)
 - **SMLMRender**: render, save_image, HistogramRender, GaussianRender, CircleRender, EllipseRender, RenderConfig (aliased as `const RenderConfig = SMLMRender.RenderConfig`)
 - **SMLMSim**: StaticSMLMConfig, DiffusionSMLMConfig, simulate, gen_images, gen_image, Nmer2D, Nmer3D, Line2D, GenericFluor
 

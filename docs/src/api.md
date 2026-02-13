@@ -42,7 +42,8 @@ DataSource
 DetectFitConfig
 FilterConfig
 FrameConnectConfig
-DriftCorrectConfig
+CalibrationConfig
+DriftConfig
 DensityFilterConfig
 ```
 

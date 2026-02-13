@@ -1,41 +1,15 @@
 """
-Drift correction step - wraps SMLMDriftCorrection.driftcorrect
+Drift correction step - uses SMLMDriftCorrection.DriftConfig directly.
+
+No wrapper config -- the upstream DriftConfig is used as a pipeline step.
+Intershift warnings are always checked and emitted at PROGRESS verbosity.
 """
 
-"""
-    DriftCorrectConfig <: AbstractSMLMConfig
+# Alias for convenience (like RenderConfig pattern)
+const DriftConfig = SMLMDriftCorrection.DriftConfig
 
-Drift correction step using entropy-based optimization from SMLMDriftCorrection.
-
-# Keywords
-- `degree`: Polynomial degree for drift model (default: 2)
-- `continuous`: `true` for continuous acquisition, `false` for registered multi-dataset (default: `false`)
-- `n_chunks`: Split continuous data into N chunks, 0 = no chunking (default: 0)
-- `chunk_frames`: Alternative chunking by frames per chunk (default: 0)
-- `quality`: `:singlepass` (fast) or `:iterative` (default: `:singlepass`)
-- `auto_roi`: Automatically select dense ROI for estimation (default: `true`)
-- `intershift_threshold_nm`: Warning threshold for inter-dataset shifts (default: 500.0)
-
-See the [Guide](@ref) for details on continuous vs registered modes.
-"""
-@kwdef struct DriftCorrectConfig <: SMLMData.AbstractSMLMConfig
-    # SMLMDriftCorrection.driftcorrect kwargs
-    degree::Int = 2
-    # Acquisition type
-    continuous::Bool = false  # true: TYPE 1 continuous acquisition (drift accumulates across datasets)
-                              # false: TYPE 2 registered acquisition (each dataset starts near zero)
-    # Chunking for continuous datasets
-    n_chunks::Int = 0         # Split continuous data into N chunks (0 = no chunking)
-    chunk_frames::Int = 0     # Alternative: frames per chunk (0 = use n_chunks instead)
-    maxn::Int = 200           # Maximum neighbors for entropy calculation
-    # Quality mode
-    quality::Symbol = :singlepass  # :singlepass (fast) or :iterative (slower, converges)
-    # ROI selection
-    auto_roi::Bool = true  # Automatically select dense ROI for faster estimation
-    # Diagnostics
-    warn_large_intershift::Bool = true  # Warn if TYPE 2 has large inter-dataset shifts
-    intershift_threshold_nm::Float64 = 500.0  # nm threshold for warning
-end
+# Override step_name to keep backward-compatible output directory naming
+step_name(::SMLMDriftCorrection.DriftConfig) = "driftcorrect"
 
 """
     driftcorrect_step(smld, cfg; outdir, step_number, verbose) -> (corrected_smld, info_nt)
@@ -46,28 +20,25 @@ result, plus a NamedTuple with step metadata.
 # Returns
 `(corrected_smld, (step_record, drift_model, drift_info))`
 """
-function driftcorrect_step(smld::BasicSMLD, cfg::DriftCorrectConfig;
+function driftcorrect_step(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig;
                            outdir::Union{String,Nothing}=nothing,
                            step_number::Int=0,
                            verbose::Int=Verbosity.STANDARD)
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
 
-    # Determine dataset mode
-    dataset_mode = cfg.continuous ? :continuous : :registered
-
     # Log info
     if cfg.n_chunks > 0 || cfg.chunk_frames > 0
         chunks_info = cfg.n_chunks > 0 ? "$(cfg.n_chunks) chunks" : "$(cfg.chunk_frames) frames/chunk"
-        v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" degree=cfg.degree continuous=cfg.continuous chunks=chunks_info
+        v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" degree=cfg.degree dataset_mode=cfg.dataset_mode chunks=chunks_info
     else
-        v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" degree=cfg.degree continuous=cfg.continuous
+        v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" degree=cfg.degree dataset_mode=cfg.dataset_mode
     end
 
     # Tuple-pattern: returns (corrected_smld, DriftInfo) where DriftInfo contains .model
     t = @elapsed (corrected_smld, drift_info) = SMLMDriftCorrection.driftcorrect(smld;
         degree = cfg.degree,
-        dataset_mode = dataset_mode,
+        dataset_mode = cfg.dataset_mode,
         n_chunks = cfg.n_chunks,
         chunk_frames = cfg.chunk_frames,
         maxn = cfg.maxn,
@@ -87,12 +58,13 @@ function driftcorrect_step(smld::BasicSMLD, cfg::DriftCorrectConfig;
     # Calculate max intra-dataset drift
     max_drift = _calc_max_drift(drift_model, n_frames; n_chunks=cfg.n_chunks)
 
-    # Diagnostic warnings
-    if cfg.warn_large_intershift && !cfg.continuous && max_intershift > cfg.intershift_threshold_nm
+    # Diagnostic warnings (always check, warn at PROGRESS level)
+    intershift_threshold_nm = 500.0
+    if cfg.dataset_mode == :registered && max_intershift > intershift_threshold_nm
         v >= Verbosity.PROGRESS && @warn "  Large inter-dataset shifts detected ($(round(max_intershift, digits=1))nm). " *
-            "If data was acquired without registration, consider continuous=true"
+            "If data was acquired without registration, consider dataset_mode=:continuous"
     end
-    if cfg.continuous && max_intershift > cfg.intershift_threshold_nm
+    if cfg.dataset_mode == :continuous && max_intershift > intershift_threshold_nm
         v >= Verbosity.PROGRESS && @warn "  Large inter-dataset shifts ($(round(max_intershift, digits=1))nm) " *
             "unexpected for continuous acquisition - check data alignment"
     end
@@ -106,7 +78,7 @@ function driftcorrect_step(smld::BasicSMLD, cfg::DriftCorrectConfig;
         :max_intershift_nm => round(max_intershift, digits=1),
         :n_datasets => n_datasets_val,
         :n_frames => n_frames,
-        :continuous => cfg.continuous,
+        :dataset_mode => cfg.dataset_mode,
         :quality => cfg.quality,
         :converged => converged,
         :iterations => iterations
@@ -118,23 +90,23 @@ function driftcorrect_step(smld::BasicSMLD, cfg::DriftCorrectConfig;
         _save_driftcorrect_outputs!(dir, drift_model, cfg, v, t, max_drift, inter_shifts, n_frames, converged, iterations, drift_info)
     end
 
-    v >= Verbosity.PROGRESS && @info "  → max drift $(round(max_drift, digits=1))nm, inter-shift $(round(max_intershift, digits=1))nm ($(round(t, digits=2))s)"
+    v >= Verbosity.PROGRESS && @info "  -> max drift $(round(max_drift, digits=1))nm, inter-shift $(round(max_intershift, digits=1))nm ($(round(t, digits=2))s)"
     (corrected_smld, (step_record=record, drift_model=drift_model, drift_info=drift_info))
 end
 
 """
-    analyze(smld, cfg::DriftCorrectConfig; kwargs...) -> (corrected_smld, info)
+    analyze(smld, cfg::SMLMDriftCorrection.DriftConfig; kwargs...) -> (corrected_smld, info)
 
 Run drift correction on localizations.
 """
-analyze(smld::BasicSMLD, cfg::DriftCorrectConfig; kwargs...) = driftcorrect_step(smld, cfg; kwargs...)
+analyze(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig; kwargs...) = driftcorrect_step(smld, cfg; kwargs...)
 
 """Calculate inter-dataset shift magnitudes in nm (Euclidean distance)"""
 function _calc_inter_shifts(drift_model)
     n_datasets = drift_model.ndatasets
     shifts = Float64[]
     for ds in 1:n_datasets
-        dx = drift_model.inter[ds].dm[1] * 1000  # μm to nm
+        dx = drift_model.inter[ds].dm[1] * 1000  # um to nm
         dy = drift_model.inter[ds].dm[2] * 1000
         push!(shifts, sqrt(dx^2 + dy^2))
     end
@@ -150,13 +122,13 @@ function _calc_max_drift(drift_model, n_frames; n_chunks::Int=0)
     max_drift = 0.0
     for ds in 1:n_datasets
         traj = DC.drift_trajectory(drift_model; dataset=ds)
-        # Note: traj.x and traj.y are in μm, convert to nm
+        # Note: traj.x and traj.y are in um, convert to nm
         max_drift = max(max_drift, maximum(abs.(traj.x)) * 1000, maximum(abs.(traj.y)) * 1000)
     end
     max_drift
 end
 
-function _save_driftcorrect_outputs!(dir::String, drift_model, cfg::DriftCorrectConfig, v::Int, t::Float64,
+function _save_driftcorrect_outputs!(dir::String, drift_model, cfg::SMLMDriftCorrection.DriftConfig, v::Int, t::Float64,
                              max_drift::Float64, inter_shifts::Vector{Float64}, n_frames::Int,
                              converged::Union{Bool,Nothing}, iterations::Union{Int,Nothing}, drift_info)
     mkpath(dir)
@@ -165,7 +137,7 @@ function _save_driftcorrect_outputs!(dir::String, drift_model, cfg::DriftCorrect
 
     if v >= Verbosity.STANDARD
         _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n_frames, converged, iterations)
-        _save_drift_figures(dir, drift_model, n_frames, cfg.continuous; n_chunks=cfg.n_chunks)
+        _save_drift_figures(dir, drift_model, n_frames, cfg.dataset_mode; n_chunks=cfg.n_chunks)
     end
 
     if v >= Verbosity.DETAILED
@@ -178,11 +150,13 @@ function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n
     n_datasets = drift_model.ndatasets
     max_intershift = n_datasets > 1 ? maximum(inter_shifts[2:end]) : 0.0
 
+    mode_str = cfg.dataset_mode == :continuous ? "Continuous" : "Registered"
+
     filepath = joinpath(dir, "stats.md")
     open(filepath, "w") do io
         println(io, "# Drift Correction Statistics\n")
         println(io, "## Summary")
-        println(io, "- **Mode**: $(cfg.continuous ? "Continuous (TYPE 1)" : "Registered (TYPE 2)")")
+        println(io, "- **Mode**: $mode_str ($(cfg.dataset_mode))")
         println(io, "- **Quality**: $(cfg.quality)")
         if cfg.quality == :iterative && converged !== nothing
             println(io, "- **Converged**: $(converged)")
@@ -198,7 +172,7 @@ function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n
         println(io, "")
         println(io, "## Parameters")
         println(io, "- degree: $(cfg.degree)")
-        println(io, "- continuous: $(cfg.continuous)")
+        println(io, "- dataset_mode: $(cfg.dataset_mode)")
         println(io, "- quality: $(cfg.quality)")
         if cfg.n_chunks > 0
             println(io, "- n_chunks: $(cfg.n_chunks)")
@@ -216,14 +190,15 @@ function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n
     end
 end
 
-function _save_drift_figures(dir, drift_model, n_frames, continuous::Bool; n_chunks::Int=0)
+function _save_drift_figures(dir, drift_model, n_frames, dataset_mode::Symbol; n_chunks::Int=0)
     DC = SMLMDriftCorrection
     n_datasets = drift_model.ndatasets
+    continuous = dataset_mode == :continuous
 
     if n_datasets == 1
         # Single dataset - use drift_trajectory
         traj = DC.drift_trajectory(drift_model; dataset=1)
-        drift_x = traj.x .* 1000  # μm to nm
+        drift_x = traj.x .* 1000  # um to nm
         drift_y = traj.y .* 1000
 
         fig = Figure(size=(1200, 400))
@@ -244,7 +219,6 @@ function _save_drift_figures(dir, drift_model, n_frames, continuous::Bool; n_chu
         save(joinpath(dir, "drift_trajectory.png"), fig)
     else
         # Multi-dataset: always show global frame continuous view
-        # This gives a clear picture of drift evolution across entire acquisition
         _save_continuous_drift_figure(dir, drift_model, n_frames; n_chunks=n_chunks, continuous=continuous)
     end
 end
@@ -260,7 +234,7 @@ function _save_continuous_drift_figure(dir, drift_model, n_frames; n_chunks::Int
     traj = DC.drift_trajectory(drift_model)
 
     # Anchor at origin (subtract first point)
-    drift_x = (traj.x .- traj.x[1]) .* 1000  # μm to nm
+    drift_x = (traj.x .- traj.x[1]) .* 1000  # um to nm
     drift_y = (traj.y .- traj.y[1]) .* 1000
 
     mode_str = continuous ? "Continuous" : "Registered"
@@ -329,7 +303,7 @@ function _save_drift_detailed(dir, drift_model, n_frames, inter_shifts; n_chunks
 
         for ds in 1:n_datasets
             traj = DC.drift_trajectory(drift_model; dataset=ds)
-            drift_x = traj.x .* 1000  # μm to nm
+            drift_x = traj.x .* 1000  # um to nm
             drift_y = traj.y .* 1000
             inter = inter_shifts[ds]
             println(io, "| $ds | $(round(maximum(abs.(drift_x)), digits=1)) | $(round(maximum(abs.(drift_y)), digits=1)) | $(round(inter, digits=1)) |")

@@ -29,14 +29,15 @@ Individual steps use `analyze()` with typed configs:
 (smld, info) = analyze(cfg::DetectFitConfig; ...)  # file-based (requires camera in config)
 (smld, info) = analyze(smld, cfg::FilterConfig; smld_raw, outdir, step_number, verbose)
 (smld, info) = analyze(smld, cfg::FrameConnectConfig; outdir, step_number, verbose)
-(smld, info) = analyze(smld, cfg::DriftCorrectConfig; outdir, step_number, verbose)
+(smld, info) = analyze(smld, cfg::CalibrationConfig; smld_connected, outdir, step_number, verbose)
+(smld, info) = analyze(smld, cfg::DriftConfig; outdir, step_number, verbose)
 (smld, info) = analyze(smld, cfg::DensityFilterConfig; outdir, step_number, verbose)
 (image, info) = analyze(smld, cfg::RenderConfig; outdir, step_number, verbose)
 ```
 
 Each returns `(result, NamedTuple)` where the NamedTuple includes:
 - `step_record::StepRecord` - timing, config, summary stats
-- Step-specific fields (e.g., `smld_raw` from detectfit, `smld_connected` from frameconnect, `drift_model` from driftcorrect)
+- Step-specific fields (e.g., `smld_raw` from detectfit, `smld_connected` from frameconnect, `drift_model`)
 
 ## Types
 
@@ -131,28 +132,23 @@ Result of multi-channel analysis. Access per-channel results via `result[:label]
 
 ### DetectFitConfig
 
-Combined detection + fitting step.
+Combined detection + fitting step. Embeds native upstream configs (`BoxerConfig` from SMLMBoxer, `GaussMLEConfig` from GaussMLE).
 
 ```julia
 DetectFitConfig(;
+    boxer=BoxerConfig(boxsize=11, psf_sigma=0.135),  # Detection config
+    fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20),  # Fitting config
     camera=nothing,           # Required for analyze() dispatch; injected by AnalysisConfig pipeline
-    boxsize=11,
-    overlap=2.0,
-    min_photons=500.0,
-    psf_sigma=0.135,
-    backend=:auto,            # :auto, :gpu, :cpu
-    psf_model=:variable,      # :fixed, :variable, :anisotropic
-    psf_sigma_fit=0.135f0,    # For :fixed only
-    iterations=20,
     path=nothing,             # File-based loading
     paths=nothing,            # Multiple files (one per dataset)
     dataset_frames=nothing,   # Explicit frame ranges
     h5_format=:auto,          # :auto, :smart, :mic
-    filter_min_photons=500.0,
-    filter_max_precision=0.007,
-    filter_min_pvalue=1e-6,
 )
 ```
+
+**BoxerConfig** key fields: `boxsize` (Int, default 7), `psf_sigma` (Float64, microns), `min_photons` (Float64), `overlap` (Float64), `backend` (Symbol), `sigma_small`/`sigma_large` (advanced).
+
+**GaussMLEConfig** key fields: `psf_model` (PSFModel), `iterations` (Int), `backend` (Symbol), `constraints` (ParameterConstraints), `batch_size` (Int).
 
 Dataset boundaries are inferred from data structure (not a user integer):
 - `Vector{Array}` data -> N datasets
@@ -172,7 +168,7 @@ FilterConfig(;
 )
 ```
 
-### FrameConnectConfig
+### FrameConnectConfig (from SMLMFrameConnection)
 
 Link localizations across frames.
 
@@ -182,27 +178,36 @@ FrameConnectConfig(;
     max_sigma_dist=5.0,
     n_density_neighbors=2,
     max_neighbors=2,
-    calibrate=true,
+)
+```
+
+### CalibrationConfig
+
+Calibrate localization uncertainties using frame-to-frame scatter.
+
+```julia
+CalibrationConfig(;
     clamp_k_to_one=true,
     filter_high_chi2=false,
     chi2_filter_threshold=6.0,
 )
 ```
 
-### DriftCorrectConfig
+### DriftConfig (from SMLMDriftCorrection)
 
 Correct sample drift.
 
 ```julia
-DriftCorrectConfig(;
+DriftConfig(;
     degree=2,
-    continuous=false,         # true: continuous, false: registered
+    dataset_mode=:registered,     # :registered or :continuous
     n_chunks=0,
     chunk_frames=0,
     maxn=200,
-    quality=:singlepass,      # :singlepass or :iterative
-    warn_large_intershift=true,
-    intershift_threshold_nm=500.0,
+    quality=:singlepass,          # :singlepass, :iterative, or :fft
+    auto_roi=false,
+    max_iterations=10,
+    convergence_tol=0.001,
 )
 ```
 

@@ -15,7 +15,8 @@ DetectFitConfig (required first)
   ┌─────────────────────────────┐
   │ FilterConfig       (0+ times)│
   │ FrameConnectConfig (0-1)     │  ← Any order,
-  │ DriftCorrectConfig (0-1)     │    any combination
+  │ CalibrationConfig  (0-1)     │    any combination
+  │ DriftConfig        (0-1)     │
   │ DensityFilterConfig(0+ times)│
   │ RenderConfig       (0+ times)│
   └─────────────────────────────┘
@@ -38,14 +39,14 @@ The orchestrator maintains `smld` as the working state. Each step receives the c
 
 - `smld_raw` — from `DetectFitConfig` (pre-filter SMLD)
 - `smld_connected` — from `FrameConnectConfig` (tracks with multi-frame info)
-- `drift_model` — from `DriftCorrectConfig` (fitted drift polynomial)
+- `drift_model` — from `DriftConfig` (fitted drift polynomial)
 
 ### Repeatable and optional steps
 
 - **`FilterConfig`**: Can appear multiple times (coarse filter early, tighter filter after connection)
 - **`RenderConfig`**: Can appear multiple times (different zooms, colormaps, or strategies)
 - **`DensityFilterConfig`**: Can appear multiple times
-- **`FrameConnectConfig`** and **`DriftCorrectConfig`**: Typically used once, but not enforced
+- **`FrameConnectConfig`**, **`CalibrationConfig`**, and **`DriftConfig`**: Typically used once, but not enforced
 
 ### Config provenance
 
@@ -53,12 +54,13 @@ The orchestrator maintains `smld` as the working state. Each step receives the c
 |--------|-----------|-------|
 | `DetectFitConfig` | SMLMAnalysis | Wraps SMLMBoxer + GaussMLE internally |
 | `FilterConfig` | SMLMAnalysis | Pure SMLMAnalysis logic |
-| `FrameConnectConfig` | SMLMAnalysis | Wraps SMLMFrameConnection internally |
-| `DriftCorrectConfig` | SMLMAnalysis | Wraps SMLMDriftCorrection internally |
+| `FrameConnectConfig` | SMLMFrameConnection | Re-exported via const alias |
+| `CalibrationConfig` | SMLMAnalysis | Pure SMLMAnalysis logic |
+| `DriftConfig` | SMLMDriftCorrection | Re-exported via const alias |
 | `DensityFilterConfig` | SMLMAnalysis | Pure SMLMAnalysis logic |
-| `RenderConfig` | SMLMRender | Re-exported via `const RenderConfig = SMLMRender.RenderConfig` |
+| `RenderConfig` | SMLMRender | Re-exported via const alias |
 
-SMLMAnalysis defines most step configs as thin wrappers that delegate to ecosystem packages. `RenderConfig` is the exception — it's used directly from SMLMRender. Extending the pipeline with a new upstream package follows the same wrapper pattern.
+SMLMAnalysis defines some step configs locally (`DetectFitConfig`, `FilterConfig`, `CalibrationConfig`, `DensityFilterConfig`) and re-exports others from upstream packages (`FrameConnectConfig`, `DriftConfig`, `RenderConfig`). Extending the pipeline with a new upstream package follows the same re-export pattern.
 
 ### Adding a new step
 
@@ -89,19 +91,20 @@ image_stacks = [images1, images2, images3, images4]  # 4 datasets
 (result, info) = analyze(image_stacks, config)
 
 # Step-by-step: same Vector{Array} input
-(smld, info) = analyze(image_stacks, DetectFitConfig(camera=camera, boxsize=9))
+(smld, info) = analyze(image_stacks, DetectFitConfig(
+    camera=camera, boxer=BoxerConfig(boxsize=9)))
 
 # File-based: MIC format auto-detects blocks as datasets
 config = AnalysisConfig(
     camera = cam,
-    steps = [DetectFitConfig(path="data.h5", h5_format=:mic), ...],
+    steps = [DetectFitConfig(path="data.h5", h5_format=:mic, boxer=BoxerConfig(boxsize=9)), ...],
 )
 (result, info) = analyze(config)  # No data argument needed
 
 # Multiple files: one per dataset
 config = AnalysisConfig(
     camera = cam,
-    steps = [DetectFitConfig(paths=["d1.h5", "d2.h5", "d3.h5", "d4.h5"]), ...],
+    steps = [DetectFitConfig(paths=["d1.h5", "d2.h5", "d3.h5", "d4.h5"], boxer=BoxerConfig(boxsize=9)), ...],
 )
 (result, info) = analyze(config)
 ```
@@ -116,16 +119,16 @@ After detection and fitting, the combined SMLD has:
 
 ## Drift Correction Modes
 
-`DriftCorrectConfig` supports two primary modes, controlled by the `continuous` flag.
+`DriftConfig` supports two primary modes, controlled by the `dataset_mode` field.
 
-### Registered mode (`continuous=false`, default)
+### Registered mode (`dataset_mode=:registered`, default)
 
 For multi-dataset acquisitions where datasets are spatially registered (e.g., the stage returns to approximately the same position between datasets):
 
 ```julia
-DriftCorrectConfig(
+DriftConfig(
     degree = 2,
-    continuous = false,
+    dataset_mode = :registered,
     quality = :singlepass
 )
 ```
@@ -134,22 +137,22 @@ DriftCorrectConfig(
 - Inter-dataset alignment via entropy optimization over spatial overlap
 - Warns if inter-dataset shifts exceed `intershift_threshold_nm` (default 500nm)
 
-### Continuous mode (`continuous=true`)
+### Continuous mode (`dataset_mode=:continuous`)
 
 For a single long acquisition split into chunks for processing:
 
 ```julia
 # Short acquisition (< 4000 frames): single polynomial
-DriftCorrectConfig(
+DriftConfig(
     degree = 5,
-    continuous = true,
+    dataset_mode = :continuous,
     n_chunks = 0
 )
 
 # Long acquisition: chunked
-DriftCorrectConfig(
+DriftConfig(
     degree = 3,
-    continuous = true,
+    dataset_mode = :continuous,
     chunk_frames = 4000
 )
 ```
@@ -177,7 +180,8 @@ Save/load SMLD after expensive steps (detectfit) using HDF5:
 
 ```julia
 # Save after expensive detectfit
-(smld, info) = analyze(image_stacks, DetectFitConfig(camera=camera, boxsize=9))
+(smld, info) = analyze(image_stacks, DetectFitConfig(
+    camera=camera, boxer=BoxerConfig(boxsize=9)))
 save_smld("output/after_detectfit.h5", smld)
 
 # Resume later - try different filter parameters
@@ -219,12 +223,12 @@ Set via `AnalysisConfig` or step function keyword:
 config = AnalysisConfig(camera=cam, steps=[...], verbose=Verbosity.DETAILED)
 
 # Or per-step
-(smld, info) = analyze(data, DetectFitConfig(camera=cam); verbose=Verbosity.DEBUG)
+(smld, info) = analyze(data, DetectFitConfig(camera=cam, boxer=BoxerConfig(boxsize=9)); verbose=Verbosity.DEBUG)
 ```
 
 ## Uncertainty Calibration
 
-Frame connection includes automatic uncertainty calibration, which compares reported CRLB uncertainties against observed frame-to-frame scatter.
+Uncertainty calibration is a separate pipeline step (`CalibrationConfig`) that compares reported CRLB uncertainties against observed frame-to-frame scatter from frame connection. It must follow `FrameConnectConfig` in the pipeline.
 
 ### Model
 
@@ -247,10 +251,9 @@ Track recombination then uses weighted averaging with corrected uncertainties, g
 ### Configuration
 
 ```julia
-FrameConnectConfig(
-    calibrate = true,         # Enable calibration (default)
-    clamp_k_to_one = true,    # k >= 1 (CRLB is theoretical lower bound)
-    filter_high_chi2 = false, # Optional: remove tracks with high chi-squared pairs
+CalibrationConfig(
+    clamp_k_to_one = true,        # k >= 1 (CRLB is theoretical lower bound)
+    filter_high_chi2 = false,     # Optional: remove tracks with high chi-squared pairs
     chi2_filter_threshold = 6.0
 )
 ```
@@ -304,14 +307,14 @@ Block-based loading is automatic when using `DetectFitConfig(path=..., h5_format
 # Auto-detect format, MIC blocks become datasets
 config = AnalysisConfig(
     camera = cam,
-    steps = [DetectFitConfig(path="data.h5", h5_format=:mic), ...],
+    steps = [DetectFitConfig(path="data.h5", h5_format=:mic, boxer=BoxerConfig(boxsize=9)), ...],
 )
 (result, info) = analyze(config)
 
 # Multiple files (one per dataset)
 config = AnalysisConfig(
     camera = cam,
-    steps = [DetectFitConfig(paths=["d1.h5", "d2.h5"]), ...],
+    steps = [DetectFitConfig(paths=["d1.h5", "d2.h5"], boxer=BoxerConfig(boxsize=9)), ...],
 )
 (result, info) = analyze(config)
 ```

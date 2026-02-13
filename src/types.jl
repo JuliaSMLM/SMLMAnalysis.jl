@@ -155,7 +155,7 @@ const StepConfig = SMLMData.AbstractSMLMConfig
 """
     step_name(cfg::AbstractSMLMConfig) -> String
 
-Derive step name from config type (e.g., `FilterConfig` → `"filter"`, `DriftCorrectConfig` → `"driftcorrect"`).
+Derive step name from config type (e.g., `FilterConfig` → `"filter"`, `DriftConfig` → `"drift"`).
 """
 step_name(cfg::SMLMData.AbstractSMLMConfig) = lowercase(replace(string(nameof(typeof(cfg))), r"Config|Options" => ""))
 
@@ -269,9 +269,11 @@ steps in order.
 config = AnalysisConfig(
     camera = cam,
     steps = [
-        DetectFitConfig(boxsize=9, psf_model=:variable),
+        DetectFitConfig(
+            boxer=BoxerConfig(boxsize=9, psf_sigma=0.130),
+            fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20)),
         FilterConfig(photons=(500.0, Inf)),
-        DriftCorrectConfig(degree=2),
+        DriftConfig(degree=2, dataset_mode=:registered),
         RenderConfig(zoom=20, colormap=:inferno),
     ],
     outdir = "output/",

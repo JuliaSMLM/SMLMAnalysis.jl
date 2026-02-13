@@ -21,28 +21,21 @@ For each dataset:
 Combined detection and fitting step. Detects ROIs via SMLMBoxer and fits
 localizations via GaussMLE in a single step, with per-dataset processing.
 
+# Embedded Configs
+- `boxer::BoxerConfig`: Detection parameters (boxsize, min_photons, psf_sigma, etc.)
+- `fitter::GaussMLEConfig`: Fitting parameters (psf_model, iterations, constraints, etc.)
+
 # Data Source Keywords (for file-based workflows)
 - `path`: Single H5 file path
 - `paths`: Vector of H5 file paths (one per dataset)
 - `dataset_frames`: Explicit frame ranges per dataset
 - `h5_format`: `:auto`, `:smart`, or `:mic`
-
-# Detection Keywords
-- `boxsize`: ROI size in pixels (default: 11)
-- `min_photons`: Detection threshold (default: 500.0)
-- `psf_sigma`: Expected PSF width in microns (default: 0.135)
-
-# Fitting Keywords
-- `psf_model`: `:fixed`, `:variable`, or `:anisotropic` (default: `:variable`)
-- `iterations`: MLE iterations (default: 20)
-- `backend`: `:auto`, `:gpu`, or `:cpu` (default: `:auto`)
-
-# Filter Preview
-- `filter_min_photons`, `filter_max_precision`, `filter_min_pvalue`: Thresholds
-  shown on fit quality plots (gray rejected regions). Set these to match your
-  intended `FilterConfig` settings.
 """
 @kwdef struct DetectFitConfig <: SMLMData.AbstractSMLMConfig
+    # Embedded upstream configs
+    boxer::SMLMBoxer.BoxerConfig = SMLMBoxer.BoxerConfig(boxsize=11, psf_sigma=0.135)
+    fitter::GaussMLEConfig = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20)
+
     # Camera (optional - injected by AnalysisConfig pipeline, required for standalone analyze())
     camera::Union{SMLMData.AbstractCamera, Nothing} = nothing
 
@@ -53,26 +46,6 @@ localizations via GaussMLE in a single step, with per-dataset processing.
 
     # H5 format: :auto (detect), :smart (SMART microscope), :mic (MATLAB Instrument Control)
     h5_format::Symbol = :auto
-
-    # Detection params (passed to SMLMBoxer.getboxes)
-    boxsize::Int = 11
-    overlap::Float64 = 2.0
-    min_photons::Float64 = 500.0
-    psf_sigma::Float64 = 0.135
-
-    # Backend: :auto (GPU with CPU fallback), :gpu (GPU only), :cpu (CPU only)
-    backend::Symbol = :auto
-
-    # Fit params (passed to GaussMLE.fit)
-    psf_model::Symbol = :variable  # :fixed, :variable, :anisotropic
-    psf_sigma_fit::Float32 = 0.135f0  # For :fixed only
-    iterations::Int = 20
-
-    # Filter preview thresholds (for fit_quality plot visualization)
-    # Set these to match your intended FilterConfig settings
-    filter_min_photons::Float64 = 500.0
-    filter_max_precision::Float64 = 0.007  # 7nm default
-    filter_min_pvalue::Float64 = 1e-6
 end
 
 """
@@ -106,19 +79,7 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
     dir = step_outdir(outdir, step_number, cfg)
     n_datasets_val = length(data)
 
-    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_datasets=n_datasets_val psf_model=cfg.psf_model
-
-    # Setup fitter
-    psf = if cfg.psf_model == :fixed
-        GaussianXYNB(cfg.psf_sigma_fit)
-    elseif cfg.psf_model == :variable
-        GaussianXYNBS()
-    elseif cfg.psf_model == :anisotropic
-        GaussianXYNBSXSY()
-    else
-        error("Unknown psf_model: $(cfg.psf_model)")
-    end
-    fitter = GaussMLEConfig(psf_model=psf, iterations=cfg.iterations, backend=cfg.backend)
+    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_datasets=n_datasets_val psf_model=typeof(cfg.fitter.psf_model)
 
     # Process each dataset
     all_emitters = AbstractEmitter[]
@@ -149,19 +110,13 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
             v >= Verbosity.PROGRESS && @info "  Dataset $ds: $(size(images)) images"
 
             # Detect (tuple-pattern: returns (ROIBatch, BoxesInfo))
-            (roi_batch, boxes_info) = SMLMBoxer.getboxes(images, camera;
-                boxsize = cfg.boxsize,
-                overlap = cfg.overlap,
-                min_photons = cfg.min_photons,
-                psf_sigma = cfg.psf_sigma,
-                backend = cfg.backend
-            )
+            (roi_batch, boxes_info) = SMLMBoxer.getboxes(images, camera, cfg.boxer)
             push!(all_boxes_info, boxes_info)
             n_rois = length(roi_batch)
             total_rois += n_rois
 
             # Fit (tuple-pattern: returns (BasicSMLD, FitInfo))
-            (smld_ds, fit_info) = GaussMLE.fit(roi_batch, fitter)
+            (smld_ds, fit_info) = GaussMLE.fit(roi_batch, cfg.fitter)
             push!(all_fit_info, fit_info)
             n_fits = length(smld_ds.emitters)
             total_fits += n_fits
@@ -273,19 +228,7 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
     dir = step_outdir(outdir, step_number, cfg)
     n_datasets_val = length(sources)
 
-    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg)) [file-based]" n_datasets=n_datasets_val psf_model=cfg.psf_model
-
-    # Setup fitter
-    psf = if cfg.psf_model == :fixed
-        GaussianXYNB(cfg.psf_sigma_fit)
-    elseif cfg.psf_model == :variable
-        GaussianXYNBS()
-    elseif cfg.psf_model == :anisotropic
-        GaussianXYNBSXSY()
-    else
-        error("Unknown psf_model: $(cfg.psf_model)")
-    end
-    fitter = GaussMLEConfig(psf_model=psf, iterations=cfg.iterations, backend=cfg.backend)
+    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg)) [file-based]" n_datasets=n_datasets_val psf_model=typeof(cfg.fitter.psf_model)
 
     # Process each dataset
     all_emitters = AbstractEmitter[]
@@ -315,18 +258,12 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
 
             v >= Verbosity.PROGRESS && @info "  Dataset $ds: $(size(images)) images"
 
-            (roi_batch, boxes_info) = SMLMBoxer.getboxes(images, camera;
-                boxsize = cfg.boxsize,
-                overlap = cfg.overlap,
-                min_photons = cfg.min_photons,
-                psf_sigma = cfg.psf_sigma,
-                backend = cfg.backend
-            )
+            (roi_batch, boxes_info) = SMLMBoxer.getboxes(images, camera, cfg.boxer)
             push!(all_boxes_info, boxes_info)
             n_rois = length(roi_batch)
             total_rois += n_rois
 
-            (smld_ds, fit_info) = GaussMLE.fit(roi_batch, fitter)
+            (smld_ds, fit_info) = GaussMLE.fit(roi_batch, cfg.fitter)
             push!(all_fit_info, fit_info)
             n_fits = length(smld_ds.emitters)
             total_fits += n_fits
@@ -569,11 +506,12 @@ function _save_detectfit_outputs!(dir, smld, camera, cfg, v, t, n_rois, n_fits,
 
     if v >= Verbosity.STANDARD
         _write_detectfit_stats(dir, smld, cfg, t, n_rois, n_fits, n_datasets, n_frames_per_dataset)
-        _save_detectfit_figures(dir, smld, cfg)
 
-        # Generate overlay plots if we have sample data
+        # Generate detection overlay if we have sample data
         if sample_images !== nothing && sample_roi_batch !== nothing
-            _save_detectfit_overlays(dir, smld, sample_roi_batch, sample_images, cfg, sample_original_frames)
+            box_colors = fill(:yellow, length(sample_roi_batch))
+            _save_box_overlay(dir, "detection_overlay.png", sample_images, sample_roi_batch, box_colors;
+                              title_prefix="Detection Frame", frame_labels=sample_original_frames)
         end
     end
 
@@ -630,13 +568,13 @@ function _write_detectfit_stats(dir, smld, cfg, t, n_rois, n_fits, n_datasets, n
 
         println(io, "")
         println(io, "## Detection Parameters")
-        println(io, "- boxsize: $(cfg.boxsize)")
-        println(io, "- min_photons: $(cfg.min_photons)")
-        println(io, "- psf_sigma: $(cfg.psf_sigma)")
+        println(io, "- boxsize: $(cfg.boxer.boxsize)")
+        println(io, "- min_photons: $(cfg.boxer.min_photons)")
+        println(io, "- psf_sigma: $(cfg.boxer.psf_sigma)")
         println(io, "")
         println(io, "## Fit Parameters")
-        println(io, "- psf_model: $(cfg.psf_model)")
-        println(io, "- iterations: $(cfg.iterations)")
+        println(io, "- psf_model: $(typeof(cfg.fitter.psf_model))")
+        println(io, "- iterations: $(cfg.fitter.iterations)")
         println(io, "")
         println(io, "## Distributions\n")
         println(io, "| Parameter | Median | 5% | 95% |")
@@ -651,250 +589,6 @@ function _write_detectfit_stats(dir, smld, cfg, t, n_rois, n_fits, n_datasets, n
         println(io, "- pvalue > 0.001: $(round(100*pval_pass, digits=1))%")
         println(io, "- pvalue > 0.01: $(round(100*sum(pvalue .> 0.01)/n, digits=1))%")
     end
-end
-
-function _save_detectfit_figures(dir, smld, cfg)
-    emitters = smld.emitters
-    isempty(emitters) && return
-
-    photons = [e.photons for e in emitters]
-    bg = [e.bg for e in emitters]
-    σ_x = [e.σ_x for e in emitters] .* 1000  # precision in nm
-    σ_y = [e.σ_y for e in emitters] .* 1000
-    pvalue = [e.pvalue for e in emitters]
-
-    # Check PSF model type
-    has_psf_iso = hasproperty(emitters[1], :σ)
-    has_psf_aniso = hasproperty(emitters[1], :σx)
-
-    # Colors for consistent styling
-    REJECTED_COLOR = (:gray30, 0.5)
-    MEAN_COLOR = :blue
-    MEDIAN_COLOR = :red
-    THRESHOLD_COLOR = :black
-
-    fig = Figure(size=(1200, 900))
-
-    # Row 1: Photons and Background
-    p98 = quantile(photons, 0.98)
-    ax1 = Axis(fig[1, 1], xlabel="Photons", ylabel="Count", title="Photon Distribution")
-    photons_lo = cfg.filter_min_photons
-    vspan!(ax1, 0, photons_lo, color=REJECTED_COLOR)
-    hist!(ax1, photons[photons .<= p98], bins=50)
-    vlines!(ax1, [mean(photons)], color=MEAN_COLOR, linestyle=:solid, linewidth=2)
-    vlines!(ax1, [median(photons)], color=MEDIAN_COLOR, linestyle=:dash, linewidth=2)
-    vlines!(ax1, [photons_lo], color=THRESHOLD_COLOR, linestyle=:dot, linewidth=2)
-    xlims!(ax1, 0, p98)
-    text!(ax1, 0.97, 0.95, text="mean: $(round(Int, mean(photons)))\nmedian: $(round(Int, median(photons)))",
-          align=(:right, :top), space=:relative, fontsize=10)
-
-    bg98 = quantile(bg, 0.98)
-    ax2 = Axis(fig[1, 2], xlabel="Background", ylabel="Count", title="Background Distribution")
-    hist!(ax2, bg[bg .<= bg98], bins=50)
-    vlines!(ax2, [mean(bg)], color=MEAN_COLOR, linestyle=:solid, linewidth=2)
-    vlines!(ax2, [median(bg)], color=MEDIAN_COLOR, linestyle=:dash, linewidth=2)
-    xlims!(ax2, 0, bg98)
-    text!(ax2, 0.97, 0.95, text="mean: $(round(mean(bg), digits=1))\nmedian: $(round(median(bg), digits=1))",
-          align=(:right, :top), space=:relative, fontsize=10)
-
-    # Row 2: Precision and P-value
-    prec_hi = cfg.filter_max_precision * 1000  # convert um to nm
-    prec_data = vcat(σ_x, σ_y)
-    prec98 = quantile(prec_data, 0.98)
-    # Ensure rejected region is at least 30% of plot width for visibility
-    prec_xlim = max(prec98, prec_hi * 1.5)
-
-    ax3 = Axis(fig[2, 1], xlabel="Localization Precision (nm)", ylabel="Count", title="Precision Distribution")
-    vspan!(ax3, prec_hi, prec_xlim, color=REJECTED_COLOR)
-    hist!(ax3, σ_x[σ_x .<= prec98], bins=50, color=(:blue, 0.5), label="σ_x")
-    hist!(ax3, σ_y[σ_y .<= prec98], bins=50, color=(:red, 0.5), label="σ_y")
-    vlines!(ax3, [prec_hi], color=THRESHOLD_COLOR, linestyle=:dot, linewidth=2)
-    xlims!(ax3, 0, prec_xlim)
-    axislegend(ax3, position=:rt, framevisible=false, labelsize=9)
-    text!(ax3, 0.97, 0.70, text="σ_x: $(round(median(σ_x), digits=1)) nm\nσ_y: $(round(median(σ_y), digits=1)) nm",
-          align=(:right, :top), space=:relative, fontsize=10)
-
-    ax4 = Axis(fig[2, 2], xlabel="log10(p-value)", ylabel="Density", title="P-value Distribution")
-    pval_nonzero = pvalue[pvalue .> 0]
-    pval_thresh = cfg.filter_min_pvalue
-
-    if !isempty(pval_nonzero)
-        log_pval = log10.(pval_nonzero)
-        pval_lo = quantile(log_pval, 0.02)
-        log_pval_filtered = log_pval[log_pval .>= pval_lo]
-        vspan!(ax4, pval_lo - 1, log10(pval_thresh), color=REJECTED_COLOR)
-        hist!(ax4, log_pval_filtered, bins=50, normalization=:pdf, color=(:steelblue, 0.7))
-        # Compute histogram max for y limits (based on data, not theory)
-        nbins = 50
-        bin_edges = range(pval_lo, 0, length=nbins+1)
-        bin_width = step(bin_edges)
-        counts = zeros(Int, nbins)
-        for v in log_pval_filtered
-            idx = clamp(floor(Int, (v - pval_lo) / bin_width) + 1, 1, nbins)
-            counts[idx] += 1
-        end
-        max_density = maximum(counts) / (length(log_pval_filtered) * bin_width)
-        # Theory curve (uniform p-values -> exponential in log space)
-        u_range = range(0, -pval_lo, length=100)
-        theory_pdf = log(10) .* (10.0 .^ (-u_range))
-        lines!(ax4, -u_range, theory_pdf, color=:red, linewidth=2, label="Uniform theory")
-        vlines!(ax4, [mean(log_pval)], color=MEAN_COLOR, linestyle=:solid, linewidth=1.5)
-        vlines!(ax4, [median(log_pval)], color=MEDIAN_COLOR, linestyle=:dash, linewidth=1.5)
-        vlines!(ax4, [log10(pval_thresh)], color=THRESHOLD_COLOR, linestyle=:dot, linewidth=2)
-        xlims!(ax4, pval_lo, 0)
-        ylims!(ax4, 0, max_density * 1.1)
-        pval_pass_pct = round(100 * sum(pvalue .> pval_thresh) / length(pvalue), digits=1)
-        text!(ax4, 0.03, 0.95, text="pass: $(pval_pass_pct)%\nthreshold: $(pval_thresh)",
-              align=(:left, :top), space=:relative, fontsize=10)
-    end
-
-    # Row 3: PSF Sigma
-    if has_psf_aniso
-        psf_σx = [e.σx for e in emitters] .* 1000
-        psf_σy = [e.σy for e in emitters] .* 1000
-        psf_data = vcat(psf_σx, psf_σy)
-        psf98 = quantile(psf_data, 0.98)
-        psf02 = quantile(psf_data, 0.02)
-        mode_x = _calculate_mode([e.σx for e in emitters]) * 1000
-        mode_y = _calculate_mode([e.σy for e in emitters]) * 1000
-        mode_avg = (mode_x + mode_y) / 2
-        tol = 0.10
-
-        ax5 = Axis(fig[3, 1], xlabel="Fitted PSF σ (nm)", ylabel="Count", title="PSF Width Distribution")
-        vspan!(ax5, psf02 * 0.9, mode_avg * (1 - tol), color=REJECTED_COLOR)
-        vspan!(ax5, mode_avg * (1 + tol), psf98 * 1.1, color=REJECTED_COLOR)
-        hist!(ax5, psf_σx[(psf_σx .>= psf02) .& (psf_σx .<= psf98)], bins=50, color=(:blue, 0.5), label="σx")
-        hist!(ax5, psf_σy[(psf_σy .>= psf02) .& (psf_σy .<= psf98)], bins=50, color=(:red, 0.5), label="σy")
-        vlines!(ax5, [mode_avg * (1 - tol), mode_avg * (1 + tol)], color=THRESHOLD_COLOR, linestyle=:dot, linewidth=2)
-        xlims!(ax5, psf02, psf98)
-        axislegend(ax5, position=:rt, framevisible=false, labelsize=9)
-        text!(ax5, 0.97, 0.70, text="mode σx: $(round(mode_x, digits=1)) nm\nmode σy: $(round(mode_y, digits=1)) nm\ntol: +/-$(round(Int, tol*100))%",
-              align=(:right, :top), space=:relative, fontsize=10)
-
-    elseif has_psf_iso
-        psf_σ = [e.σ for e in emitters] .* 1000
-        psf98 = quantile(psf_σ, 0.98)
-        psf02 = quantile(psf_σ, 0.02)
-        mode_σ = _calculate_mode([e.σ for e in emitters]) * 1000
-        tol = 0.10
-        lo_bound = mode_σ * (1 - tol)
-        hi_bound = mode_σ * (1 + tol)
-        psf_xmin = min(psf02, lo_bound * 0.95)
-        psf_xmax = max(psf98, hi_bound * 1.05)
-
-        ax5 = Axis(fig[3, 1], xlabel="Fitted PSF σ (nm)", ylabel="Count", title="PSF Width Distribution")
-        vspan!(ax5, psf_xmin, lo_bound, color=REJECTED_COLOR)
-        vspan!(ax5, hi_bound, psf_xmax, color=REJECTED_COLOR)
-        hist!(ax5, psf_σ[(psf_σ .>= psf02) .& (psf_σ .<= psf98)], bins=50)
-        vlines!(ax5, [mean(psf_σ)], color=MEAN_COLOR, linestyle=:solid, linewidth=2)
-        vlines!(ax5, [median(psf_σ)], color=MEDIAN_COLOR, linestyle=:dash, linewidth=2)
-        vlines!(ax5, [lo_bound, hi_bound], color=THRESHOLD_COLOR, linestyle=:dot, linewidth=2)
-        xlims!(ax5, psf_xmin, psf_xmax)
-        text!(ax5, 0.97, 0.95, text="mode: $(round(mode_σ, digits=1)) nm\nmean: $(round(mean(psf_σ), digits=1)) nm\ntol: +/-$(round(Int, tol*100))%",
-              align=(:right, :top), space=:relative, fontsize=10)
-    else
-        ax5 = Axis(fig[3, 1], xlabel="PSF σ (nm)", ylabel="", title="PSF Width (Fixed)")
-        fixed_σ = cfg.psf_sigma_fit * 1000
-        vlines!(ax5, [fixed_σ], color=:blue, linewidth=3)
-        text!(ax5, 0.5, 0.5, text="Fixed: $(round(fixed_σ, digits=1)) nm",
-              align=(:center, :center), space=:relative, fontsize=14)
-        hideydecorations!(ax5)
-    end
-
-    # Row 3, Col 2: Legend
-    ax6 = Axis(fig[3, 2], title="Legend")
-    hidedecorations!(ax6)
-    hidespines!(ax6)
-    lines!(ax6, [0.1, 0.25], [0.8, 0.8], color=MEAN_COLOR, linewidth=2)
-    text!(ax6, 0.3, 0.8, text="Mean", fontsize=12)
-    lines!(ax6, [0.1, 0.25], [0.6, 0.6], color=MEDIAN_COLOR, linewidth=2, linestyle=:dash)
-    text!(ax6, 0.3, 0.6, text="Median", fontsize=12)
-    lines!(ax6, [0.1, 0.25], [0.4, 0.4], color=THRESHOLD_COLOR, linewidth=2, linestyle=:dot)
-    text!(ax6, 0.3, 0.4, text="Filter Threshold", fontsize=12)
-    poly!(ax6, Point2f[(0.1, 0.15), (0.25, 0.15), (0.25, 0.25), (0.1, 0.25)], color=REJECTED_COLOR)
-    text!(ax6, 0.3, 0.2, text="Rejected Region", fontsize=12)
-    xlims!(ax6, 0, 1)
-    ylims!(ax6, 0, 1)
-
-    save(joinpath(dir, "fit_quality.png"), fig)
-end
-
-"""
-Generate overlay plots showing detection boxes colored by fit status.
-Uses sample frames spread across all datasets with absolute frame labels.
-"""
-function _save_detectfit_overlays(dir, smld, sample_roi_batch, sample_images, cfg, sample_original_frames)
-    isempty(sample_roi_batch) && return
-
-    # Create mapping from sample index (1:N) to original frame number
-    sample_to_original = Dict(i => f for (i, f) in enumerate(sample_original_frames))
-    original_frame_set = Set(sample_original_frames)
-
-    # Get emitters only from the sampled frames (using absolute frame numbers)
-    _abs_frame(e) = (e.dataset - 1) * smld.n_frames + e.frame
-    sample_emitters = filter(e -> _abs_frame(e) in original_frame_set, smld.emitters)
-
-    # Detection overlay: all boxes yellow (detection view)
-    box_colors = fill(:yellow, length(sample_roi_batch))
-    _save_box_overlay(dir, "detection_overlay.png", sample_images, sample_roi_batch, box_colors;
-                      title_prefix="Detection Frame", frame_labels=sample_original_frames)
-
-    # Fit overlay: boxes colored by fit status
-    # Match emitters to ROIs by position (approximate)
-    if !isempty(sample_emitters)
-        fit_colors = Symbol[]
-        # Convert emitter positions to pixel coordinates relative to cropped image
-        pix_size = smld.camera.pixel_edges_x[2] - smld.camera.pixel_edges_x[1]
-        x_origin = smld.camera.pixel_edges_x[1]
-        y_origin = smld.camera.pixel_edges_y[1]
-        for i in 1:length(sample_roi_batch)
-            roi_frame_idx = sample_roi_batch.frame_indices[i]  # Remapped index (1:N)
-            original_frame = sample_to_original[roi_frame_idx]  # Original frame number
-            roi_x = sample_roi_batch.x_corners[i] + sample_roi_batch.roi_size ÷ 2
-            roi_y = sample_roi_batch.y_corners[i] + sample_roi_batch.roi_size ÷ 2
-
-            # Find matching emitter using original frame number
-            best_emitter = nothing
-            best_dist = Inf
-            for e in sample_emitters
-                if _abs_frame(e) == original_frame
-                    # Convert emitter position (microns) to pixels, accounting for camera origin
-                    ex_px = (e.x - x_origin) / pix_size
-                    ey_px = (e.y - y_origin) / pix_size
-                    dist = sqrt((ex_px - roi_x)^2 + (ey_px - roi_y)^2)
-                    if dist < best_dist
-                        best_dist = dist
-                        best_emitter = e
-                    end
-                end
-            end
-
-            if best_emitter !== nothing && best_dist < sample_roi_batch.roi_size
-                push!(fit_colors, _detectfit_box_color(best_emitter;
-                    min_photons=cfg.filter_min_photons,
-                    max_precision=cfg.filter_max_precision,
-                    min_pvalue=cfg.filter_min_pvalue))
-            else
-                push!(fit_colors, :gray)  # No matching emitter found
-            end
-        end
-
-        # Build title with color legend
-        prec_nm = round(cfg.filter_max_precision * 1000, digits=1)
-        title = "Fit: green=pass  red=photons<$(round(Int, cfg.filter_min_photons))  orange=prec>$(prec_nm)nm  purple=pval<$(cfg.filter_min_pvalue)  gray=no match"
-        _save_box_overlay(dir, "fit_overlay.png", sample_images, sample_roi_batch, fit_colors;
-                          title_prefix="Frame", frame_labels=sample_original_frames, suptitle=title)
-    end
-end
-
-
-"""Determine box color based on fit status (like fit.jl)"""
-function _detectfit_box_color(e; min_photons=500.0, max_precision=0.007, min_pvalue=1e-6)
-    e.photons < min_photons && return :red           # failed photons
-    prec = sqrt(e.σ_x^2 + e.σ_y^2) / sqrt(2)
-    prec > max_precision && return :orange           # failed precision
-    e.pvalue < min_pvalue && return :purple          # failed pvalue
-    return :green                                     # accepted
 end
 
 """

@@ -13,8 +13,9 @@ Pipeline steps (all via analyze() dispatch):
 1. analyze(images, DetectFitConfig(...)) - detection and fitting
 2. analyze(smld, FilterConfig(...)) - quality filtering
 3. analyze(smld, FrameConnectConfig(...)) - link across frames
-4. analyze(smld, DriftCorrectConfig(...)) - correct sample drift
-5. analyze(smld, RenderConfig(...)) - super-resolution image
+4. analyze(smld, CalibrationConfig(...)) - calibrate uncertainties
+5. analyze(smld, DriftConfig(...)) - correct sample drift
+6. analyze(smld, RenderConfig(...)) - super-resolution image
 
 The stepwise approach is best for:
 - Interactive parameter tuning
@@ -68,12 +69,8 @@ println("="^60)
 
 (smld, df_info) = analyze(image_stacks, DetectFitConfig(
     camera = camera,
-    boxsize = 7,
-    min_photons = 500.0,
-    psf_sigma = psf_sigma,
-    backend = :cpu,
-    psf_model = :variable,
-    iterations = 20
+    boxer = BoxerConfig(boxsize=7, min_photons=500.0, psf_sigma=psf_sigma, backend=:cpu),
+    fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20, backend=:cpu),
 ); outdir=OUTPUT_DIR, step_number=1, verbose=Verbosity.STANDARD)
 
 smld_raw = df_info.smld_raw
@@ -120,36 +117,51 @@ println("="^60)
 ); outdir=OUTPUT_DIR, step_number=3, verbose=Verbosity.STANDARD)
 
 smld_connected = fc_info.smld_connected
+
 n_tracks = length(unique([e.track_id for e in smld_connected.emitters]))
 println("  Tracks: $n_tracks")
 println()
 
 # ============================================================================
-# Step 4: Drift Correction
+# Step 4: Uncertainty Calibration
 # ============================================================================
 
 println("="^60)
-println("Step 4: Drift Correction")
+println("Step 4: Uncertainty Calibration")
 println("="^60)
 
-(smld, dc_info) = analyze(smld, DriftCorrectConfig(
+(smld, cal_info) = analyze(smld, CalibrationConfig(
+    clamp_k_to_one = true
+); smld_connected=smld_connected, outdir=OUTPUT_DIR, step_number=4, verbose=Verbosity.STANDARD)
+
+println()
+
+# ============================================================================
+# Step 5: Drift Correction
+# ============================================================================
+
+println("="^60)
+println("Step 5: Drift Correction")
+println("="^60)
+
+(smld, dc_info) = analyze(smld, DriftConfig(
     degree = 2,
-    continuous = false
-); outdir=OUTPUT_DIR, step_number=4, verbose=Verbosity.STANDARD)
+    dataset_mode = :registered
+); outdir=OUTPUT_DIR, step_number=5, verbose=Verbosity.STANDARD)
 
 drift_model = dc_info.drift_model
 println()
 
 # ============================================================================
-# Step 5: Render
+# Step 6: Render
 # ============================================================================
 
 println("="^60)
-println("Step 5: Render")
+println("Step 6: Render")
 println("="^60)
 
 (_, r_info) = analyze(smld, RenderConfig(zoom=20, colormap=:inferno);
-    outdir=OUTPUT_DIR, step_number=5, verbose=Verbosity.STANDARD)
+    outdir=OUTPUT_DIR, step_number=6, verbose=Verbosity.STANDARD)
 
 println()
 
@@ -164,11 +176,13 @@ println("="^60)
 config = AnalysisConfig(
     camera = camera,
     steps = [
-        DetectFitConfig(boxsize=7, min_photons=500.0, psf_sigma=psf_sigma,
-                        backend=:cpu, psf_model=:variable, iterations=20),
+        DetectFitConfig(
+            boxer=BoxerConfig(boxsize=7, min_photons=500.0, psf_sigma=psf_sigma, backend=:cpu),
+            fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20, backend=:cpu)),
         FilterConfig(photons=(500.0, Inf), precision=(0.0, 0.015), pvalue=(1e-3, 1.0)),
         FrameConnectConfig(max_frame_gap=5, max_sigma_dist=5.0),
-        DriftCorrectConfig(degree=2, continuous=false),
+        CalibrationConfig(clamp_k_to_one=true),
+        DriftConfig(degree=2, dataset_mode=:registered),
         RenderConfig(zoom=20, colormap=:inferno),
     ],
     outdir = OUTPUT_DIR,
@@ -204,7 +218,7 @@ To iterate on parameters (in REPL):
   # Try different filter settings
   (smld2, _) = analyze(smld, FilterConfig(photons=(300.0, Inf), precision=(0.0, 0.020)))
   (smld2, _) = analyze(smld2, FrameConnectConfig(max_frame_gap=5))
-  (smld2, _) = analyze(smld2, DriftCorrectConfig(degree=2))
+  (smld2, _) = analyze(smld2, DriftConfig(degree=2))
   (_, _) = analyze(smld2, RenderConfig(zoom=20, colormap=:inferno))
 
   # Or use the config for a full re-run:

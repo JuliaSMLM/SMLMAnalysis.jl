@@ -98,9 +98,9 @@ Returns a tuple of (AnalysisResult, AnalysisInfo) following the JuliaSMLM tuple-
 config = AnalysisConfig(
     camera = cam,
     steps = [
-        DetectFitConfig(boxsize=9),
+        DetectFitConfig(boxer=BoxerConfig(boxsize=9)),
         FilterConfig(photons=(500.0, Inf)),
-        DriftCorrectConfig(degree=2),
+        DriftConfig(degree=2),
         RenderConfig(zoom=20, colormap=:inferno),
     ],
     outdir = "output/",
@@ -154,15 +154,21 @@ function analyze(data, config::AnalysisConfig)
                     smld_raw=smld_raw, outdir=outdir, step_number=step_number, verbose=v)
                 push!(step_records, info.step_record)
 
-            elseif cfg isa FrameConnectConfig
+            elseif cfg isa SMLMFrameConnection.FrameConnectConfig
                 smld === nothing && error("FrameConnectConfig requires a prior detectfit step")
                 (smld, info) = frameconnect_step(smld, cfg;
                     outdir=outdir, step_number=step_number, verbose=v)
                 smld_connected = info.smld_connected
                 push!(step_records, info.step_record)
 
-            elseif cfg isa DriftCorrectConfig
-                smld === nothing && error("DriftCorrectConfig requires a prior detectfit step")
+            elseif cfg isa CalibrationConfig
+                smld === nothing && error("CalibrationConfig requires a prior detectfit step")
+                (smld, info) = calibration_step(smld, cfg;
+                    smld_connected=smld_connected, outdir=outdir, step_number=step_number, verbose=v)
+                push!(step_records, info.step_record)
+
+            elseif cfg isa SMLMDriftCorrection.DriftConfig
+                smld === nothing && error("DriftConfig requires a prior detectfit step")
                 (smld, info) = driftcorrect_step(smld, cfg;
                     outdir=outdir, step_number=step_number, verbose=v)
                 drift_model = info.drift_model
@@ -218,9 +224,9 @@ Convenience varargs form. Builds AnalysisConfig from positional step configs and
 # Example
 ```julia
 (result, info) = analyze(image_stacks,
-    DetectFitConfig(boxsize=9),
+    DetectFitConfig(boxer=BoxerConfig(boxsize=9)),
     FilterConfig(photons=(500.0, Inf)),
-    DriftCorrectConfig(degree=2);
+    DriftConfig(degree=2);
     camera=cam, outdir="output/")
 ```
 """
@@ -290,15 +296,21 @@ function analyze(config::AnalysisConfig)
                     smld_raw=smld_raw, outdir=outdir, step_number=step_number, verbose=v)
                 push!(step_records, info.step_record)
 
-            elseif cfg isa FrameConnectConfig
+            elseif cfg isa SMLMFrameConnection.FrameConnectConfig
                 smld === nothing && error("FrameConnectConfig requires a prior detectfit step")
                 (smld, info) = frameconnect_step(smld, cfg;
                     outdir=outdir, step_number=step_number, verbose=v)
                 smld_connected = info.smld_connected
                 push!(step_records, info.step_record)
 
-            elseif cfg isa DriftCorrectConfig
-                smld === nothing && error("DriftCorrectConfig requires a prior detectfit step")
+            elseif cfg isa CalibrationConfig
+                smld === nothing && error("CalibrationConfig requires a prior detectfit step")
+                (smld, info) = calibration_step(smld, cfg;
+                    smld_connected=smld_connected, outdir=outdir, step_number=step_number, verbose=v)
+                push!(step_records, info.step_record)
+
+            elseif cfg isa SMLMDriftCorrection.DriftConfig
+                smld === nothing && error("DriftConfig requires a prior detectfit step")
                 (smld, info) = driftcorrect_step(smld, cfg;
                     outdir=outdir, step_number=step_number, verbose=v)
                 drift_model = info.drift_model

@@ -55,15 +55,8 @@ config = AnalysisConfig(
         DetectFitConfig(
             path = h5file,
             h5_format = :mic,
-            boxsize = 9,
-            min_photons = 500.0,
-            psf_sigma = 0.130,
-            backend = :auto,
-            psf_model = :variable,
-            iterations = 20,
-            filter_min_photons = 500.0,
-            filter_max_precision = 0.007,
-            filter_min_pvalue = 1e-6
+            boxer = BoxerConfig(boxsize=9, min_photons=500.0, psf_sigma=0.130),
+            fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20),
         ),
         FilterConfig(
             photons = (500.0, Inf),
@@ -73,12 +66,13 @@ config = AnalysisConfig(
         FrameConnectConfig(
             max_frame_gap = 5,
             max_sigma_dist = 5.0,
-            calibrate = true
         ),
-        DriftCorrectConfig(
+        CalibrationConfig(),
+        DriftConfig(
             degree = 2,
-            continuous = false,
-            quality = :iterative
+            dataset_mode = :registered,
+            quality = :iterative,
+            auto_roi = false
         ),
         DensityFilterConfig(
             n_sigma = 2.0,

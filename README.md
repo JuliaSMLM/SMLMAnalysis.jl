@@ -28,10 +28,13 @@ cam = IdealCamera(512, 512, 0.1)
 config = AnalysisConfig(
     camera = cam,
     steps = [
-        DetectFitConfig(boxsize=9, psf_model=:variable),
+        DetectFitConfig(
+            boxer=BoxerConfig(boxsize=9, psf_sigma=0.130),
+            fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20)),
         FilterConfig(photons=(500.0, Inf), precision=(0.0, 0.007)),
         FrameConnectConfig(max_frame_gap=5),
-        DriftCorrectConfig(degree=2),
+        CalibrationConfig(),
+        DriftConfig(degree=2),
         RenderConfig(zoom=20, colormap=:inferno),
     ],
     outdir = "output/",
@@ -39,7 +42,7 @@ config = AnalysisConfig(
 (result, info) = analyze(image_stacks, config)
 
 result.smld               # Final BasicSMLD with corrected localizations
-result.drift_model        # Drift model (if DriftCorrectConfig was used)
+result.drift_model        # Drift model (if DriftConfig was used)
 info.steps[:detectfit]    # Per-step info from upstream packages
 info.elapsed_s            # Total wall time
 ```
@@ -54,18 +57,22 @@ using SMLMAnalysis
 cam = IdealCamera(512, 512, 0.1)
 
 # 1. Detect ROIs and fit localizations (GPU-accelerated)
-(smld, df_info) = analyze(image_stacks, DetectFitConfig(camera=cam, boxsize=9))
+(smld, df_info) = analyze(image_stacks, DetectFitConfig(
+    camera=cam, boxer=BoxerConfig(boxsize=9, psf_sigma=0.130)))
 
 # 2. Filter by quality
 (smld, _) = analyze(smld, FilterConfig(photons=(500.0, Inf)))
 
-# 3. Link localizations across frames + uncertainty calibration
+# 3. Link localizations across frames
 (smld, fc_info) = analyze(smld, FrameConnectConfig(max_frame_gap=5))
 
-# 4. Correct sample drift
-(smld, dc_info) = analyze(smld, DriftCorrectConfig(degree=2))
+# 4. Calibrate localization uncertainties
+(smld, cal_info) = analyze(smld, CalibrationConfig())
 
-# 5. Render super-resolution image
+# 5. Correct sample drift
+(smld, dc_info) = analyze(smld, DriftConfig(degree=2))
+
+# 6. Render super-resolution image
 (img, _) = analyze(smld, RenderConfig(zoom=20, colormap=:inferno))
 
 # Save/load intermediate results for parameter iteration
@@ -82,7 +89,7 @@ The `steps` vector is composable — after `DetectFitConfig` (which must be firs
 ```julia
 config = AnalysisConfig(
     camera = cam,
-    steps = [DetectFitConfig(boxsize=9), RenderConfig(zoom=20)],
+    steps = [DetectFitConfig(boxer=BoxerConfig(boxsize=9)), RenderConfig(zoom=20)],
 )
 ```
 
@@ -90,9 +97,9 @@ config = AnalysisConfig(
 
 ```julia
 steps = [
-    DetectFitConfig(boxsize=9),
+    DetectFitConfig(boxer=BoxerConfig(boxsize=9)),
     FilterConfig(photons=(500.0, Inf)),
-    DriftCorrectConfig(degree=2),
+    DriftConfig(degree=2),
     RenderConfig(zoom=10, colormap=:viridis),
     RenderConfig(zoom=20, colormap=:inferno),
 ]
@@ -102,16 +109,17 @@ steps = [
 
 ```julia
 steps = [
-    DetectFitConfig(boxsize=9),
+    DetectFitConfig(boxer=BoxerConfig(boxsize=9)),
     FilterConfig(photons=(500.0, Inf)),           # coarse filter
     FrameConnectConfig(max_frame_gap=5),
+    CalibrationConfig(),
     FilterConfig(precision=(0.0, 0.005)),          # tighter filter after connection
-    DriftCorrectConfig(degree=2),
+    DriftConfig(degree=2),
     RenderConfig(zoom=20),
 ]
 ```
 
-**Config provenance**: `DetectFitConfig`, `FilterConfig`, `FrameConnectConfig`, `DriftCorrectConfig`, and `DensityFilterConfig` are defined in SMLMAnalysis as wrappers around ecosystem packages. `RenderConfig` is the exception — re-exported directly from SMLMRender.
+**Config provenance**: `DetectFitConfig` and `FilterConfig` are defined in SMLMAnalysis. `FrameConnectConfig` and `DriftConfig` are re-exported from upstream packages (SMLMFrameConnection, SMLMDriftCorrection). `RenderConfig` is re-exported from SMLMRender.
 
 **Extensibility**: Define a new `struct YourConfig <: AbstractSMLMConfig`, implement `analyze(smld, YourConfig)`, and add it to the steps vector.
 
@@ -123,22 +131,22 @@ steps = [
 
 ### DetectFitConfig
 
-Combined ROI detection (SMLMBoxer) and MLE fitting (GaussMLE).
+Combined ROI detection (SMLMBoxer) and MLE fitting (GaussMLE). Embeds native upstream configs for full access to all detection/fitting parameters.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `boxer` | `BoxerConfig(boxsize=11, psf_sigma=0.135)` | Detection config (SMLMBoxer) |
+| `fitter` | `GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20)` | Fitting config (GaussMLE) |
 | `camera` | `nothing` | Camera model (required for step-by-step; injected by AnalysisConfig) |
-| `boxsize` | `11` | ROI size in pixels |
-| `min_photons` | `500.0` | Detection threshold |
-| `psf_sigma` | `0.135` | Expected PSF width (microns) |
-| `psf_model` | `:variable` | PSF model: `:fixed`, `:variable`, `:anisotropic` |
-| `iterations` | `20` | MLE iterations |
-| `backend` | `:auto` | Computation: `:auto` (GPU with CPU fallback), `:gpu`, `:cpu` |
 | `path` | `nothing` | H5 file path (file-based workflow) |
 | `paths` | `nothing` | Vector of H5 paths (one per dataset) |
 | `h5_format` | `:auto` | H5 format: `:auto`, `:smart`, `:mic` |
 
-**PSF model guidance:** `:variable` (default) fits per-emitter PSF width -- use for most data. `:fixed` uses a known PSF sigma (faster). `:anisotropic` fits independent sigma_x and sigma_y (for astigmatic 3D).
+**BoxerConfig** key fields: `boxsize` (ROI size in pixels), `min_photons` (detection threshold), `psf_sigma` (expected PSF width in microns), `backend` (`:auto`/`:gpu`/`:cpu`).
+
+**GaussMLEConfig** key fields: `psf_model` (PSF type, e.g. `GaussianXYNBS()` for variable width), `iterations` (MLE iterations), `backend`, `constraints`, `batch_size`.
+
+**PSF model guidance:** `GaussianXYNBS()` (default) fits per-emitter PSF width -- use for most data. `GaussianXYNB(sigma)` uses a known PSF sigma (faster). `GaussianXYNBSXSY()` fits independent sigma_x and sigma_y (for astigmatic 3D).
 
 ### FilterConfig
 
@@ -153,31 +161,38 @@ Quality-based filtering. All criteria use `(min, max)` tuples; `nothing` disable
 
 ### FrameConnectConfig
 
-Links localizations of the same emitter across consecutive frames, then calibrates localization uncertainties.
+Links localizations of the same emitter across consecutive frames. Re-exported from SMLMFrameConnection.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `max_frame_gap` | `5` | Maximum dark frames allowed in a track |
 | `max_sigma_dist` | `5.0` | Spatial matching threshold (in sigma units) |
-| `calibrate` | `true` | Run uncertainty calibration after connection |
+
+### CalibrationConfig
+
+Uncertainty calibration from frame connection analysis. Uses connected tracks to estimate motion blur and CRLB scale factors.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
 | `clamp_k_to_one` | `true` | Prevent CRLB scale factor k < 1 |
 | `filter_high_chi2` | `false` | Remove tracks with high chi-squared pairs |
 | `chi2_filter_threshold` | `6.0` | Chi-squared threshold for track removal |
 
-### DriftCorrectConfig
+### DriftConfig
 
-Entropy-based drift correction via SMLMDriftCorrection.
+Entropy-based drift correction. Re-exported from SMLMDriftCorrection.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `degree` | `2` | Legendre polynomial degree |
-| `continuous` | `false` | `true` for one long acquisition, `false` for registered multi-dataset |
+| `dataset_mode` | `:registered` | `:registered` for independent multi-dataset, `:continuous` for one long acquisition |
 | `quality` | `:singlepass` | `:singlepass` or `:iterative` |
 | `chunk_frames` | `0` | Split continuous data into chunks of N frames (0 = no chunking) |
 | `auto_roi` | `true` | Use dense ROI subset for faster estimation |
 | `maxn` | `200` | Maximum neighbors for entropy calculation |
+| `max_iterations` | `100` | Maximum iterations for optimization |
 
-**Mode guidance:** Use `continuous=false` (default) when datasets are independent acquisitions of the same FOV. Use `continuous=true` when data is one long acquisition split across files, with `chunk_frames=4000` for long acquisitions.
+**Mode guidance:** Use `dataset_mode=:registered` (default) when datasets are independent acquisitions of the same FOV. Use `dataset_mode=:continuous` when data is one long acquisition split across files, with `chunk_frames=4000` for long acquisitions.
 
 ### DensityFilterConfig
 
@@ -227,7 +242,7 @@ config = AnalysisConfig(
 |--------|-------------|
 | `result.smld` | Final drift-corrected BasicSMLD |
 | `result.smld_connected` | Connected SMLD with track info (if FrameConnectConfig used) |
-| `result.drift_model` | Fitted drift model (if DriftCorrectConfig used) |
+| `result.drift_model` | Fitted drift model (if DriftConfig used) |
 | `info.elapsed_s` | Total wall time (seconds) |
 | `info.steps[:detectfit]` | Per-step upstream info struct |
 | `info.step_records` | Vector of StepRecords with timing, config, and summary stats |

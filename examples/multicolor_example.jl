@@ -53,10 +53,8 @@ config_clusters = AnalysisConfig(
     camera = camera,
     steps = [
         DetectFitConfig(
-            boxsize = 7,
-            psf_model = :variable,
-            backend = :cpu,
-            iterations = 20,
+            boxer = BoxerConfig(boxsize=7, backend=:cpu),
+            fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20, backend=:cpu),
         ),
         FilterConfig(
             photons = (500.0, Inf),
@@ -64,7 +62,8 @@ config_clusters = AnalysisConfig(
             pvalue = (1e-3, 1.0),
         ),
         FrameConnectConfig(max_frame_gap = 5),
-        DriftCorrectConfig(degree = 2),
+        CalibrationConfig(),
+        DriftConfig(degree = 2),
         RenderConfig(zoom = 20, colormap = :inferno),
     ],
     verbose = Verbosity.STANDARD,
@@ -74,10 +73,8 @@ config_lines = AnalysisConfig(
     camera = camera,
     steps = [
         DetectFitConfig(
-            boxsize = 7,
-            psf_model = :variable,
-            backend = :cpu,
-            iterations = 20,
+            boxer = BoxerConfig(boxsize=7, backend=:cpu),
+            fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20, backend=:cpu),
         ),
         FilterConfig(
             photons = (500.0, Inf),
@@ -85,7 +82,8 @@ config_lines = AnalysisConfig(
             pvalue = (1e-3, 1.0),
         ),
         FrameConnectConfig(max_frame_gap = 5),
-        DriftCorrectConfig(degree = 2),
+        CalibrationConfig(),
+        DriftConfig(degree = 2),
         RenderConfig(zoom = 20, colormap = :inferno),
     ],
     verbose = Verbosity.STANDARD,

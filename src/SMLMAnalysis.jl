@@ -14,9 +14,13 @@ using SMLMAnalysis
 config = AnalysisConfig(
     camera = cam,
     steps = [
-        DetectFitConfig(boxsize=9, psf_model=:variable),
+        DetectFitConfig(
+            boxer=BoxerConfig(boxsize=9, psf_sigma=0.130),
+            fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20)),
         FilterConfig(photons=(500.0, Inf)),
-        DriftCorrectConfig(degree=2),
+        FrameConnectConfig(max_frame_gap=5),
+        CalibrationConfig(clamp_k_to_one=true),
+        DriftConfig(degree=2, dataset_mode=:registered),
         RenderConfig(zoom=20, colormap=:inferno),
     ],
     outdir = "output/",
@@ -24,9 +28,11 @@ config = AnalysisConfig(
 (result, info) = analyze(image_stacks, config)
 
 # Individual steps via analyze() dispatch
-(smld, info) = analyze(image_stacks, DetectFitConfig(camera=cam, boxsize=9))
+(smld, info) = analyze(image_stacks, DetectFitConfig(
+    camera=cam, boxer=BoxerConfig(boxsize=9, psf_sigma=0.130)))
 (smld, info) = analyze(smld, FilterConfig(photons=(500.0, Inf)))
-(smld, info) = analyze(smld, DriftCorrectConfig(degree=2))
+(smld, info) = analyze(smld, FrameConnectConfig(max_frame_gap=5))
+(smld, info) = analyze(smld, DriftConfig(degree=2))
 (img, info)  = analyze(smld, RenderConfig(zoom=20, colormap=:inferno))
 ```
 
@@ -34,6 +40,8 @@ config = AnalysisConfig(
 Key types from ecosystem packages are re-exported for convenience:
 - SMLMData: AbstractCamera, IdealCamera, SCMOSCamera, BasicSMLD, Emitter types
 - GaussMLE: GaussMLEConfig, PSF models, ROIBatch
+- SMLMFrameConnection: FrameConnectConfig
+- SMLMDriftCorrection: DriftConfig
 - SMLMRender: render strategies
 """
 module SMLMAnalysis
@@ -70,7 +78,7 @@ export simulate, gen_images, gen_image
 export Nmer2D, Nmer3D, Line2D, GenericFluor
 
 # Re-export from SMLMBoxer
-export getboxes
+export getboxes, BoxerConfig
 
 # Re-export from GaussMLE
 export GaussMLEConfig
@@ -82,6 +90,9 @@ export fit
 
 # Re-export from SMLMFrameConnection
 export frameconnect
+# Re-export FrameConnectConfig (used directly as step config)
+const FrameConnectConfig = SMLMFrameConnection.FrameConnectConfig
+export FrameConnectConfig
 
 # Re-export from SMLMDriftCorrection
 export driftcorrect
@@ -121,10 +132,14 @@ include("steps/filter.jl")
 export FilterConfig
 
 include("steps/frameconnect.jl")
-export FrameConnectConfig
+# FrameConnectConfig is re-exported above (from SMLMFrameConnection)
+
+include("steps/calibration_step.jl")
+export CalibrationConfig
 
 include("steps/driftcorrect.jl")
-export DriftCorrectConfig
+# DriftConfig is defined as const alias in driftcorrect.jl and exported below
+export DriftConfig
 
 include("steps/densityfilter.jl")
 export DensityFilterConfig
@@ -159,7 +174,7 @@ export analyze
 include("multitarget.jl")
 
 # ============================================================
-# Calibration (used by frameconnect step)
+# Calibration (used by calibration step)
 # ============================================================
 include("calibration.jl")
 export analyze_frameconnect_drift, apply_uncertainty_calibration, recombine_tracks
