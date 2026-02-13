@@ -145,15 +145,33 @@ drift_model = dc_info.info.model  # DriftInfo.model
 println()
 
 # ============================================================================
-# Step 5: Render
+# Step 5-7: Render (three strategies)
 # ============================================================================
 
 println("="^60)
-println("Step 5: Render")
+println("Step 5: Render (Gaussian)")
 println("="^60)
 
 (_, r_info) = analyze(smld, RenderConfig(zoom=20, colormap=:inferno);
     outdir=OUTPUT_DIR, step_number=5, verbose=Verbosity.STANDARD)
+
+println()
+
+println("="^60)
+println("Step 6: Render (Histogram)")
+println("="^60)
+
+(_, _) = analyze(smld, RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame);
+    outdir=OUTPUT_DIR, step_number=6, verbose=Verbosity.STANDARD)
+
+println()
+
+println("="^60)
+println("Step 7: Render (Circle)")
+println("="^60)
+
+(_, _) = analyze(smld, RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame);
+    outdir=OUTPUT_DIR, step_number=7, verbose=Verbosity.STANDARD)
 
 println()
 
@@ -176,6 +194,8 @@ config = AnalysisConfig(
             calibration=CalibrationConfig(clamp_k_to_one=true)),
         DriftConfig(degree=2, dataset_mode=:registered),
         RenderConfig(zoom=20, colormap=:inferno),
+        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame),
+        RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),
     ],
     outdir = OUTPUT_DIR,
 )

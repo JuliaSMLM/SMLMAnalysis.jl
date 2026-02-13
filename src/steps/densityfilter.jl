@@ -22,7 +22,7 @@ end
 """
     densityfilter_step(smld, cfg; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)
 
-Filter localizations by neighbor density. Returns `(filtered_smld, info)`.
+Filter localizations by neighbor density. Returns `(filtered_smld, DensityFilterInfo)`.
 
 # Arguments
 - `smld::BasicSMLD`: Input localizations
@@ -34,7 +34,7 @@ Filter localizations by neighbor density. Returns `(filtered_smld, info)`.
 - `verbose`: Verbosity level
 
 # Returns
-`(filtered_smld, (step_record, n_before, n_after, threshold))`
+`(filtered_smld, DensityFilterInfo)`
 """
 function densityfilter_step(smld::BasicSMLD, cfg::DensityFilterConfig;
                             outdir::Union{String,Nothing}=nothing,
@@ -50,28 +50,32 @@ function densityfilter_step(smld::BasicSMLD, cfg::DensityFilterConfig;
     n_after = length(filtered.emitters)
     n_rejected = n_before - n_after
 
-    summary = Dict{Symbol,Any}(
-        :n_before => n_before,
-        :n_after => n_after,
-        :n_rejected => n_rejected,
-        :threshold => threshold
-    )
-    record = StepRecord(step_number, cfg, t, summary)
-
     if dir !== nothing
         _save_densityfilter_outputs!(dir, cfg, v, t, neighbor_counts, threshold, n_before, n_after)
     end
 
     v >= Verbosity.PROGRESS && @info "  → $n_rejected rejected (threshold=$threshold) ($(round(t, digits=2))s)"
-    (filtered, (step_record=record, n_before=n_before, n_after=n_after, threshold=threshold))
+    (filtered, DensityFilterInfo(n_before, n_after, threshold, t))
 end
 
+_step_summary(info::DensityFilterInfo) = Dict{Symbol,Any}(
+    :n_before => info.n_before,
+    :n_after => info.n_after,
+    :n_rejected => info.n_before - info.n_after,
+    :threshold => info.threshold
+)
+
 """
-    analyze(smld, cfg::DensityFilterConfig; kwargs...) -> (filtered_smld, info)
+    analyze(smld, cfg::DensityFilterConfig; kwargs...) -> (filtered_smld, StepInfo)
 
 Filter localizations by neighbor density.
 """
-analyze(smld::BasicSMLD, cfg::DensityFilterConfig; kwargs...) = densityfilter_step(smld, cfg; kwargs...)
+function analyze(smld::BasicSMLD, cfg::DensityFilterConfig;
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD)
+    t = @elapsed (filtered, df_info) = densityfilter_step(smld, cfg;
+        outdir=outdir, step_number=step_number, verbose=verbose)
+    (filtered, StepInfo(step_number, cfg, t, _step_summary(df_info); info=df_info))
+end
 
 function _filter_by_density(smld::BasicSMLD, cfg::DensityFilterConfig)
     emitters = smld.emitters

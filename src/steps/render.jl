@@ -14,7 +14,7 @@ step_name(::SMLMRender.RenderConfig) = "render"
 """
     render_step(smld, cfg; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)
 
-Render localizations to a super-resolution image. Returns `(render_image, info)`.
+Render localizations to a super-resolution image. Returns `(render_image, RenderInfo)`.
 
 # Arguments
 - `smld::BasicSMLD`: Input localizations
@@ -26,7 +26,7 @@ Render localizations to a super-resolution image. Returns `(render_image, info)`
 - `verbose`: Verbosity level
 
 # Returns
-`(render_image, (step_record, render_info))`
+`(render_image, RenderInfo)`
 """
 function render_step(smld::BasicSMLD, cfg::SMLMRender.RenderConfig;
                      outdir::Union{String,Nothing}=nothing,
@@ -64,12 +64,6 @@ function render_step(smld::BasicSMLD, cfg::SMLMRender.RenderConfig;
     end
 
     n_locs = length(smld.emitters)
-    summary = Dict{Symbol,Any}(
-        :n_locs => n_locs,
-        :strategy => render_info.strategy,
-        :output_size => render_info.output_size
-    )
-    record = StepRecord(step_number, cfg, t, summary; info=render_info)
 
     if dir !== nothing
         mkpath(dir)
@@ -81,15 +75,26 @@ function render_step(smld::BasicSMLD, cfg::SMLMRender.RenderConfig;
     end
 
     v >= Verbosity.PROGRESS && @info "  → render $(render_info.output_size) ($(round(t, digits=2))s)"
-    (render_image, (step_record=record, render_info=render_info))
+    (render_image, render_info)
 end
 
+_step_summary(info::SMLMRender.RenderInfo) = Dict{Symbol,Any}(
+    :n_locs => info.n_emitters_rendered,
+    :strategy => info.strategy,
+    :output_size => info.output_size
+)
+
 """
-    analyze(smld, cfg::RenderConfig; kwargs...) -> (render_image, info)
+    analyze(smld, cfg::RenderConfig; kwargs...) -> (render_image, StepInfo)
 
 Render localizations to a super-resolution image.
 """
-analyze(smld::BasicSMLD, cfg::SMLMRender.RenderConfig; kwargs...) = render_step(smld, cfg; kwargs...)
+function analyze(smld::BasicSMLD, cfg::SMLMRender.RenderConfig;
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD)
+    t = @elapsed (render_image, render_info) = render_step(smld, cfg;
+        outdir=outdir, step_number=step_number, verbose=verbose)
+    (render_image, StepInfo(step_number, cfg, t, _step_summary(render_info); info=render_info))
+end
 
 function _write_render_stats(dir, cfg::SMLMRender.RenderConfig, render_info, n_locs, t)
     filepath = joinpath(dir, "stats.md")

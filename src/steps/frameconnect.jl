@@ -84,12 +84,15 @@ function _save_frameconnect_outputs!(dir::String, cfg::SMLMFrameConnection.Frame
     mkpath(dir)
     _save_config!(dir, cfg)
     _save_info!(dir, connect_info)
+    if connect_info.calibration !== nothing
+        _save_info!(dir, connect_info.calibration; section="calibration")
+    end
 
     if v >= Verbosity.STANDARD
         koff_stats = _save_frameconnect_figures(dir, smld_connected)
         _write_frameconnect_stats(dir, cfg, n_before, n_after, t, koff_stats, connect_info.calibration)
         if connect_info.calibration !== nothing
-            _save_calibration_figures(dir, connect_info.calibration)
+            _save_calibration_figures(dir, connect_info.calibration, smld_connected)
         end
     end
 end
@@ -202,41 +205,65 @@ end
 Save calibration diagnostic plots from FrameConnectInfo.calibration.
 Called when calibration was enabled and outdir is set.
 """
-function _save_calibration_figures(dir, cal::SMLMFrameConnection.CalibrationResult)
+function _save_calibration_figures(dir, cal::SMLMFrameConnection.CalibrationResult,
+                                   smld_connected::BasicSMLD)
     !cal.calibration_applied && return
     isempty(cal.bin_centers) && return
 
     _save_calibration_plot(dir, cal)
     _save_shift_histogram(dir, cal)
+    _save_drift_jitter_plot(dir, smld_connected)
 end
 
 """
 Plot uncertainty calibration: binned observed vs CRLB variance with WLS fit line.
+FC stores bin data in μm²; convert to nm² for readable axes.
 """
 function _save_calibration_plot(dir, cal::SMLMFrameConnection.CalibrationResult)
+    # Convert from μm² to nm² (×1e6)
+    bc_nm2 = cal.bin_centers .* 1e6
+    bo_nm2 = cal.bin_observed .* 1e6
+    A_nm2 = cal.A * 1e6
+    B = cal.B  # dimensionless ratio
+
     fig = Figure(size=(700, 500))
     ax = Axis(fig[1, 1],
-        xlabel = "CRLB Variance (combined x+y)",
-        ylabel = "Observed Variance (combined x+y)",
+        xlabel = "CRLB Variance (nm², combined x+y)",
+        ylabel = "Observed Variance (nm², combined x+y)",
         title = "Uncertainty Calibration: obs = A + B * CRLB"
     )
 
     # Data points
-    scatter!(ax, cal.bin_centers, cal.bin_observed, markersize=8, label="Binned data")
+    scatter!(ax, bc_nm2, bo_nm2, markersize=8, label="Binned data")
 
     # 1:1 line
-    x_range = range(minimum(cal.bin_centers), maximum(cal.bin_centers), length=100)
+    x_range = range(minimum(bc_nm2), maximum(bc_nm2), length=100)
     lines!(ax, collect(x_range), collect(x_range), color=:gray, linestyle=:dash, label="1:1 (ideal)")
 
     # Fit line
-    lines!(ax, collect(x_range), cal.A .+ cal.B .* collect(x_range), color=:red, linewidth=2,
-        label="Fit: A=$(round(cal.A, sigdigits=3)), B=$(round(cal.B, digits=2))")
+    lines!(ax, collect(x_range), A_nm2 .+ B .* collect(x_range), color=:red, linewidth=2,
+        label="Fit: A=$(round(A_nm2, sigdigits=3)) nm², B=$(round(B, digits=2))")
 
     axislegend(ax, position=:lt)
 
-    # Annotation
+    # Annotation with clamped/filtered info
+    k_str = "k = $(round(cal.k_scale, digits=2))"
+    if cal.k_scale == 1.0 && B < 1.0
+        k_str *= " (clamped)"
+    end
+    σ_str = "sigma_motion = $(round(cal.sigma_motion_nm, digits=1)) nm"
+    if cal.k_scale == 1.0 && cal.sigma_motion_nm == 0.0
+        σ_str *= " (A clamped)"
+    end
+    pairs_str = "$(cal.n_pairs) pairs"
+    if cal.n_tracks_filtered > 0
+        filt_pct = round(100 * cal.n_tracks_filtered / (cal.n_tracks_used + cal.n_tracks_filtered), digits=1)
+        pairs_str *= " ($(filt_pct)% filtered)"
+    end
+    pairs_str *= ", R2=$(round(cal.r_squared, digits=3))"
+
     text!(ax, 0.95, 0.05,
-        text="k = $(round(cal.k_scale, digits=2))\nsigma_motion = $(round(cal.sigma_motion_nm, digits=1)) nm\n$(cal.n_pairs) pairs, R2=$(round(cal.r_squared, digits=3))",
+        text="$k_str\n$σ_str\n$pairs_str",
         align=(:right, :bottom),
         space=:relative,
         fontsize=12)
@@ -281,4 +308,143 @@ function _save_shift_histogram(dir, cal::SMLMFrameConnection.CalibrationResult)
         align=(:right, :top), space=:relative, fontsize=11)
 
     save(joinpath(dir, "shift_histogram.png"), fig)
+end
+
+"""
+Plot frame-to-frame drift jitter and cumulative drift from linked emitters.
+Three panels: jitter X, jitter Y (top), cumulative drift (bottom).
+Uses global frame numbering (absolute_frame across datasets).
+"""
+function _save_drift_jitter_plot(dir, smld_connected::BasicSMLD)
+    emitters = smld_connected.emitters
+    isempty(emitters) && return
+    n_frames = smld_connected.n_frames
+
+    # Group emitters by track_id
+    track_dict = Dict{Int, Vector{eltype(emitters)}}()
+    for e in emitters
+        e.track_id > 0 || continue
+        if haskey(track_dict, e.track_id)
+            push!(track_dict[e.track_id], e)
+        else
+            track_dict[e.track_id] = [e]
+        end
+    end
+
+    # Collect weighted mean shift per (dataset, frame) transition
+    # Accumulate: key = (dataset, frame) => (sum_wx, sum_wy, sum_w_x, sum_w_y, count)
+    shift_accum = Dict{Tuple{Int,Int}, NTuple{5,Float64}}()
+
+    for (_, track_locs) in track_dict
+        sort!(track_locs, by = e -> (e.dataset, e.frame))
+        for i in 1:(length(track_locs) - 1)
+            e1, e2 = track_locs[i], track_locs[i + 1]
+            e1.dataset == e2.dataset && e2.frame == e1.frame + 1 || continue
+
+            dx = Float64(e2.x - e1.x)
+            dy = Float64(e2.y - e1.y)
+            vx = Float64(e1.σ_x^2 + e2.σ_x^2)
+            vy = Float64(e1.σ_y^2 + e2.σ_y^2)
+            (vx > 0 && vy > 0) || continue
+
+            w_x, w_y = 1.0 / vx, 1.0 / vy
+            key = (e1.dataset, e1.frame)
+            if haskey(shift_accum, key)
+                s = shift_accum[key]
+                shift_accum[key] = (s[1] + w_x * dx, s[2] + w_y * dy,
+                                    s[3] + w_x, s[4] + w_y, s[5] + 1.0)
+            else
+                shift_accum[key] = (w_x * dx, w_y * dy, w_x, w_y, 1.0)
+            end
+        end
+    end
+
+    isempty(shift_accum) && return
+
+    # Build per-dataset arrays with global frame numbering
+    datasets = sort(unique(first.(keys(shift_accum))))
+
+    # Per-dataset data: (global_frames, dx_nm, dy_nm, σ_dx_nm, σ_dy_nm)
+    dataset_data = Dict{Int, NamedTuple{(:gframes, :dx, :dy, :σ_dx, :σ_dy),
+                         Tuple{Vector{Int}, Vector{Float64}, Vector{Float64},
+                               Vector{Float64}, Vector{Float64}}}}()
+
+    for ds in datasets
+        frames = Int[]
+        dx_nm = Float64[]
+        dy_nm = Float64[]
+        σ_dx_nm = Float64[]
+        σ_dy_nm = Float64[]
+        for (key, s) in shift_accum
+            key[1] == ds || continue
+            # Global frame = (dataset-1) * n_frames + frame
+            gframe = (ds - 1) * n_frames + key[2]
+            push!(frames, gframe)
+            push!(dx_nm, s[1] / s[3] * 1000)   # weighted mean, μm -> nm
+            push!(dy_nm, s[2] / s[4] * 1000)
+            push!(σ_dx_nm, 1000.0 / sqrt(s[3])) # σ of weighted mean
+            push!(σ_dy_nm, 1000.0 / sqrt(s[4]))
+        end
+        perm = sortperm(frames)
+        dataset_data[ds] = (gframes=frames[perm], dx=dx_nm[perm], dy=dy_nm[perm],
+                            σ_dx=σ_dx_nm[perm], σ_dy=σ_dy_nm[perm])
+    end
+
+    # Build global sorted arrays for cumulative drift
+    all_gframes = Int[]
+    all_dx = Float64[]
+    all_dy = Float64[]
+    all_σ_dx = Float64[]
+    all_σ_dy = Float64[]
+    for (_, dd) in dataset_data
+        append!(all_gframes, dd.gframes)
+        append!(all_dx, dd.dx)
+        append!(all_dy, dd.dy)
+        append!(all_σ_dx, dd.σ_dx)
+        append!(all_σ_dy, dd.σ_dy)
+    end
+    gperm = sortperm(all_gframes)
+    all_gframes = all_gframes[gperm]
+    all_dx = all_dx[gperm]
+    all_dy = all_dy[gperm]
+    all_σ_dx = all_σ_dx[gperm]
+    all_σ_dy = all_σ_dy[gperm]
+
+    # Cumulative drift and uncertainty
+    cum_dx = cumsum(all_dx)
+    cum_dy = cumsum(all_dy)
+    cum_σ_dx = sqrt.(cumsum(all_σ_dx .^ 2))
+    cum_σ_dy = sqrt.(cumsum(all_σ_dy .^ 2))
+
+    colors = [:blue, :red, :green, :orange, :purple, :cyan, :magenta, :brown]
+
+    fig = Figure(size=(900, 700))
+
+    # Top row: jitter
+    ax1 = Axis(fig[1, 1], xlabel="Global Frame", ylabel="DX (nm)",
+               title="Frame-to-Frame X Shift (jitter)")
+    ax2 = Axis(fig[1, 2], xlabel="Global Frame", ylabel="DY (nm)",
+               title="Frame-to-Frame Y Shift (jitter)")
+
+    for (di, ds) in enumerate(datasets)
+        dd = dataset_data[ds]
+        c = colors[mod1(di, length(colors))]
+        lines!(ax1, dd.gframes, dd.dx, color=(c, 0.5), linewidth=0.5)
+        lines!(ax2, dd.gframes, dd.dy, color=(c, 0.5), linewidth=0.5)
+    end
+    hlines!(ax1, [0], color=:black, linestyle=:dash, linewidth=0.5)
+    hlines!(ax2, [0], color=:black, linestyle=:dash, linewidth=0.5)
+
+    # Bottom row: cumulative drift with confidence band
+    ax3 = Axis(fig[2, 1:2], xlabel="Global Frame", ylabel="Cumulative Drift (nm)",
+               title="Cumulative Drift from Linked Emitters")
+
+    band!(ax3, all_gframes, cum_dx .- cum_σ_dx, cum_dx .+ cum_σ_dx, color=(:red, 0.2))
+    lines!(ax3, all_gframes, cum_dx, color=:red, linewidth=1, label="X")
+    band!(ax3, all_gframes, cum_dy .- cum_σ_dy, cum_dy .+ cum_σ_dy, color=(:blue, 0.2))
+    lines!(ax3, all_gframes, cum_dy, color=:blue, linewidth=1, label="Y")
+    hlines!(ax3, [0], color=:black, linestyle=:dash, linewidth=0.5)
+    axislegend(ax3, position=:lt)
+
+    save(joinpath(dir, "drift_jitter.png"), fig)
 end

@@ -12,13 +12,13 @@ const DriftConfig = SMLMDriftCorrection.DriftConfig
 step_name(::SMLMDriftCorrection.DriftConfig) = "driftcorrect"
 
 """
-    driftcorrect_step(smld, cfg; outdir, step_number, verbose) -> (corrected_smld, info_nt)
+    driftcorrect_step(smld, cfg; outdir, step_number, verbose) -> (corrected_smld, DriftInfo)
 
 Run drift correction on `smld`, returning the corrected SMLD as the primary
-result, plus a NamedTuple with step metadata.
+result, plus the upstream DriftInfo.
 
 # Returns
-`(corrected_smld, (step_record, drift_model, drift_info))`
+`(corrected_smld, DriftInfo)`
 """
 function driftcorrect_step(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig;
                            outdir::Union{String,Nothing}=nothing,
@@ -35,17 +35,12 @@ function driftcorrect_step(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig
         v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" degree=cfg.degree dataset_mode=cfg.dataset_mode
     end
 
-    # Tuple-pattern: returns (corrected_smld, DriftInfo) where DriftInfo contains .model
-    t = @elapsed (corrected_smld, drift_info) = SMLMDriftCorrection.driftcorrect(smld;
-        degree = cfg.degree,
-        dataset_mode = cfg.dataset_mode,
-        n_chunks = cfg.n_chunks,
-        chunk_frames = cfg.chunk_frames,
-        maxn = cfg.maxn,
-        quality = cfg.quality,
-        auto_roi = cfg.auto_roi,
+    # Config dispatch with verbose injected from pipeline verbosity
+    drift_cfg = SMLMDriftCorrection.DriftConfig(;
+        (f => getfield(cfg, f) for f in fieldnames(SMLMDriftCorrection.DriftConfig) if f != :verbose)...,
         verbose = v >= Verbosity.DETAILED ? 1 : 0
     )
+    t = @elapsed (corrected_smld, drift_info) = SMLMDriftCorrection.driftcorrect(smld, drift_cfg)
 
     drift_model = drift_info.model
     n_datasets_val = drift_model.ndatasets
@@ -69,7 +64,33 @@ function driftcorrect_step(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig
             "unexpected for continuous acquisition - check data alignment"
     end
 
-    # Capture convergence info from drift_info (tuple-pattern)
+    if dir !== nothing
+        converged = hasproperty(drift_info, :converged) ? drift_info.converged : nothing
+        iterations = hasproperty(drift_info, :iterations) ? drift_info.iterations : nothing
+        _save_driftcorrect_outputs!(dir, drift_model, cfg, v, t, max_drift, inter_shifts, n_frames, converged, iterations, drift_info)
+    end
+
+    v >= Verbosity.PROGRESS && @info "  -> max drift $(round(max_drift, digits=1))nm, inter-shift $(round(max_intershift, digits=1))nm ($(round(t, digits=2))s)"
+    (corrected_smld, drift_info)
+end
+
+"""
+    analyze(smld, cfg::SMLMDriftCorrection.DriftConfig; kwargs...) -> (corrected_smld, StepInfo)
+
+Run drift correction on localizations.
+"""
+function analyze(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig;
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD)
+    n_frames = smld.n_frames
+    t = @elapsed (corrected, drift_info) = driftcorrect_step(smld, cfg;
+        outdir=outdir, step_number=step_number, verbose=verbose)
+
+    # Build summary (needs smld.n_frames for max_drift calculation)
+    drift_model = drift_info.model
+    n_datasets_val = drift_model.ndatasets
+    inter_shifts = _calc_inter_shifts(drift_model)
+    max_intershift = n_datasets_val > 1 ? maximum(inter_shifts[2:end]) : 0.0
+    max_drift = _calc_max_drift(drift_model, n_frames; n_chunks=cfg.n_chunks)
     converged = hasproperty(drift_info, :converged) ? drift_info.converged : nothing
     iterations = hasproperty(drift_info, :iterations) ? drift_info.iterations : nothing
 
@@ -84,22 +105,8 @@ function driftcorrect_step(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig
         :iterations => iterations
     )
 
-    record = StepRecord(step_number, cfg, t, summary; info=drift_info)
-
-    if dir !== nothing
-        _save_driftcorrect_outputs!(dir, drift_model, cfg, v, t, max_drift, inter_shifts, n_frames, converged, iterations, drift_info)
-    end
-
-    v >= Verbosity.PROGRESS && @info "  -> max drift $(round(max_drift, digits=1))nm, inter-shift $(round(max_intershift, digits=1))nm ($(round(t, digits=2))s)"
-    (corrected_smld, (step_record=record, drift_model=drift_model, drift_info=drift_info))
+    (corrected, StepInfo(step_number, cfg, t, summary; info=drift_info))
 end
-
-"""
-    analyze(smld, cfg::SMLMDriftCorrection.DriftConfig; kwargs...) -> (corrected_smld, info)
-
-Run drift correction on localizations.
-"""
-analyze(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig; kwargs...) = driftcorrect_step(smld, cfg; kwargs...)
 
 """Calculate inter-dataset shift magnitudes in nm (Euclidean distance)"""
 function _calc_inter_shifts(drift_model)

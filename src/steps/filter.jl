@@ -27,7 +27,7 @@ end
 """
     filter_step(smld, cfg; smld_raw=nothing, outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)
 
-Filter localizations by quality criteria. Returns `(filtered_smld, info)`.
+Filter localizations by quality criteria. Returns `(filtered_smld, FilterInfo)`.
 
 # Arguments
 - `smld::BasicSMLD`: Input localizations
@@ -40,7 +40,7 @@ Filter localizations by quality criteria. Returns `(filtered_smld, info)`.
 - `verbose`: Verbosity level
 
 # Returns
-`(filtered_smld, (step_record, n_before, n_after))`
+`(filtered_smld, FilterInfo)`
 """
 function filter_step(smld::BasicSMLD, cfg::FilterConfig;
                      smld_raw::Union{BasicSMLD,Nothing}=nothing,
@@ -56,27 +56,31 @@ function filter_step(smld::BasicSMLD, cfg::FilterConfig;
     t = @elapsed filtered = _filter_smld(smld, cfg)
     n_after = length(filtered.emitters)
 
-    summary = Dict{Symbol,Any}(
-        :n_before => n_before,
-        :n_after => n_after,
-        :acceptance => round(n_after / n_before, digits=3)
-    )
-    record = StepRecord(step_number, cfg, t, summary)
-
     if dir !== nothing
         _save_filter_outputs!(dir, cfg, v, t, n_before, n_after, smld_raw, filtered)
     end
 
     v >= Verbosity.PROGRESS && @info "  → $n_after / $n_before ($(round(t, digits=2))s)"
-    (filtered, (step_record=record, n_before=n_before, n_after=n_after))
+    (filtered, FilterInfo(n_before, n_after, t))
 end
 
+_step_summary(info::FilterInfo) = Dict{Symbol,Any}(
+    :n_before => info.n_before,
+    :n_after => info.n_after,
+    :acceptance => round(info.n_after / max(1, info.n_before), digits=3)
+)
+
 """
-    analyze(smld, cfg::FilterConfig; kwargs...) -> (filtered_smld, info)
+    analyze(smld, cfg::FilterConfig; kwargs...) -> (filtered_smld, StepInfo)
 
 Filter localizations by quality criteria.
 """
-analyze(smld::BasicSMLD, cfg::FilterConfig; kwargs...) = filter_step(smld, cfg; kwargs...)
+function analyze(smld::BasicSMLD, cfg::FilterConfig;
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
+    t = @elapsed (filtered, filter_info) = filter_step(smld, cfg;
+        outdir=outdir, step_number=step_number, verbose=verbose, kwargs...)
+    (filtered, StepInfo(step_number, cfg, t, _step_summary(filter_info); info=filter_info))
+end
 
 function _filter_smld(smld::BasicSMLD, cfg::FilterConfig)
     emitters = smld.emitters

@@ -63,7 +63,9 @@ config_clusters = AnalysisConfig(
         ),
         FrameConnectConfig(max_frame_gap = 5, calibration=CalibrationConfig()),
         DriftConfig(degree = 2),
-        RenderConfig(zoom = 20, colormap = :inferno),
+        RenderConfig(zoom=20, colormap=:inferno),
+        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame),
+        RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),
     ],
     verbose = Verbosity.STANDARD,
 )
@@ -82,7 +84,9 @@ config_lines = AnalysisConfig(
         ),
         FrameConnectConfig(max_frame_gap = 5, calibration=CalibrationConfig()),
         DriftConfig(degree = 2),
-        RenderConfig(zoom = 20, colormap = :inferno),
+        RenderConfig(zoom=20, colormap=:inferno),
+        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame),
+        RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),
     ],
     verbose = Verbosity.STANDARD,
 )

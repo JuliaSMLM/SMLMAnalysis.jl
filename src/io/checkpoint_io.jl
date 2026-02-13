@@ -95,7 +95,7 @@ end
 
 """
     save_pipeline_state(path::String, result::AnalysisResult;
-                        smld_raw=nothing, step_records=StepRecord[], camera=nothing)
+                        smld_raw=nothing, step_infos=StepInfo[], camera=nothing)
 
 Save pipeline state to JLD2 for cross-session resume.
 
@@ -103,12 +103,12 @@ Save pipeline state to JLD2 for cross-session resume.
 ```julia
 (result, info) = analyze(image_stacks, config)
 save_pipeline_state("output/checkpoint.jld2", result;
-    step_records=info.step_records, camera=config.camera)
+    step_infos=info.step_infos, camera=config.camera)
 ```
 """
 function save_pipeline_state(path::String, result::AnalysisResult;
                              smld_raw::Union{BasicSMLD,Nothing}=nothing,
-                             step_records::Vector{StepRecord}=StepRecord[],
+                             step_infos::Vector{StepInfo}=StepInfo[],
                              camera::Union{SMLMData.AbstractCamera,Nothing}=nothing)
     mkpath(dirname(path))
 
@@ -121,9 +121,9 @@ function save_pipeline_state(path::String, result::AnalysisResult;
         smld_raw_cols = smld_raw_cols,
         smld_connected_cols = smld_connected_cols,
         drift_model = result.drift_model,
-        step_records = step_records,
+        step_infos = step_infos,
         camera = camera,
-        checkpoint_version = 7
+        checkpoint_version = 8
     )
 
     path
@@ -135,7 +135,7 @@ end
 Load pipeline state from JLD2.
 
 Returns a NamedTuple with fields: smld, smld_raw, smld_connected, drift_model,
-step_records, camera.
+step_infos, camera.
 
 # Example
 ```julia
@@ -163,12 +163,15 @@ function load_pipeline_state(path::String)
         end
 
         camera = haskey(file, "camera") ? file["camera"] : nothing
-        step_records = if version >= 7 && haskey(file, "step_records")
-            file["step_records"]
+        step_infos = if version >= 8 && haskey(file, "step_infos")
+            file["step_infos"]
+        elseif version >= 7 && haskey(file, "step_records")
+            # Convert legacy StepRecord to StepInfo
+            StepInfo[StepInfo(r) for r in file["step_records"]]
         elseif haskey(file, "steps")
-            file["steps"]  # Legacy format
+            StepInfo[]  # Very old format - no conversion possible
         else
-            StepRecord[]
+            StepInfo[]
         end
 
         (
@@ -176,7 +179,7 @@ function load_pipeline_state(path::String)
             smld_raw = smld_raw,
             smld_connected = smld_connected,
             drift_model = file["drift_model"],
-            step_records = step_records,
+            step_infos = step_infos,
             camera = camera
         )
     end

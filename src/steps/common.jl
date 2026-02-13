@@ -2,6 +2,9 @@
 Common helper functions shared across analysis steps.
 """
 
+# Fallback summary dispatch - overridden per step
+_step_summary(::SMLMData.AbstractSMLMInfo) = Dict{Symbol, Any}()
+
 """
     _calculate_mode(values; n_bins=100)
 
@@ -159,17 +162,31 @@ function _save_config!(dir::String, cfg::SMLMData.AbstractSMLMConfig)
     open(filepath, "w") do io
         println(io, "# $(nameof(typeof(cfg)))")
         println(io, "type = \"$(nameof(typeof(cfg)))\"")
-        for f in fieldnames(typeof(cfg))
-            v = getfield(cfg, f)
-            # Skip camera objects (not TOML-serializable)
-            v isa SMLMData.AbstractCamera && continue
-            if v isa String
-                println(io, "$f = \"$v\"")
-            elseif v isa Symbol
-                println(io, "$f = \"$v\"")
-            elseif v !== nothing
-                println(io, "$f = $v")
-            end
+        _write_config_fields!(io, cfg)
+    end
+end
+
+"""Check if a value is a config-like struct (has fields, not a primitive/collection)."""
+_is_config_struct(v) = isstructtype(typeof(v)) && !(v isa Union{Number, String, Symbol, AbstractArray, AbstractDict, Tuple, SMLMData.AbstractCamera})
+
+"""Write config fields to TOML. Nested structs become [section] blocks."""
+function _write_config_fields!(io::IO, cfg; section::String="")
+    for f in fieldnames(typeof(cfg))
+        v = getfield(cfg, f)
+        v isa SMLMData.AbstractCamera && continue
+        v === nothing && continue
+        key = section == "" ? string(f) : "$(section).$(f)"
+        if _is_config_struct(v)
+            # Nested config -> TOML section
+            println(io, "\n[$f]")
+            println(io, "type = \"$(nameof(typeof(v)))\"")
+            _write_config_fields!(io, v; section=string(f))
+        elseif v isa String
+            println(io, "$f = \"$v\"")
+        elseif v isa Symbol
+            println(io, "$f = \"$v\"")
+        else
+            println(io, "$f = $v")
         end
     end
 end

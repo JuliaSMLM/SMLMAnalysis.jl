@@ -49,7 +49,7 @@ localizations via GaussMLE in a single step, with per-dataset processing.
 end
 
 """
-    detectfit(data, camera, cfg; kwargs...) -> (smld, info)
+    detectfit(data, camera, cfg; kwargs...) -> (smld, DetectFitInfo)
 
 Run combined detection and fitting on image data.
 
@@ -64,12 +64,7 @@ Run combined detection and fitting on image data.
 - `verbose::Int=Verbosity.STANDARD`: Verbosity level
 
 # Returns
-`(smld::BasicSMLD, info::NamedTuple)` where info contains:
-- `step_record::StepRecord`: Step record with timing and summary
-- `boxes_info::Vector`: Per-dataset BoxesInfo from SMLMBoxer
-- `fit_info::Vector`: Per-dataset FitInfo from GaussMLE
-- `elapsed_s::Float64`: Total elapsed time
-- `smld_raw::BasicSMLD`: Reference to the raw SMLD (same as smld)
+`(smld::BasicSMLD, info::DetectFitInfo)`
 """
 function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
                    outdir::Union{String,Nothing}=nothing,
@@ -175,20 +170,8 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
 
     smld = BasicSMLD(all_emitters, camera, n_frames_per_dataset, n_datasets_val, Dict{String,Any}())
 
-    summary = Dict{Symbol,Any}(
-        :n_datasets => n_datasets_val,
-        :n_rois => total_rois,
-        :n_fits => total_fits,
-        :n_frames_per_dataset => n_frames_per_dataset
-    )
-
-    # Aggregate per-dataset info (tuple-pattern)
-    step_info = (
-        boxes_info = all_boxes_info,
-        fit_info = all_fit_info,
-        elapsed_s = t
-    )
-    record = StepRecord(step_number, cfg, t, summary; info=step_info)
+    detect_info = DetectFitInfo(all_boxes_info, all_fit_info,
+        n_datasets_val, total_rois, total_fits, n_frames_per_dataset, t)
 
     if dir !== nothing
         _save_detectfit_outputs!(dir, smld, camera, cfg, v, t, total_rois, total_fits,
@@ -199,7 +182,7 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
 
     v >= Verbosity.PROGRESS && @info "  -> $total_fits fits from $total_rois ROIs across $n_datasets_val datasets ($(round(t, digits=2))s)"
 
-    return (smld, (step_record=record, boxes_info=all_boxes_info, fit_info=all_fit_info, elapsed_s=t, smld_raw=smld))
+    return (smld, detect_info)
 end
 
 """
@@ -322,19 +305,8 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
 
     smld = BasicSMLD(all_emitters, camera, n_frames_per_dataset, n_datasets_val, Dict{String,Any}())
 
-    summary = Dict{Symbol,Any}(
-        :n_datasets => n_datasets_val,
-        :n_rois => total_rois,
-        :n_fits => total_fits,
-        :n_frames_per_dataset => n_frames_per_dataset
-    )
-
-    step_info = (
-        boxes_info = all_boxes_info,
-        fit_info = all_fit_info,
-        elapsed_s = t
-    )
-    record = StepRecord(step_number, cfg, t, summary; info=step_info)
+    detect_info = DetectFitInfo(all_boxes_info, all_fit_info,
+        n_datasets_val, total_rois, total_fits, n_frames_per_dataset, t)
 
     if dir !== nothing
         _save_detectfit_outputs!(dir, smld, camera, cfg, v, t, total_rois, total_fits,
@@ -345,7 +317,7 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
 
     v >= Verbosity.PROGRESS && @info "  -> $total_fits fits from $total_rois ROIs across $n_datasets_val datasets ($(round(t, digits=2))s)"
 
-    return (smld, (step_record=record, boxes_info=all_boxes_info, fit_info=all_fit_info, elapsed_s=t, smld_raw=smld))
+    return (smld, detect_info)
 end
 
 # ============================================================
@@ -366,18 +338,24 @@ end
 # analyze() dispatch methods
 # ============================================================
 
+_step_summary(info::DetectFitInfo) = Dict{Symbol,Any}(
+    :n_datasets => info.n_datasets,
+    :n_rois => info.n_rois,
+    :n_fits => info.n_fits,
+    :n_frames_per_dataset => info.n_frames_per_dataset
+)
+
 """
-    analyze(data, cfg::DetectFitConfig; kwargs...) -> (smld, info)
+    analyze(data, cfg::DetectFitConfig; kwargs...) -> (smld, StepInfo)
 
 Run combined detection and fitting. Camera must be set in `cfg.camera`.
-
-# Arguments
-- `data::Vector{<:AbstractArray{<:Real,3}}`: Vector of image stacks (one per dataset)
-- `cfg::DetectFitConfig`: Configuration (must include `camera`)
 """
-function analyze(data::Vector{<:AbstractArray{<:Real,3}}, cfg::DetectFitConfig; kwargs...)
+function analyze(data::Vector{<:AbstractArray{<:Real,3}}, cfg::DetectFitConfig;
+                 outdir=nothing, step_number::Int=1, verbose::Int=Verbosity.STANDARD)
     cfg.camera === nothing && error("DetectFitConfig.camera is required for analyze(). Set camera=... in the config.")
-    detectfit(data, cfg.camera, cfg; kwargs...)
+    t = @elapsed (smld, detect_info) = detectfit(data, cfg.camera, cfg;
+        outdir=outdir, step_number=step_number, verbose=verbose)
+    (smld, StepInfo(step_number, cfg, t, _step_summary(detect_info); info=detect_info))
 end
 
 function analyze(images::AbstractArray{<:Real,3}, cfg::DetectFitConfig; kwargs...)
@@ -385,13 +363,16 @@ function analyze(images::AbstractArray{<:Real,3}, cfg::DetectFitConfig; kwargs..
 end
 
 """
-    analyze(cfg::DetectFitConfig; kwargs...) -> (smld, info)
+    analyze(cfg::DetectFitConfig; kwargs...) -> (smld, StepInfo)
 
 File-based detection and fitting. Requires `cfg.path` or `cfg.paths` and `cfg.camera`.
 """
-function analyze(cfg::DetectFitConfig; kwargs...)
+function analyze(cfg::DetectFitConfig;
+                 outdir=nothing, step_number::Int=1, verbose::Int=Verbosity.STANDARD)
     cfg.camera === nothing && error("DetectFitConfig.camera is required for analyze(). Set camera=... in the config.")
-    detectfit(cfg.camera, cfg; kwargs...)
+    t = @elapsed (smld, detect_info) = detectfit(cfg.camera, cfg;
+        outdir=outdir, step_number=step_number, verbose=verbose)
+    (smld, StepInfo(step_number, cfg, t, _step_summary(detect_info); info=detect_info))
 end
 
 # ============================================================
@@ -507,11 +488,13 @@ function _save_detectfit_outputs!(dir, smld, camera, cfg, v, t, n_rois, n_fits,
     if v >= Verbosity.STANDARD
         _write_detectfit_stats(dir, smld, cfg, t, n_rois, n_fits, n_datasets, n_frames_per_dataset)
 
-        # Generate detection overlay if we have sample data
+        # Generate detection and fit overlays if we have sample data
         if sample_images !== nothing && sample_roi_batch !== nothing
             box_colors = fill(:yellow, length(sample_roi_batch))
             _save_box_overlay(dir, "detection_overlay.png", sample_images, sample_roi_batch, box_colors;
                               title_prefix="Detection Frame", frame_labels=sample_original_frames)
+
+            _save_fit_overlay(dir, smld, sample_roi_batch, sample_images, sample_original_frames)
         end
     end
 
@@ -733,4 +716,72 @@ function _save_detectfit_detailed(dir, smld)
     save(joinpath(dir, "localizations_per_frame.png"), fig)
 
     return bleach_result
+end
+
+"""
+Generate fit overlay: boxes colored by fit quality (green=good, red/orange/purple=thresholds).
+
+Uses reasonable defaults for overlay coloring since filter thresholds live in FilterConfig.
+"""
+function _save_fit_overlay(dir, smld, sample_roi_batch, sample_images, sample_original_frames;
+                           min_photons=500.0, max_precision=0.007, min_pvalue=1e-3)
+    isempty(sample_roi_batch) && return
+
+    # Map sample index (1:N) to absolute frame number
+    sample_to_original = Dict(i => f for (i, f) in enumerate(sample_original_frames))
+    original_frame_set = Set(sample_original_frames)
+
+    # Build absolute frame for each emitter and filter to sampled frames
+    n_frames = smld.n_frames
+    emitter_abs_frames = [(e, (e.dataset - 1) * n_frames + e.frame) for e in smld.emitters]
+    sample_emitters = [(e, af) for (e, af) in emitter_abs_frames if af in original_frame_set]
+    isempty(sample_emitters) && return
+
+    # Color each ROI box by matching emitter quality
+    fit_colors = Symbol[]
+    pix_size = smld.camera.pixel_edges_x[2] - smld.camera.pixel_edges_x[1]
+    x_origin = smld.camera.pixel_edges_x[1]
+    y_origin = smld.camera.pixel_edges_y[1]
+
+    for i in 1:length(sample_roi_batch)
+        roi_frame_idx = sample_roi_batch.frame_indices[i]  # Remapped index (1:N)
+        original_frame = sample_to_original[roi_frame_idx]
+        roi_x = sample_roi_batch.x_corners[i] + sample_roi_batch.roi_size ÷ 2
+        roi_y = sample_roi_batch.y_corners[i] + sample_roi_batch.roi_size ÷ 2
+
+        # Find closest matching emitter by position in this frame
+        best_emitter = nothing
+        best_dist = Inf
+        for (e, af) in sample_emitters
+            if af == original_frame
+                ex_px = (e.x - x_origin) / pix_size
+                ey_px = (e.y - y_origin) / pix_size
+                dist = sqrt((ex_px - roi_x)^2 + (ey_px - roi_y)^2)
+                if dist < best_dist
+                    best_dist = dist
+                    best_emitter = e
+                end
+            end
+        end
+
+        if best_emitter !== nothing && best_dist < sample_roi_batch.roi_size
+            push!(fit_colors, _fit_box_color(best_emitter;
+                min_photons=min_photons, max_precision=max_precision, min_pvalue=min_pvalue))
+        else
+            push!(fit_colors, :gray)
+        end
+    end
+
+    prec_nm = round(max_precision * 1000, digits=1)
+    title = "Fit: green=pass  red=photons<$(round(Int, min_photons))  orange=prec>$(prec_nm)nm  purple=pval<$(min_pvalue)  gray=no match"
+    _save_box_overlay(dir, "fit_overlay.png", sample_images, sample_roi_batch, fit_colors;
+                      title_prefix="Frame", frame_labels=sample_original_frames, suptitle=title)
+end
+
+"""Determine box color based on fit quality."""
+function _fit_box_color(e; min_photons=500.0, max_precision=0.007, min_pvalue=1e-3)
+    e.photons < min_photons && return :red
+    max(e.σ_x, e.σ_y) > max_precision && return :orange
+    e.pvalue < min_pvalue && return :purple
+    return :green
 end

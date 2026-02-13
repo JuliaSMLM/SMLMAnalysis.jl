@@ -146,9 +146,13 @@ src/
 
 - **`AnalysisConfig`**: Complete pipeline description with camera, ordered steps vector, optional ROI, outdir, verbosity. Primary input to `analyze(data, config)`
 - **`AnalysisResult`**: Immutable result from `analyze()` holding final `smld`, optional `smld_connected`, and `drift_model`
-- **`AnalysisInfo`**: Aggregated metadata from all steps with `elapsed_s`, `steps` dict (step name → upstream info), and `step_records` vector
+- **`AnalysisInfo`**: Aggregated metadata from all steps with `elapsed_s`, `steps` dict (step name → upstream info), and `step_infos` vector
+- **`StepInfo <: AbstractSMLMInfo`**: Logged after each step with `elapsed_s`, `config`, `summary` dict, and typed `info::Union{AbstractSMLMInfo, Nothing}` field
 - **`DataSource`**: Lazy loading wrapper - holds `images` (single array), `images_vec` (Vector of arrays for multi-dataset), or `path` (file for deferred loading)
-- **`StepRecord`**: Logged after each step with timing, config, summary statistics, and upstream info struct
+- **`DetectFitInfo <: AbstractSMLMInfo`**: Info from detectfit step (boxes_info, fit_info, n_datasets, n_rois, n_fits)
+- **`FilterInfo <: AbstractSMLMInfo`**: Info from filter step (n_before, n_after, elapsed_s)
+- **`CalibrationInfo <: AbstractSMLMInfo`**: Info from calibration step (calibration_result, mean_chi2, k_scale, sigma_motion_nm)
+- **`DensityFilterInfo <: AbstractSMLMInfo`**: Info from density filter step (n_before, n_after, threshold)
 - **`Verbosity`**: Output detail levels (SILENT=0, PROGRESS=1, STANDARD=2, DETAILED=3, DEBUG=4)
 - **`MultiTargetConfig`**: Multi-channel analysis config with per-channel labels, colors, composite rendering
 - **`MultiTargetResult`**: Multi-channel result with per-channel `AnalysisResult` access via `result[:label]`
@@ -162,25 +166,29 @@ SMLMAnalysis follows the JuliaSMLM tuple-pattern where functions return `(result
 (result, info) = analyze(image_stacks, config)
 result.smld               # Final SMLD
 info.elapsed_s            # Total elapsed time in seconds
-info.steps[:detectfit]    # Per-step info from upstream packages
+info.steps[:detectfit]    # DetectFitInfo from detectfit step
 info.steps[:driftcorrect] # DriftInfo from SMLMDriftCorrection
+info.step_infos           # Vector{StepInfo} with per-step timing/config/summary
 
-# Step dispatch returns (result, NamedTuple)
-(smld, df_info) = analyze(image_stacks, DetectFitConfig(
+# Step dispatch returns (result, StepInfo) with typed info
+(smld, step_info) = analyze(image_stacks, DetectFitConfig(
     camera=cam, boxer=BoxerConfig(boxsize=9)))
-df_info.smld_raw          # Pre-filter SMLD
-df_info.step_record       # StepRecord with timing/summary
+step_info.info            # DetectFitInfo
+step_info.elapsed_s       # Step timing
 
-(smld, fc_info) = analyze(smld, FrameConnectConfig())
-fc_info.smld_connected    # Connected SMLD with track info
+(smld, step_info) = analyze(smld, FrameConnectConfig())
+step_info.info.connected  # Connected SMLD (FrameConnectInfo.connected)
+
+(smld, step_info) = analyze(smld, DriftConfig(degree=2))
+step_info.info.model      # Drift model (DriftInfo.model)
 ```
 
-Each step internally handles tuple returns from upstream packages:
-- `getboxes()` → `(ROIBatch, BoxesInfo)`
-- `fit()` → `(BasicSMLD, FitInfo)`
-- `frameconnect()` → `(combined, FrameConnectInfo)` with `.connected` in info
-- `driftcorrect()` → `(corrected_smld, DriftInfo)` with `.model` in info
-- `render()` → `(image, RenderInfo)`
+Each step uses config dispatch to upstream packages:
+- `SMLMBoxer.getboxes(images, camera, cfg.boxer)` → `(ROIBatch, BoxesInfo)`
+- `GaussMLE.fit(roi_batch, cfg.fitter)` → `(BasicSMLD, FitInfo)`
+- `SMLMFrameConnection.frameconnect(smld, cfg)` → `(combined, FrameConnectInfo)` with `.connected` in info
+- `SMLMDriftCorrection.driftcorrect(smld, cfg)` → `(corrected_smld, DriftInfo)` with `.model` in info
+- `SMLMRender.render(smld, cfg)` → `(image, RenderInfo)`
 
 ### Data Flow
 
@@ -261,26 +269,38 @@ The combined detection+fitting step supports three data source modes:
 
 H5 formats auto-detected: `:smart` (SMART microscope), `:mic` (LidkeLab MIC format with block-based loading)
 
-### Internal Step Functions
+### Two-Layer Step Architecture
 
-Each step has an internal function (NOT exported) called by the pipeline orchestrator in `analysis.jl`:
-- `detectfit(data, camera, cfg)` / `detectfit(camera, cfg)` (file-based)
-- `filter_step(smld, cfg)`
-- `frameconnect_step(smld, cfg)`
-- `calibration_step(smld, cfg; smld_connected)`
-- `driftcorrect_step(smld, cfg)`
-- `densityfilter_step(smld, cfg)`
-- `render_step(smld, cfg)`
+Each step has two layers:
 
-The public API is always `analyze()` dispatch. The orchestrator in `analysis.jl` has two nearly-identical `analyze()` methods (data-based and file-based) with an if/elseif chain dispatching to these internal functions.
+**Internal function** (NOT exported) — does the work, returns `(result, info::AbstractSMLMInfo)`:
+- `detectfit(data, camera, cfg)` → `(smld, DetectFitInfo)`
+- `filter_step(smld, cfg)` → `(filtered, FilterInfo)`
+- `frameconnect_step(smld, cfg)` → `(combined, FrameConnectInfo)` (upstream)
+- `calibration_step(smld, cfg; smld_connected)` → `(calibrated, CalibrationInfo)`
+- `driftcorrect_step(smld, cfg)` → `(corrected, DriftInfo)` (upstream, config dispatch)
+- `densityfilter_step(smld, cfg)` → `(filtered, DensityFilterInfo)`
+- `render_step(smld, cfg)` → `(image, RenderInfo)` (upstream)
+
+**analyze() dispatch** — thin wrapper that times the call and creates StepInfo:
+```julia
+function analyze(smld::BasicSMLD, cfg::DriftConfig; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)
+    t = @elapsed (corrected, drift_info) = driftcorrect_step(smld, cfg; outdir, step_number, verbose)
+    (corrected, StepInfo(step_number, cfg, t, _step_summary(drift_info); info=drift_info))
+end
+```
+
+The orchestrator in `analysis.jl` calls `analyze()` for each step, collecting `StepInfo`s.
 
 ### Adding a New Step
 
 1. Create `src/steps/yourstep.jl` with:
    - `@kwdef struct YourStepConfig <: SMLMData.AbstractSMLMConfig` with relevant fields
-   - Internal function: `yourstep(smld, cfg; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)` returning `(result, (step_record=..., ...))`
-   - Dispatch method: `analyze(smld::BasicSMLD, cfg::YourStepConfig; kw...) = yourstep(smld, cfg; kw...)`
-2. Include it in `SMLMAnalysis.jl` and export the config type
+   - `struct YourStepInfo <: SMLMData.AbstractSMLMInfo` with step-specific fields
+   - Internal function: `yourstep(smld, cfg; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)` returning `(result, YourStepInfo(...))`
+   - `_step_summary(info::YourStepInfo)` returning `Dict{Symbol,Any}` for summary display
+   - Dispatch method: `analyze(smld::BasicSMLD, cfg::YourStepConfig; ...)` that times the call and returns `(result, StepInfo(...))`
+2. Include it in `SMLMAnalysis.jl` and export the config and info types
 3. Add `elseif cfg isa YourStepConfig` case in BOTH `analyze()` methods in `analysis.jl` (data-based and file-based)
 
 ### Re-exported Types
