@@ -19,7 +19,6 @@ config = AnalysisConfig(
             fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20)),
         FilterConfig(photons=(500.0, Inf)),
         FrameConnectConfig(max_frame_gap=5),
-        CalibrationConfig(clamp_k_to_one=true),
         DriftConfig(degree=2, dataset_mode=:registered),
         RenderConfig(zoom=20, colormap=:inferno),
     ],
@@ -93,6 +92,10 @@ export frameconnect
 # Re-export FrameConnectConfig (used directly as step config)
 const FrameConnectConfig = SMLMFrameConnection.FrameConnectConfig
 export FrameConnectConfig
+# Re-export CalibrationConfig and CalibrationResult (used via FrameConnectConfig.calibration)
+const CalibrationConfig = SMLMFrameConnection.CalibrationConfig
+const CalibrationResult = SMLMFrameConnection.CalibrationResult
+export CalibrationConfig, CalibrationResult
 
 # Re-export from SMLMDriftCorrection
 export driftcorrect
@@ -110,7 +113,8 @@ export RenderConfig
 include("types.jl")
 export Verbosity
 export DataSource, get_images, n_datasets, n_frames_per_dataset
-export AnalysisConfig, AnalysisResult, AnalysisInfo, StepRecord
+export AnalysisConfig, AnalysisResult, AnalysisInfo, StepInfo
+export DetectFitInfo, FilterInfo, DensityFilterInfo
 export MultiTargetConfig, MultiTargetResult, MultiTargetInfo
 export crop_camera, crop_images
 export step_name
@@ -134,8 +138,7 @@ export FilterConfig
 include("steps/frameconnect.jl")
 # FrameConnectConfig is re-exported above (from SMLMFrameConnection)
 
-include("steps/calibration_step.jl")
-export CalibrationConfig
+# CalibrationConfig is re-exported above (from SMLMFrameConnection)
 
 include("steps/driftcorrect.jl")
 # DriftConfig is defined as const alias in driftcorrect.jl and exported below
@@ -173,10 +176,5 @@ export analyze
 # ============================================================
 include("multitarget.jl")
 
-# ============================================================
-# Calibration (used by calibration step)
-# ============================================================
-include("calibration.jl")
-export analyze_frameconnect_drift, apply_uncertainty_calibration, recombine_tracks
 
 end # module

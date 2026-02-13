@@ -2,7 +2,7 @@
 Analysis orchestrator: analyze() function and helpers.
 
 The analyze() function is a fold over pipeline steps, threading SMLD state
-through pure step functions and collecting StepRecords.
+through analyze() dispatch and collecting StepInfos.
 """
 
 # ============================================================
@@ -130,9 +130,8 @@ function analyze(data, config::AnalysisConfig)
     # Pipeline state - threaded through step functions
     smld = nothing
     smld_raw = nothing
-    smld_connected = nothing
     drift_model = nothing
-    step_records = StepRecord[]
+    step_infos = StepInfo[]
     step_number = 0
 
     _with_log_file(outdir) do
@@ -143,48 +142,41 @@ function analyze(data, config::AnalysisConfig)
                 # Normalize data for detectfit, inject camera from AnalysisConfig
                 data_vec = _normalize_data(data)
                 cfg = _inject_camera(cfg, camera)
-                (smld, info) = detectfit(data_vec, cfg.camera, cfg;
+                (smld, step_info) = analyze(data_vec, cfg;
                     outdir=outdir, step_number=step_number, verbose=v)
-                smld_raw = info.smld_raw
-                push!(step_records, info.step_record)
+                smld_raw = smld
+                push!(step_infos, step_info)
 
             elseif cfg isa FilterConfig
                 smld === nothing && error("FilterConfig requires a prior detectfit step")
-                (smld, info) = filter_step(smld, cfg;
+                (smld, step_info) = analyze(smld, cfg;
                     smld_raw=smld_raw, outdir=outdir, step_number=step_number, verbose=v)
-                push!(step_records, info.step_record)
+                push!(step_infos, step_info)
 
             elseif cfg isa SMLMFrameConnection.FrameConnectConfig
                 smld === nothing && error("FrameConnectConfig requires a prior detectfit step")
-                (smld, info) = frameconnect_step(smld, cfg;
+                (smld, step_info) = analyze(smld, cfg;
                     outdir=outdir, step_number=step_number, verbose=v)
-                smld_connected = info.smld_connected
-                push!(step_records, info.step_record)
-
-            elseif cfg isa CalibrationConfig
-                smld === nothing && error("CalibrationConfig requires a prior detectfit step")
-                (smld, info) = calibration_step(smld, cfg;
-                    smld_connected=smld_connected, outdir=outdir, step_number=step_number, verbose=v)
-                push!(step_records, info.step_record)
+                push!(step_infos, step_info)
 
             elseif cfg isa SMLMDriftCorrection.DriftConfig
                 smld === nothing && error("DriftConfig requires a prior detectfit step")
-                (smld, info) = driftcorrect_step(smld, cfg;
+                (smld, step_info) = analyze(smld, cfg;
                     outdir=outdir, step_number=step_number, verbose=v)
-                drift_model = info.drift_model
-                push!(step_records, info.step_record)
+                drift_model = step_info.info.model
+                push!(step_infos, step_info)
 
             elseif cfg isa DensityFilterConfig
                 smld === nothing && error("DensityFilterConfig requires a prior detectfit step")
-                (smld, info) = densityfilter_step(smld, cfg;
+                (smld, step_info) = analyze(smld, cfg;
                     outdir=outdir, step_number=step_number, verbose=v)
-                push!(step_records, info.step_record)
+                push!(step_infos, step_info)
 
             elseif cfg isa SMLMRender.RenderConfig
                 smld === nothing && error("RenderConfig requires a prior detectfit step")
-                (_, info) = render_step(smld, cfg;
+                (_, step_info) = analyze(smld, cfg;
                     outdir=outdir, step_number=step_number, verbose=v)
-                push!(step_records, info.step_record)
+                push!(step_infos, step_info)
 
             else
                 error("Unknown step config type: $(typeof(cfg))")
@@ -194,21 +186,28 @@ function analyze(data, config::AnalysisConfig)
 
     # Build result
     smld === nothing && error("Pipeline produced no SMLD. Did you include a DetectFitConfig step?")
+    # Extract smld_connected from FrameConnect step if it was run
+    smld_connected = nothing
+    for si in step_infos
+        if si.info isa SMLMFrameConnection.FrameConnectInfo
+            smld_connected = si.info.connected
+        end
+    end
     result = AnalysisResult(smld, smld_connected, drift_model)
 
     # Build info
     elapsed_s = (time_ns() - t_start) / 1e9
     steps_dict = Dict{Symbol, Any}()
-    for rec in step_records
-        if rec.info !== nothing
-            steps_dict[Symbol(rec.name)] = rec.info
+    for si in step_infos
+        if si.info !== nothing
+            steps_dict[Symbol(si.name)] = si.info
         end
     end
-    info = AnalysisInfo(elapsed_s, steps_dict, step_records)
+    info = AnalysisInfo(elapsed_s, steps_dict, step_infos)
 
     # Write summary
     if outdir !== nothing
-        _write_summary(outdir, step_records, smld)
+        _write_summary(outdir, step_infos, smld)
     end
 
     v >= Verbosity.PROGRESS && @info "Pipeline complete: $(length(smld.emitters)) localizations ($(round(elapsed_s, digits=2))s)"
@@ -274,9 +273,8 @@ function analyze(config::AnalysisConfig)
 
     smld = nothing
     smld_raw = nothing
-    smld_connected = nothing
     drift_model = nothing
-    step_records = StepRecord[]
+    step_infos = StepInfo[]
     step_number = 0
 
     _with_log_file(outdir) do
@@ -285,48 +283,41 @@ function analyze(config::AnalysisConfig)
 
             if cfg isa DetectFitConfig
                 cfg = _inject_camera(cfg, camera)
-                (smld, info) = detectfit(cfg.camera, cfg;
+                (smld, step_info) = analyze(cfg;
                     outdir=outdir, step_number=step_number, verbose=v)
-                smld_raw = info.smld_raw
-                push!(step_records, info.step_record)
+                smld_raw = smld
+                push!(step_infos, step_info)
 
             elseif cfg isa FilterConfig
                 smld === nothing && error("FilterConfig requires a prior detectfit step")
-                (smld, info) = filter_step(smld, cfg;
+                (smld, step_info) = analyze(smld, cfg;
                     smld_raw=smld_raw, outdir=outdir, step_number=step_number, verbose=v)
-                push!(step_records, info.step_record)
+                push!(step_infos, step_info)
 
             elseif cfg isa SMLMFrameConnection.FrameConnectConfig
                 smld === nothing && error("FrameConnectConfig requires a prior detectfit step")
-                (smld, info) = frameconnect_step(smld, cfg;
+                (smld, step_info) = analyze(smld, cfg;
                     outdir=outdir, step_number=step_number, verbose=v)
-                smld_connected = info.smld_connected
-                push!(step_records, info.step_record)
-
-            elseif cfg isa CalibrationConfig
-                smld === nothing && error("CalibrationConfig requires a prior detectfit step")
-                (smld, info) = calibration_step(smld, cfg;
-                    smld_connected=smld_connected, outdir=outdir, step_number=step_number, verbose=v)
-                push!(step_records, info.step_record)
+                push!(step_infos, step_info)
 
             elseif cfg isa SMLMDriftCorrection.DriftConfig
                 smld === nothing && error("DriftConfig requires a prior detectfit step")
-                (smld, info) = driftcorrect_step(smld, cfg;
+                (smld, step_info) = analyze(smld, cfg;
                     outdir=outdir, step_number=step_number, verbose=v)
-                drift_model = info.drift_model
-                push!(step_records, info.step_record)
+                drift_model = step_info.info.model
+                push!(step_infos, step_info)
 
             elseif cfg isa DensityFilterConfig
                 smld === nothing && error("DensityFilterConfig requires a prior detectfit step")
-                (smld, info) = densityfilter_step(smld, cfg;
+                (smld, step_info) = analyze(smld, cfg;
                     outdir=outdir, step_number=step_number, verbose=v)
-                push!(step_records, info.step_record)
+                push!(step_infos, step_info)
 
             elseif cfg isa SMLMRender.RenderConfig
                 smld === nothing && error("RenderConfig requires a prior detectfit step")
-                (_, info) = render_step(smld, cfg;
+                (_, step_info) = analyze(smld, cfg;
                     outdir=outdir, step_number=step_number, verbose=v)
-                push!(step_records, info.step_record)
+                push!(step_infos, step_info)
 
             else
                 error("Unknown step config type: $(typeof(cfg))")
@@ -335,19 +326,25 @@ function analyze(config::AnalysisConfig)
     end
 
     smld === nothing && error("Pipeline produced no SMLD. Did you include a DetectFitConfig step?")
+    smld_connected = nothing
+    for si in step_infos
+        if si.info isa SMLMFrameConnection.FrameConnectInfo
+            smld_connected = si.info.connected
+        end
+    end
     result = AnalysisResult(smld, smld_connected, drift_model)
 
     elapsed_s = (time_ns() - t_start) / 1e9
     steps_dict = Dict{Symbol, Any}()
-    for rec in step_records
-        if rec.info !== nothing
-            steps_dict[Symbol(rec.name)] = rec.info
+    for si in step_infos
+        if si.info !== nothing
+            steps_dict[Symbol(si.name)] = si.info
         end
     end
-    info = AnalysisInfo(elapsed_s, steps_dict, step_records)
+    info = AnalysisInfo(elapsed_s, steps_dict, step_infos)
 
     if outdir !== nothing
-        _write_summary(outdir, step_records, smld)
+        _write_summary(outdir, step_infos, smld)
     end
 
     v >= Verbosity.PROGRESS && @info "Pipeline complete: $(length(smld.emitters)) localizations ($(round(elapsed_s, digits=2))s)"
@@ -359,20 +356,20 @@ end
 # Pipeline summary
 # ============================================================
 
-function _write_summary(outdir::String, step_records::Vector{StepRecord}, smld)
+function _write_summary(outdir::String, step_infos::Vector{StepInfo}, smld)
     filepath = joinpath(outdir, "summary.md")
     open(filepath, "w") do io
         println(io, "# Analysis Summary\n")
         println(io, "Generated: $(Dates.now())")
         println(io, "")
 
-        total_time = sum(s.timing for s in step_records)
+        total_time = sum(s.elapsed_s for s in step_infos)
         println(io, "## Pipeline")
         println(io, "")
         println(io, "| Step | Name | Time | Result |")
         println(io, "|------|------|------|--------|")
 
-        for s in step_records
+        for s in step_infos
             result_str = if haskey(s.summary, :n_rois)
                 "$(s.summary[:n_rois]) ROIs"
             elseif haskey(s.summary, :n_fits)
@@ -388,7 +385,7 @@ function _write_summary(outdir::String, step_records::Vector{StepRecord}, smld)
             else
                 ""
             end
-            println(io, "| $(s.number) | $(s.name) | $(round(s.timing, digits=2))s | $result_str |")
+            println(io, "| $(s.number) | $(s.name) | $(round(s.elapsed_s, digits=2))s | $result_str |")
         end
 
         println(io, "")

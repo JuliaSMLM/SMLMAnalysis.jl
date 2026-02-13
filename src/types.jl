@@ -160,10 +160,10 @@ Derive step name from config type (e.g., `FilterConfig` → `"filter"`, `DriftCo
 step_name(cfg::SMLMData.AbstractSMLMConfig) = lowercase(replace(string(nameof(typeof(cfg))), r"Config|Options" => ""))
 
 # ============================================================
-# Step Record - what gets logged after each step
+# StepInfo - typed step record (replaces StepRecord)
 # ============================================================
 """
-    StepRecord
+    StepInfo <: AbstractSMLMInfo
 
 Record of a completed pipeline step, stored in AnalysisInfo.
 
@@ -172,10 +172,27 @@ Record of a completed pipeline step, stored in AnalysisInfo.
 - `name::String`: Step name (derived from config type, e.g. `"filter"`)
 - `config::AbstractSMLMConfig`: The config used for this step
 - `timestamp::DateTime`: When the step completed
-- `timing::Float64`: Elapsed time in seconds
+- `elapsed_s::Float64`: Elapsed time in seconds
 - `summary::Dict{Symbol, Any}`: Summary statistics (counts, acceptance rates, etc.)
-- `info::Any`: Upstream package info struct (BoxesInfo, FitInfo, DriftInfo, etc.)
+- `info::Union{AbstractSMLMInfo, Nothing}`: Typed upstream info struct (DriftInfo, FrameConnectInfo, etc.)
 """
+struct StepInfo <: SMLMData.AbstractSMLMInfo
+    number::Int
+    name::String
+    config::SMLMData.AbstractSMLMConfig
+    timestamp::DateTime
+    elapsed_s::Float64
+    summary::Dict{Symbol, Any}
+    info::Union{SMLMData.AbstractSMLMInfo, Nothing}
+end
+
+function StepInfo(number::Int, cfg::SMLMData.AbstractSMLMConfig, elapsed_s::Float64, summary::Dict{Symbol,Any}; info=nothing)
+    StepInfo(number, step_name(cfg), cfg, now(), elapsed_s, summary, info)
+end
+
+# ============================================================
+# StepRecord - deprecated, kept for JLD2 checkpoint backward compat
+# ============================================================
 struct StepRecord
     number::Int
     name::String
@@ -183,11 +200,54 @@ struct StepRecord
     timestamp::DateTime
     timing::Float64
     summary::Dict{Symbol, Any}
-    info::Any  # Upstream package info struct (BoxesInfo, FitInfo, DriftInfo, etc.)
+    info::Any
 end
 
-function StepRecord(number::Int, cfg::SMLMData.AbstractSMLMConfig, timing::Float64, summary::Dict{Symbol,Any}; info=nothing)
-    StepRecord(number, step_name(cfg), cfg, now(), timing, summary, info)
+"""Convert legacy StepRecord to StepInfo."""
+function StepInfo(r::StepRecord)
+    StepInfo(r.number, r.name, r.config, r.timestamp, r.timing, r.summary, nothing)
+end
+
+# ============================================================
+# Native info structs for SMLMAnalysis-owned steps
+# ============================================================
+
+"""
+    DetectFitInfo <: AbstractSMLMInfo
+
+Info from combined detection and fitting step.
+"""
+struct DetectFitInfo <: SMLMData.AbstractSMLMInfo
+    boxes_info::Vector{Any}
+    fit_info::Vector{Any}
+    n_datasets::Int
+    n_rois::Int
+    n_fits::Int
+    n_frames_per_dataset::Int
+    elapsed_s::Float64
+end
+
+"""
+    FilterInfo <: AbstractSMLMInfo
+
+Info from quality filtering step.
+"""
+struct FilterInfo <: SMLMData.AbstractSMLMInfo
+    n_before::Int
+    n_after::Int
+    elapsed_s::Float64
+end
+
+"""
+    DensityFilterInfo <: AbstractSMLMInfo
+
+Info from density-based filtering step.
+"""
+struct DensityFilterInfo <: SMLMData.AbstractSMLMInfo
+    n_before::Int
+    n_after::Int
+    threshold::Int
+    elapsed_s::Float64
 end
 
 # ============================================================
@@ -201,15 +261,15 @@ Aggregated metadata from all analysis steps, following the tuple-pattern.
 # Fields
 - `elapsed_s::Float64`: Total elapsed time in seconds
 - `steps::Dict{Symbol, Any}`: Step name → upstream info struct mapping
-- `step_records::Vector{StepRecord}`: Full step history with timing and config
+- `step_infos::Vector{StepInfo}`: Full step history with timing and config
 """
 struct AnalysisInfo <: SMLMData.AbstractSMLMInfo
     elapsed_s::Float64
     steps::Dict{Symbol, Any}
-    step_records::Vector{StepRecord}
+    step_infos::Vector{StepInfo}
 end
 
-AnalysisInfo() = AnalysisInfo(0.0, Dict{Symbol, Any}(), StepRecord[])
+AnalysisInfo() = AnalysisInfo(0.0, Dict{Symbol, Any}(), StepInfo[])
 
 # ============================================================
 # AnalysisResult - immutable result from analyze()
@@ -305,19 +365,19 @@ function Base.show(io::IO, cfg::SMLMData.AbstractSMLMConfig)
     print(io, "$(nameof(T))($(join(vals, ", ")))")
 end
 
-function Base.show(io::IO, r::StepRecord)
-    print(io, "Step $(r.number): $(r.name) ($(round(r.timing, digits=2))s)")
+function Base.show(io::IO, si::StepInfo)
+    print(io, "Step $(si.number): $(si.name) ($(round(si.elapsed_s, digits=2))s)")
 end
 
 function Base.show(io::IO, info::AnalysisInfo)
-    n = length(info.step_records)
+    n = length(info.step_infos)
     print(io, "AnalysisInfo: $n steps, $(round(info.elapsed_s, digits=2))s")
 end
 
 function Base.show(io::IO, ::MIME"text/plain", info::AnalysisInfo)
-    println(io, "AnalysisInfo: $(length(info.step_records)) steps, $(round(info.elapsed_s, digits=2))s")
-    for s in info.step_records
-        println(io, "  $(s.number). $(s.name) ($(round(s.timing, digits=2))s)")
+    println(io, "AnalysisInfo: $(length(info.step_infos)) steps, $(round(info.elapsed_s, digits=2))s")
+    for s in info.step_infos
+        println(io, "  $(s.number). $(s.name) ($(round(s.elapsed_s, digits=2))s)")
         for (k, v) in s.summary
             println(io, "      $k: $v")
         end

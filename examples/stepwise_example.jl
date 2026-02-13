@@ -12,10 +12,9 @@ This example demonstrates:
 Pipeline steps (all via analyze() dispatch):
 1. analyze(images, DetectFitConfig(...)) - detection and fitting
 2. analyze(smld, FilterConfig(...)) - quality filtering
-3. analyze(smld, FrameConnectConfig(...)) - link across frames
-4. analyze(smld, CalibrationConfig(...)) - calibrate uncertainties
-5. analyze(smld, DriftConfig(...)) - correct sample drift
-6. analyze(smld, RenderConfig(...)) - super-resolution image
+3. analyze(smld, FrameConnectConfig(...)) - link across frames + calibrate uncertainties
+4. analyze(smld, DriftConfig(...)) - correct sample drift
+5. analyze(smld, RenderConfig(...)) - super-resolution image
 
 The stepwise approach is best for:
 - Interactive parameter tuning
@@ -73,7 +72,7 @@ println("="^60)
     fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20, backend=:cpu),
 ); outdir=OUTPUT_DIR, step_number=1, verbose=Verbosity.STANDARD)
 
-smld_raw = df_info.smld_raw
+smld_raw = smld  # Raw SMLD from detectfit, before filtering
 
 println("  Fitted emitters: $(length(smld.emitters))")
 println("  Mean photons: $(round(mean([e.photons for e in smld.emitters]), digits=0))")
@@ -113,55 +112,48 @@ println("="^60)
 
 (smld, fc_info) = analyze(smld, FrameConnectConfig(
     max_frame_gap = 5,
-    max_sigma_dist = 5.0
+    max_sigma_dist = 5.0,
+    calibration = CalibrationConfig(clamp_k_to_one=true)
 ); outdir=OUTPUT_DIR, step_number=3, verbose=Verbosity.STANDARD)
 
-smld_connected = fc_info.smld_connected
+smld_connected = fc_info.info.connected  # FrameConnectInfo.connected
 
 n_tracks = length(unique([e.track_id for e in smld_connected.emitters]))
 println("  Tracks: $n_tracks")
+
+# Calibration diagnostics from FrameConnectInfo
+cal = fc_info.info.calibration
+if cal !== nothing && cal.calibration_applied
+    println("  Calibration: k=$(round(cal.k_scale, digits=2)), sigma_motion=$(round(cal.sigma_motion_nm, digits=1))nm")
+end
 println()
 
 # ============================================================================
-# Step 4: Uncertainty Calibration
+# Step 4: Drift Correction
 # ============================================================================
 
 println("="^60)
-println("Step 4: Uncertainty Calibration")
-println("="^60)
-
-(smld, cal_info) = analyze(smld, CalibrationConfig(
-    clamp_k_to_one = true
-); smld_connected=smld_connected, outdir=OUTPUT_DIR, step_number=4, verbose=Verbosity.STANDARD)
-
-println()
-
-# ============================================================================
-# Step 5: Drift Correction
-# ============================================================================
-
-println("="^60)
-println("Step 5: Drift Correction")
+println("Step 4: Drift Correction")
 println("="^60)
 
 (smld, dc_info) = analyze(smld, DriftConfig(
     degree = 2,
     dataset_mode = :registered
-); outdir=OUTPUT_DIR, step_number=5, verbose=Verbosity.STANDARD)
+); outdir=OUTPUT_DIR, step_number=4, verbose=Verbosity.STANDARD)
 
-drift_model = dc_info.drift_model
+drift_model = dc_info.info.model  # DriftInfo.model
 println()
 
 # ============================================================================
-# Step 6: Render
+# Step 5: Render
 # ============================================================================
 
 println("="^60)
-println("Step 6: Render")
+println("Step 5: Render")
 println("="^60)
 
 (_, r_info) = analyze(smld, RenderConfig(zoom=20, colormap=:inferno);
-    outdir=OUTPUT_DIR, step_number=6, verbose=Verbosity.STANDARD)
+    outdir=OUTPUT_DIR, step_number=5, verbose=Verbosity.STANDARD)
 
 println()
 
@@ -180,8 +172,8 @@ config = AnalysisConfig(
             boxer=BoxerConfig(boxsize=7, min_photons=500.0, psf_sigma=psf_sigma, backend=:cpu),
             fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20, backend=:cpu)),
         FilterConfig(photons=(500.0, Inf), precision=(0.0, 0.015), pvalue=(1e-3, 1.0)),
-        FrameConnectConfig(max_frame_gap=5, max_sigma_dist=5.0),
-        CalibrationConfig(clamp_k_to_one=true),
+        FrameConnectConfig(max_frame_gap=5, max_sigma_dist=5.0,
+            calibration=CalibrationConfig(clamp_k_to_one=true)),
         DriftConfig(degree=2, dataset_mode=:registered),
         RenderConfig(zoom=20, colormap=:inferno),
     ],

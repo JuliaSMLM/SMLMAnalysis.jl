@@ -68,8 +68,7 @@ config = AnalysisConfig(
             precision = (0.0, 0.007),
             pvalue = (1e-3, 1.0)
         ),
-        FrameConnectConfig(max_frame_gap = 5),
-        CalibrationConfig(),
+        FrameConnectConfig(max_frame_gap = 5, calibration=CalibrationConfig()),
         DriftConfig(degree = 2),
         DensityFilterConfig(n_sigma=2.0, min_neighbors=:auto),
         RenderConfig(zoom=20, colormap=:inferno),

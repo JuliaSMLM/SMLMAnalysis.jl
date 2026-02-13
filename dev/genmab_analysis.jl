@@ -66,8 +66,8 @@ config = AnalysisConfig(
         FrameConnectConfig(
             max_frame_gap = 5,
             max_sigma_dist = 5.0,
+            calibration = CalibrationConfig(),
         ),
-        CalibrationConfig(),
         DriftConfig(
             degree = 2,
             dataset_mode = :registered,
