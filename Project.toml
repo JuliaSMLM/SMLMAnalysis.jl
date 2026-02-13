@@ -1,6 +1,6 @@
 name = "SMLMAnalysis"
 uuid = "5ba66956-a7ba-489c-b260-90fb8f3af39c"
-version = "1.1.0-DEV"
+version = "1.1.0"
 authors = ["klidke@unm.edu"]
 
 [deps]

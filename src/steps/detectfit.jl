@@ -173,7 +173,7 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
                 remaining = n_sample_frames - samples_collected
                 remaining_ds = n_datasets_val - ds + 1
                 n_this = clamp(remaining ÷ remaining_ds, 1, min(n_frames_ds, remaining))
-                idxs = [round(Int, x) for x in range(1, n_frames_ds, length=n_this)]
+                idxs = n_this == 1 ? [cld(n_frames_ds, 2)] : [round(Int, x) for x in range(1, n_frames_ds, length=n_this)]
 
                 for idx in idxs
                     push!(sample_image_slices, collect(images[:, :, idx]))
@@ -338,7 +338,7 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
                 remaining = n_sample_frames - samples_collected
                 remaining_ds = n_datasets_val - ds + 1
                 n_this = clamp(remaining ÷ remaining_ds, 1, min(n_frames_ds, remaining))
-                idxs = [round(Int, x) for x in range(1, n_frames_ds, length=n_this)]
+                idxs = n_this == 1 ? [cld(n_frames_ds, 2)] : [round(Int, x) for x in range(1, n_frames_ds, length=n_this)]
 
                 for idx in idxs
                     push!(sample_image_slices, collect(images[:, :, idx]))
