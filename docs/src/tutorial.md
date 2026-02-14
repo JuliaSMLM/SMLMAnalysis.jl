@@ -174,7 +174,7 @@ The valley between the isolated peak (low neighbors) and the clustered peak (hig
 RenderConfig(zoom=20, colormap=:inferno)
 
 # Histogram binning colored by time
-RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame)
+RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing)
 
 # Circle rendering colored by time
 RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame)

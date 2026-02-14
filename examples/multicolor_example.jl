@@ -64,7 +64,7 @@ config_clusters = AnalysisConfig(
         FrameConnectConfig(max_frame_gap = 5, calibration=CalibrationConfig()),
         DriftConfig(degree = 2),
         RenderConfig(zoom=20, colormap=:inferno),
-        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame),
+        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing),
         RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),
     ],
     verbose = Verbosity.STANDARD,
@@ -85,7 +85,7 @@ config_lines = AnalysisConfig(
         FrameConnectConfig(max_frame_gap = 5, calibration=CalibrationConfig()),
         DriftConfig(degree = 2),
         RenderConfig(zoom=20, colormap=:inferno),
-        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame),
+        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing),
         RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),
     ],
     verbose = Verbosity.STANDARD,
@@ -104,7 +104,7 @@ mt = MultiTargetConfig(
     colors = [:red, :green],
     render_zoom = 20,
     render_strategies = [GaussianRender(), HistogramRender()],
-    outdir = joinpath(@__DIR__, "output", "multicolor_example"),
+    outdir = let d = joinpath(@__DIR__, "output", "multicolor_example"); rm(d; force=true, recursive=true); d end,
 )
 
 (result, info) = analyze([

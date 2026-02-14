@@ -51,7 +51,7 @@ function generate_single_target()
         ndatasets = n_datasets,
     )
     pattern = Nmer2D(n=8, d=0.05)
-    fluor = GenericFluor(photons=50000.0, k_off=20.0, k_on=0.02)
+    fluor = GenericFluor(photons=50000.0, k_off=20.0, k_on=0.04)
 
     t = @elapsed begin
         (_, sim_info) = simulate(sim_params; pattern=pattern, molecule=fluor, camera=camera)
@@ -105,7 +105,7 @@ function generate_lines()
         ndatasets = n_datasets,
     )
     pattern = Line2D(λ=50.0, endpoints=[(-0.4, 0.0), (0.4, 0.0)])
-    fluor = GenericFluor(photons=50000.0, k_off=20.0, k_on=0.02)
+    fluor = GenericFluor(photons=50000.0, k_off=20.0, k_on=0.04)
 
     t = @elapsed begin
         (_, sim_info) = simulate(sim_params; pattern=pattern, molecule=fluor, camera=camera)

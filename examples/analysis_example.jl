@@ -54,14 +54,15 @@ println("="^60)
 println("Running analysis with AnalysisConfig")
 println("="^60)
 
+rm(OUTPUT_DIR; force=true, recursive=true)
 mkpath(OUTPUT_DIR)
 
 config = AnalysisConfig(
     camera = camera,
     steps = [
         DetectFitConfig(
-            boxer = BoxerConfig(boxsize=7, min_photons=500.0, psf_sigma=psf_sigma, backend=:cpu),
-            fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20, backend=:cpu),
+            boxer = BoxerConfig(boxsize=7, min_photons=500.0, psf_sigma=psf_sigma),
+            fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20),
         ),
         FilterConfig(
             photons = (500.0, Inf),
@@ -72,7 +73,7 @@ config = AnalysisConfig(
         DriftConfig(degree = 2),
         DensityFilterConfig(n_sigma=2.0, min_neighbors=:auto),
         RenderConfig(zoom=20, colormap=:inferno),
-        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame),
+        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing),
         RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),
     ],
     outdir = OUTPUT_DIR,

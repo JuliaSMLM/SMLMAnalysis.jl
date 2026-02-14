@@ -56,6 +56,7 @@ println("Camera: $(data["camera_nx"])x$(data["camera_ny"]) pixels, $(data["camer
 println("Data: $(length(image_stacks)) datasets x $(data["n_frames"]) frames/dataset")
 println()
 
+rm(OUTPUT_DIR; force=true, recursive=true)
 mkpath(OUTPUT_DIR)
 
 # ============================================================================
@@ -161,7 +162,7 @@ println("="^60)
 println("Step 6: Render (Histogram)")
 println("="^60)
 
-(_, _) = analyze(smld, RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame);
+(_, _) = analyze(smld, RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing);
     outdir=OUTPUT_DIR, step_number=6, verbose=Verbosity.STANDARD)
 
 println()
@@ -194,7 +195,7 @@ config = AnalysisConfig(
             calibration=CalibrationConfig(clamp_k_to_one=true)),
         DriftConfig(degree=2, dataset_mode=:registered),
         RenderConfig(zoom=20, colormap=:inferno),
-        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame),
+        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing),
         RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),
     ],
     outdir = OUTPUT_DIR,

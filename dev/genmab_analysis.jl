@@ -48,6 +48,7 @@ println("Camera: $(info.width)x$(info.height), $(pixel_size*1000)nm pixels (per-
 # Analysis Setup - File-based (MIC format auto-detects blocks as datasets)
 # =============================================================================
 outdir = joinpath(@__DIR__, "output", "hexabody_dstorm")
+rm(outdir; force=true, recursive=true)
 
 config = AnalysisConfig(
     camera = camera,
@@ -79,7 +80,7 @@ config = AnalysisConfig(
             min_neighbors = :auto
         ),
         RenderConfig(zoom=20, colormap=:inferno),
-        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame),
+        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing),
         RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),
     ],
     outdir = outdir,

@@ -48,6 +48,7 @@ roi = (x = info.width÷2+1:info.width, y = 1:info.height)
 println("ROI: x=$(roi.x), y=$(roi.y) (right half)")
 
 outdir = joinpath(@__DIR__, "output", "gatta_beads")
+rm(outdir; force=true, recursive=true)
 
 # Single continuous acquisition = 1-element Vector
 image_stacks = [images]
@@ -81,7 +82,7 @@ config = AnalysisConfig(
             min_neighbors = :auto
         ),
         RenderConfig(zoom=20, colormap=:inferno, clip_percentile=0.999),
-        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame),
+        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing),
         RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),
     ],
     roi = roi,

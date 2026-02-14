@@ -34,6 +34,7 @@ camera = SCMOSCamera(info.width, info.height, pixel_size, cal.readnoise;
 
 # Analysis
 outdir = joinpath(@__DIR__, "output", outname)
+rm(outdir; force=true, recursive=true)
 
 config = AnalysisConfig(
     camera = camera,
@@ -65,7 +66,7 @@ config = AnalysisConfig(
             min_neighbors = :auto
         ),
         RenderConfig(zoom=20, colormap=:inferno),
-        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame),
+        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing),
         RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),
     ],
     outdir = outdir,
