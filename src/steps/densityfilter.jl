@@ -212,6 +212,7 @@ function _save_densityfilter_outputs!(dir::String, cfg::DensityFilterConfig, v::
                                       neighbor_counts::Vector{Int}, threshold::Int, n_before::Int, n_after::Int)
     mkpath(dir)
     _save_config!(dir, cfg)
+    _save_info!(dir, DensityFilterInfo(n_before, n_after, threshold, t))
 
     if v >= Verbosity.STANDARD
         _write_densityfilter_stats(dir, cfg, n_before, n_after, threshold, t)
