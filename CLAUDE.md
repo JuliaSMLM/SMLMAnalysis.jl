@@ -133,7 +133,7 @@ src/
 │   ├── driftcorrect.jl  # Uses SMLMDriftCorrection.DriftConfig directly
 │   ├── densityfilter.jl # DensityFilterConfig, analyze(smld, cfg) → (smld, info)
 │   ├── render.jl        # analyze(smld, RenderConfig) → (image, info)
-│   ├── bagol.jl         # BaGoLConfig (legacy run_step! API, not yet ported to analyze() dispatch)
+│   ├── bagol.jl         # BaGoLConfig (NOT included in module - legacy, not yet ported)
 └── io/
     ├── smld_io.jl       # HDF5 serialization (save_smld, load_smld)
     ├── smart_h5.jl      # SMART microscope HDF5 import
