@@ -85,15 +85,17 @@ _step_summary(info::SMLMRender.RenderInfo) = Dict{Symbol,Any}(
 )
 
 """
-    analyze(smld, cfg::RenderConfig; kwargs...) -> (render_image, StepInfo)
+    analyze(smld, cfg::RenderConfig; kwargs...) -> (smld, StepInfo)
 
-Render localizations to a super-resolution image.
+Render localizations to a super-resolution image. The image is saved to disk
+(via render_step); the smld passes through so subsequent pipeline steps can
+operate on it. Use `render_step` or `SMLMRender.render` directly to get the image.
 """
 function analyze(smld::BasicSMLD, cfg::SMLMRender.RenderConfig;
                  outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
     t = @elapsed (render_image, render_info) = render_step(smld, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose)
-    (render_image, StepInfo(step_number, cfg, t, _step_summary(render_info); info=render_info))
+    (smld, StepInfo(step_number, cfg, t, _step_summary(render_info); info=render_info))
 end
 
 function _write_render_stats(dir, cfg::SMLMRender.RenderConfig, render_info, n_locs, t)
