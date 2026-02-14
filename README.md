@@ -82,7 +82,7 @@ smld = load_smld("checkpoint.h5")
 
 ## Composable Pipeline
 
-The `steps` vector is composable — after `DetectFitConfig` (which must be first since it produces localizations from raw images), you can use any combination, order, or repetition of steps.
+The `steps` vector is composable — after `DetectFitConfig` (which must be first since it produces localizations from raw images), you can use any combination, order, or repetition of steps. The pipeline uses Julia's method dispatch on `(state_type, config_type)` for routing: there is no step registry or `if/elseif` chain. Wrong step ordering gives a `MethodError`, not a silent failure.
 
 **Minimal pipeline** — detect+fit and render, skipping all intermediate processing:
 
@@ -121,7 +121,7 @@ steps = [
 
 **Config provenance**: `DetectFitConfig` and `FilterConfig` are defined in SMLMAnalysis. `FrameConnectConfig` and `DriftConfig` are re-exported from upstream packages (SMLMFrameConnection, SMLMDriftCorrection). `RenderConfig` is re-exported from SMLMRender.
 
-**Extensibility**: Define a new `struct YourConfig <: AbstractSMLMConfig`, implement `analyze(smld, YourConfig)`, and add it to the steps vector.
+**Extensibility**: Adding a step requires no changes to the pipeline orchestrator. Define `struct YourConfig <: AbstractSMLMConfig`, implement `analyze(smld::BasicSMLD, cfg::YourConfig; kwargs...)` returning `(result, StepInfo(...))`, and your step works in both config-driven and step-by-step workflows. See the [Guide](https://JuliaSMLM.github.io/SMLMAnalysis.jl/stable/guide/#Extending-the-Pipeline) for a worked example.
 
 ### Rendered output
 
@@ -245,7 +245,7 @@ config = AnalysisConfig(
 | `result.drift_model` | Fitted drift model (if DriftConfig used) |
 | `info.elapsed_s` | Total wall time (seconds) |
 | `info.steps[:detectfit]` | Per-step upstream info struct |
-| `info.step_records` | Vector of StepRecords with timing, config, and summary stats |
+| `info.step_infos` | Vector of StepInfos with timing, config, and summary stats |
 
 When `outdir` is set, each step writes to `outdir/01_detectfit/`, `outdir/02_filter/`, etc., with `config.toml`, `stats.md`, and diagnostic plots.
 

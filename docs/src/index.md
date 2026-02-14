@@ -47,7 +47,7 @@ save_smld("after_detectfit.h5", smld)
 ## Documentation
 
 - **[Tutorial](@ref)** -- Full pipeline walkthrough with figures at every step
-- **[Guide](@ref)** -- Concepts: multi-dataset architecture, drift modes, I/O
+- **[Guide](@ref)** -- Concepts: pipeline architecture, extending with new steps, multi-dataset, drift modes, I/O
 - **[API Reference](@ref)** -- Complete function and type documentation
 
 ## Installation

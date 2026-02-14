@@ -20,7 +20,7 @@ analyze
 AnalysisConfig
 AnalysisResult
 AnalysisInfo
-StepRecord
+StepInfo
 DataSource
 ```
 

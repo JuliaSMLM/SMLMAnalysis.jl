@@ -4,6 +4,16 @@ Conceptual reference for topics that need more explanation than a docstring prov
 
 ## Pipeline Architecture
 
+### Design philosophy
+
+SMLMAnalysis uses **Julia's method dispatch as the pipeline routing mechanism**. There is no step registry, no string-based lookup, and no `if/elseif` chain in the pipeline loop. Each analysis step is a config type (`<: AbstractSMLMConfig`), and calling `analyze(state, config)` dispatches to the correct implementation based on the types of both arguments. This means:
+
+- **Composability**: Steps can be freely reordered, repeated, or omitted -- the pipeline loop doesn't care what the steps are, only that `analyze()` has a method for `(state_type, config_type)`.
+- **Extensibility**: Adding a new step requires no changes to the pipeline orchestrator. Define a config type and an `analyze()` method, and the step works automatically.
+- **Error clarity**: Wrong step ordering produces a `MethodError` (e.g., `FilterConfig` before `DetectFitConfig` gives "no method matching `analyze(::Vector{...}, ::FilterConfig)`"), not a silent failure.
+
+Every `analyze()` call returns a `(result, info)` tuple following the JuliaSMLM tuple-pattern. The result becomes the input state for the next step; the info is collected for provenance.
+
 ### The `steps` vector
 
 `AnalysisConfig.steps` is a composable list of `AbstractSMLMConfig` subtypes. The orchestrator in `analysis.jl` iterates through them sequentially, threading state between steps:
@@ -24,20 +34,45 @@ DetectFitConfig (required first)
 
 The only ordering constraint: `DetectFitConfig` must be first because it is the only step that produces a `BasicSMLD` from raw image data. All other steps receive and return an existing `smld`.
 
-### Two-level dispatch
+### Two-layer step architecture
 
-The pipeline operates at two levels:
+Each step has two layers:
 
-1. **Orchestrator** (`analyze(data, AnalysisConfig)`): Loops over `steps`, calls each step, threads `smld` state, and collects `StepRecord`s into `AnalysisInfo`
-2. **Step dispatch** (`analyze(smld, StepConfig)`): Each step config type has its own `analyze()` method that does the actual work
+1. **Internal function** (not exported) -- does the actual work, returns `(result, YourStepInfo)`:
+   - `filter_step(smld, cfg; outdir, step_number, verbose)` → `(filtered_smld, FilterInfo)`
+   - `densityfilter_step(smld, cfg; ...)` → `(filtered_smld, DensityFilterInfo)`
+   - Or delegates to an upstream package: `SMLMDriftCorrection.driftcorrect(smld, cfg)` → `(corrected, DriftInfo)`
 
-The step-by-step workflow (`analyze(smld, cfg)`) already supports any config in any order — the orchestrator just automates the loop and collects metadata.
+2. **`analyze()` dispatch** -- thin wrapper that times the call and creates a `StepInfo`:
+   ```julia
+   function analyze(smld::BasicSMLD, cfg::FilterConfig;
+                    outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
+       t = @elapsed (filtered, filter_info) = filter_step(smld, cfg;
+           outdir=outdir, step_number=step_number, verbose=verbose)
+       (filtered, StepInfo(step_number, cfg, t, _step_summary(filter_info); info=filter_info))
+   end
+   ```
+
+The `kwargs...` in the `analyze()` signature is required -- the pipeline loop passes context keywords (like `smld_raw`) and each step must accept (and ignore) keywords it doesn't use.
+
+### Pipeline orchestrator
+
+The orchestrator (`_run_pipeline` in `analysis.jl`) is a simple fold:
+
+```julia
+for (i, cfg) in enumerate(steps)
+    cfg = _prepare_step(cfg, camera)       # inject camera into DetectFitConfig
+    (state, step_info) = analyze(state, cfg; outdir=outdir, step_number=i, verbose=v)
+    push!(step_infos, step_info)
+end
+```
+
+No `isa` checks, no step registry. Dispatch handles everything. After the loop, the orchestrator collects `StepInfo`s into `AnalysisInfo` and extracts special state (`smld_connected`, `drift_model`) from the collected infos.
 
 ### State threading
 
 The orchestrator maintains `smld` as the working state. Each step receives the current `smld` and returns an updated one. Additional state captured from specific steps:
 
-- `smld_raw` — from `DetectFitConfig` (pre-filter SMLD)
 - `smld_connected` — from `FrameConnectConfig` (tracks with multi-frame info)
 - `drift_model` — from `DriftConfig` (fitted drift polynomial)
 
@@ -62,13 +97,164 @@ The orchestrator maintains `smld` as the working state. Each step receives the c
 
 SMLMAnalysis defines some step configs locally (`DetectFitConfig`, `FilterConfig`, `CalibrationConfig`, `DensityFilterConfig`) and re-exports others from upstream packages (`FrameConnectConfig`, `DriftConfig`, `RenderConfig`). Extending the pipeline with a new upstream package follows the same re-export pattern.
 
-### Adding a new step
+## Extending the Pipeline
 
-1. Define `@kwdef struct YourConfig <: AbstractSMLMConfig` in `src/steps/yourstep.jl`
-2. Implement internal function `yourstep(smld, cfg; outdir, step_number, verbose)` returning `(result, info_namedtuple)`
-3. Add dispatch: `analyze(smld::BasicSMLD, cfg::YourConfig; kw...) = yourstep(smld, cfg; kw...)`
-4. Add `elseif cfg isa YourConfig` in **both** `analyze()` methods in `analysis.jl` (data-based and file-based)
-5. Export `YourConfig` from `SMLMAnalysis.jl`
+### Overview
+
+Adding a new step to SMLMAnalysis requires **no changes to the pipeline orchestrator**. The dispatch-based architecture means you only need to:
+
+1. Define a config type (`<: AbstractSMLMConfig`)
+2. Define an info type (`<: AbstractSMLMInfo`)
+3. Implement the internal work function
+4. Implement the `analyze()` dispatch wrapper
+5. Implement `_step_summary()` for the info type
+6. Include and export from the module
+
+### Worked example: adding a spatial ROI filter
+
+Here is a complete, minimal step that filters localizations to a spatial region:
+
+**Step 1: Config and info types**
+
+```julia
+# src/steps/spatialfilter.jl
+
+"""
+    SpatialFilterConfig <: AbstractSMLMConfig
+
+Filter localizations to a rectangular spatial region.
+
+# Keywords
+- `x_range`: (min, max) in microns
+- `y_range`: (min, max) in microns
+"""
+@kwdef struct SpatialFilterConfig <: SMLMData.AbstractSMLMConfig
+    x_range::Tuple{Float64, Float64}
+    y_range::Tuple{Float64, Float64}
+end
+
+"""Info from spatial filtering step."""
+struct SpatialFilterInfo <: SMLMData.AbstractSMLMInfo
+    n_before::Int
+    n_after::Int
+end
+```
+
+**Step 2: Internal work function**
+
+The internal function does the actual computation. It receives the standard keyword arguments (`outdir`, `step_number`, `verbose`) and returns `(result, info)`:
+
+```julia
+function spatialfilter_step(smld::BasicSMLD, cfg::SpatialFilterConfig;
+                            outdir::Union{String,Nothing}=nothing,
+                            step_number::Int=0,
+                            verbose::Int=Verbosity.STANDARD)
+    v = verbose
+    dir = step_outdir(outdir, step_number, cfg)
+
+    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))"
+
+    n_before = length(smld.emitters)
+    keep = [cfg.x_range[1] <= e.x <= cfg.x_range[2] &&
+            cfg.y_range[1] <= e.y <= cfg.y_range[2] for e in smld.emitters]
+    filtered = BasicSMLD(smld.emitters[keep], smld.camera, smld.n_frames, smld.n_datasets, smld.metadata)
+    n_after = length(filtered.emitters)
+
+    if dir !== nothing
+        mkpath(dir)
+        _save_config!(dir, cfg)        # writes config.toml
+    end
+
+    v >= Verbosity.PROGRESS && @info "  → $n_after / $n_before"
+    (filtered, SpatialFilterInfo(n_before, n_after))
+end
+```
+
+**Step 3: Summary dispatch**
+
+`_step_summary` converts the info struct to a `Dict{Symbol, Any}` for the pipeline summary table:
+
+```julia
+_step_summary(info::SpatialFilterInfo) = Dict{Symbol,Any}(
+    :n_before => info.n_before,
+    :n_after => info.n_after,
+    :acceptance => round(info.n_after / max(1, info.n_before), digits=3)
+)
+```
+
+**Step 4: `analyze()` dispatch**
+
+The thin wrapper times the call and creates a `StepInfo`. The `kwargs...` is required for pipeline compatibility:
+
+```julia
+function analyze(smld::BasicSMLD, cfg::SpatialFilterConfig;
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
+    t = @elapsed (filtered, sf_info) = spatialfilter_step(smld, cfg;
+        outdir=outdir, step_number=step_number, verbose=verbose)
+    (filtered, StepInfo(step_number, cfg, t, _step_summary(sf_info); info=sf_info))
+end
+```
+
+**Step 5: Include and export**
+
+In `src/SMLMAnalysis.jl`:
+
+```julia
+include("steps/spatialfilter.jl")
+export SpatialFilterConfig, SpatialFilterInfo
+```
+
+**Usage** -- works immediately in both workflows:
+
+```julia
+# Config-driven
+config = AnalysisConfig(
+    camera = cam,
+    steps = [
+        DetectFitConfig(boxer=BoxerConfig(boxsize=9)),
+        SpatialFilterConfig(x_range=(5.0, 15.0), y_range=(5.0, 15.0)),
+        RenderConfig(zoom=20),
+    ],
+)
+(result, info) = analyze(image_stacks, config)
+
+# Step-by-step
+(smld, _) = analyze(smld, SpatialFilterConfig(x_range=(5.0, 15.0), y_range=(5.0, 15.0)))
+```
+
+### Key patterns
+
+**StepInfo creation**: Every `analyze()` dispatch must return `(result, StepInfo(...))`. The `StepInfo` constructor takes `(step_number, config, elapsed_s, summary_dict; info=typed_info)`.
+
+**`_step_summary` dispatch**: Implement `_step_summary(info::YourInfo)` returning `Dict{Symbol, Any}`. This is used for the pipeline summary table (`summary.md`). The fallback returns an empty dict.
+
+**Shared helpers** (from `src/steps/common.jl`):
+- `step_outdir(outdir, step_number, cfg)` -- computes `outdir/02_spatialfilter/`
+- `_save_config!(dir, cfg)` -- writes `config.toml` with all config fields
+- `_save_info!(dir, info)` -- writes `info.toml` with scalar fields from the info struct
+- `step_name(cfg)` -- derives name from type (e.g., `SpatialFilterConfig` → `"spatialfilter"`)
+
+**Pipeline cache** (for inter-step data passing via filesystem):
+- `save_cache(outdir, "filename.jld2"; key=value)` -- save data for downstream steps
+- `load_cache(outdir, "filename.jld2")` -- load cached data (returns `nothing` if missing)
+
+### Re-exporting from an upstream package
+
+If the step is implemented in a separate package (like `DriftConfig` from SMLMDriftCorrection), use a const alias and delegate:
+
+```julia
+# In SMLMAnalysis.jl
+const MyStepConfig = MyUpstreamPackage.MyStepConfig
+
+# In steps/mystep.jl
+function analyze(smld::BasicSMLD, cfg::MyUpstreamPackage.MyStepConfig;
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
+    t = @elapsed (result, upstream_info) = MyUpstreamPackage.mystep(smld, cfg)
+    (result, StepInfo(step_number, cfg, t, _step_summary(upstream_info); info=upstream_info))
+end
+```
+
+This keeps the upstream package independent while making its config a first-class pipeline step.
 
 ## Multi-Dataset Architecture
 

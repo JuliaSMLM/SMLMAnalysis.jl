@@ -2,6 +2,18 @@
 
 AI-parseable API reference for SMLMAnalysis.jl.
 
+## Design Concepts
+
+**Dispatch-based pipeline**: The pipeline loop calls `analyze(state, config)` for each step. Routing is pure Julia method dispatch on `(state_type, config_type)` -- no step registry, no `isa` checks. Adding a new step requires only a new config type and `analyze()` method; the orchestrator needs no changes.
+
+**Tuple-pattern returns**: Every `analyze()` call returns `(result, info)`. Pipeline-level: `(AnalysisResult, AnalysisInfo)`. Step-level: `(smld_or_image, StepInfo)`.
+
+**Two-layer steps**: Each step has an internal function that does the work (e.g., `filter_step()` → `(filtered, FilterInfo)`) and a thin `analyze()` wrapper that times it and creates a `StepInfo`. The `StepInfo` wraps the typed info with step number, timing, config, and summary dict.
+
+**Composability**: Steps can be reordered, repeated, or omitted freely after `DetectFitConfig`. Wrong ordering gives a `MethodError`.
+
+**Config provenance**: Some configs are defined locally (`DetectFitConfig`, `FilterConfig`), others are re-exported from upstream packages via const aliases (`DriftConfig = SMLMDriftCorrection.DriftConfig`).
+
 ## Core Functions
 
 ### analyze
@@ -35,9 +47,9 @@ Individual steps use `analyze()` with typed configs:
 (image, info) = analyze(smld, cfg::RenderConfig; outdir, step_number, verbose)
 ```
 
-Each returns `(result, NamedTuple)` where the NamedTuple includes:
-- `step_record::StepRecord` - timing, config, summary stats
-- Step-specific fields (e.g., `smld_raw` from detectfit, `smld_connected` from frameconnect, `drift_model`)
+Each returns `(result, StepInfo)` where StepInfo wraps:
+- Timing (`elapsed_s`), config, step number, summary dict
+- Typed `info` field (e.g., `FilterInfo`, `DriftInfo`, `FrameConnectInfo`)
 
 ## Types
 
@@ -68,7 +80,7 @@ Aggregated metadata from pipeline run.
 **Fields:**
 - `elapsed_s::Float64` - Total elapsed time in seconds
 - `steps::Dict{Symbol, Any}` - Per-step info keyed by step name
-- `step_records::Vector{StepRecord}` - Full step history
+- `step_infos::Vector{StepInfo}` - Full step history
 
 **Step info types:**
 - `:detectfit` -> `(boxes=BoxesInfo, fit=FitInfo)`
@@ -77,18 +89,23 @@ Aggregated metadata from pipeline run.
 - `:driftcorrect` -> `DriftInfo`
 - `:render` -> `Vector{RenderInfo}`
 
-### StepRecord
+### StepInfo <: AbstractSMLMInfo
 
 Logged after each step execution.
 
 **Fields:**
-- `number::Int` - Step number
-- `name::String` - Step name
-- `config::StepConfig` - Configuration used
-- `timestamp::DateTime` - Execution time
-- `timing::Float64` - Duration in seconds
-- `summary::Dict{Symbol, Any}` - Step statistics
-- `info::Any` - Upstream package info
+- `number::Int` - Step number in the pipeline
+- `name::String` - Step name (derived from config type, e.g., `"filter"`)
+- `config::AbstractSMLMConfig` - Configuration used
+- `timestamp::DateTime` - When the step completed
+- `elapsed_s::Float64` - Duration in seconds
+- `summary::Dict{Symbol, Any}` - Step statistics (counts, rates, etc.)
+- `info::Union{AbstractSMLMInfo, Nothing}` - Typed upstream info struct (FilterInfo, DriftInfo, etc.)
+
+**Constructor:**
+```julia
+StepInfo(number, cfg, elapsed_s, summary_dict; info=typed_info)
+```
 
 ### DataSource
 
