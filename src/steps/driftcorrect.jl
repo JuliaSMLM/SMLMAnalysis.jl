@@ -80,7 +80,7 @@ end
 Run drift correction on localizations.
 """
 function analyze(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD)
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
     n_frames = smld.n_frames
     t = @elapsed (corrected, drift_info) = driftcorrect_step(smld, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose)

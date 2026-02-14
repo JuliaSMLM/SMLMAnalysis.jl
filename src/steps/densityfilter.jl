@@ -71,7 +71,7 @@ _step_summary(info::DensityFilterInfo) = Dict{Symbol,Any}(
 Filter localizations by neighbor density.
 """
 function analyze(smld::BasicSMLD, cfg::DensityFilterConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD)
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
     t = @elapsed (filtered, df_info) = densityfilter_step(smld, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose)
     (filtered, StepInfo(step_number, cfg, t, _step_summary(df_info); info=df_info))

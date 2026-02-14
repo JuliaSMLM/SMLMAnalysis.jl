@@ -71,7 +71,7 @@ end
 Run frame connection on localizations.
 """
 function analyze(smld::BasicSMLD, cfg::SMLMFrameConnection.FrameConnectConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD)
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
     t = @elapsed (combined, connect_info) = frameconnect_step(smld, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose)
     (combined, StepInfo(step_number, cfg, t, _step_summary(connect_info); info=connect_info))
@@ -228,8 +228,8 @@ function _save_calibration_plot(dir, cal::SMLMFrameConnection.CalibrationResult)
 
     fig = Figure(size=(700, 500))
     ax = Axis(fig[1, 1],
-        xlabel = "CRLB Variance (nm², combined x+y)",
-        ylabel = "Observed Variance (nm², combined x+y)",
+        xlabel = "CRLB Variance (nm², per-axis average)",
+        ylabel = "Observed Variance (nm², per-axis average)",
         title = "Uncertainty Calibration: obs = A + B * CRLB"
     )
 

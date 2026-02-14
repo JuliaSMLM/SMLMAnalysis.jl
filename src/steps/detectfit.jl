@@ -351,7 +351,7 @@ _step_summary(info::DetectFitInfo) = Dict{Symbol,Any}(
 Run combined detection and fitting. Camera must be set in `cfg.camera`.
 """
 function analyze(data::Vector{<:AbstractArray{<:Real,3}}, cfg::DetectFitConfig;
-                 outdir=nothing, step_number::Int=1, verbose::Int=Verbosity.STANDARD)
+                 outdir=nothing, step_number::Int=1, verbose::Int=Verbosity.STANDARD, kwargs...)
     cfg.camera === nothing && error("DetectFitConfig.camera is required for analyze(). Set camera=... in the config.")
     t = @elapsed (smld, detect_info) = detectfit(data, cfg.camera, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose)
@@ -362,13 +362,17 @@ function analyze(images::AbstractArray{<:Real,3}, cfg::DetectFitConfig; kwargs..
     analyze([images], cfg; kwargs...)
 end
 
+"""File-based dispatch for pipeline use: `analyze(nothing, DetectFitConfig(path=...))`.
+Routes to file-based `analyze(cfg::DetectFitConfig)` when no data is provided."""
+analyze(::Nothing, cfg::DetectFitConfig; kwargs...) = analyze(cfg; kwargs...)
+
 """
     analyze(cfg::DetectFitConfig; kwargs...) -> (smld, StepInfo)
 
 File-based detection and fitting. Requires `cfg.path` or `cfg.paths` and `cfg.camera`.
 """
 function analyze(cfg::DetectFitConfig;
-                 outdir=nothing, step_number::Int=1, verbose::Int=Verbosity.STANDARD)
+                 outdir=nothing, step_number::Int=1, verbose::Int=Verbosity.STANDARD, kwargs...)
     cfg.camera === nothing && error("DetectFitConfig.camera is required for analyze(). Set camera=... in the config.")
     t = @elapsed (smld, detect_info) = detectfit(cfg.camera, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose)

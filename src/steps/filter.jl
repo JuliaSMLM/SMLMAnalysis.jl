@@ -25,16 +25,17 @@ All filters default to `nothing` (disabled).
 end
 
 """
-    filter_step(smld, cfg; smld_raw=nothing, outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)
+    filter_step(smld, cfg; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)
 
 Filter localizations by quality criteria. Returns `(filtered_smld, FilterInfo)`.
+
+Diagnostic plots use `smld` (the input) for pre-filter distributions.
 
 # Arguments
 - `smld::BasicSMLD`: Input localizations
 - `cfg::FilterConfig`: Filter criteria
 
 # Keyword Arguments
-- `smld_raw`: Original unfiltered SMLD for detailed output diagnostics
 - `outdir`: Output directory (nothing to skip file output)
 - `step_number`: Step number for output directory naming
 - `verbose`: Verbosity level
@@ -43,7 +44,6 @@ Filter localizations by quality criteria. Returns `(filtered_smld, FilterInfo)`.
 `(filtered_smld, FilterInfo)`
 """
 function filter_step(smld::BasicSMLD, cfg::FilterConfig;
-                     smld_raw::Union{BasicSMLD,Nothing}=nothing,
                      outdir::Union{String,Nothing}=nothing,
                      step_number::Int=0,
                      verbose::Int=Verbosity.STANDARD)
@@ -57,7 +57,7 @@ function filter_step(smld::BasicSMLD, cfg::FilterConfig;
     n_after = length(filtered.emitters)
 
     if dir !== nothing
-        _save_filter_outputs!(dir, outdir, cfg, v, t, n_before, n_after, smld_raw, filtered)
+        _save_filter_outputs!(dir, outdir, cfg, v, t, n_before, n_after, smld, filtered)
     end
 
     v >= Verbosity.PROGRESS && @info "  → $n_after / $n_before ($(round(t, digits=2))s)"
@@ -78,7 +78,7 @@ Filter localizations by quality criteria.
 function analyze(smld::BasicSMLD, cfg::FilterConfig;
                  outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
     t = @elapsed (filtered, filter_info) = filter_step(smld, cfg;
-        outdir=outdir, step_number=step_number, verbose=verbose, kwargs...)
+        outdir=outdir, step_number=step_number, verbose=verbose)
     (filtered, StepInfo(step_number, cfg, t, _step_summary(filter_info); info=filter_info))
 end
 
@@ -142,22 +142,18 @@ end
 
 function _save_filter_outputs!(dir::String, outdir::Union{String,Nothing}, cfg::FilterConfig, v::Int, t::Float64,
                                n_before::Int, n_after::Int,
-                               smld_raw::Union{BasicSMLD,Nothing}, smld_filtered::BasicSMLD)
+                               smld_input::BasicSMLD, smld_filtered::BasicSMLD)
     mkpath(dir)
     _save_config!(dir, cfg)
 
     if v >= Verbosity.STANDARD
         _write_filter_stats(dir, cfg, n_before, n_after, t)
-
-        # Fit quality figures showing distributions with filter thresholds
-        if smld_raw !== nothing
-            _save_filter_quality_figures(dir, smld_raw, cfg)
-            _save_fit_overlay_from_cache(dir, outdir, smld_raw, cfg)
-        end
+        _save_filter_quality_figures(dir, smld_input, cfg)
+        _save_fit_overlay_from_cache(dir, outdir, smld_input, cfg)
     end
 
-    if v >= Verbosity.DETAILED && smld_raw !== nothing
-        _save_filter_detailed(dir, smld_raw, smld_filtered, cfg)
+    if v >= Verbosity.DETAILED
+        _save_filter_detailed(dir, smld_input, smld_filtered, cfg)
     end
 end
 

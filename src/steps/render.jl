@@ -90,7 +90,7 @@ _step_summary(info::SMLMRender.RenderInfo) = Dict{Symbol,Any}(
 Render localizations to a super-resolution image.
 """
 function analyze(smld::BasicSMLD, cfg::SMLMRender.RenderConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD)
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
     t = @elapsed (render_image, render_info) = render_step(smld, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose)
     (render_image, StepInfo(step_number, cfg, t, _step_summary(render_info); info=render_info))

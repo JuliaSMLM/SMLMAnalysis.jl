@@ -295,9 +295,10 @@ The orchestrator in `analysis.jl` calls `analyze()` for each step, collecting `S
    - `struct YourStepInfo <: SMLMData.AbstractSMLMInfo` with step-specific fields
    - Internal function: `yourstep(smld, cfg; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)` returning `(result, YourStepInfo(...))`
    - `_step_summary(info::YourStepInfo)` returning `Dict{Symbol,Any}` for summary display
-   - Dispatch method: `analyze(smld::BasicSMLD, cfg::YourStepConfig; ...)` that times the call and returns `(result, StepInfo(...))`
+   - Dispatch method: `analyze(smld::BasicSMLD, cfg::YourStepConfig; kwargs...)` that times the call and returns `(result, StepInfo(...))`. The `kwargs...` is required so the pipeline can pass context like `smld_raw`.
 2. Include it in `SMLMAnalysis.jl` and export the config and info types
-3. Add `elseif cfg isa YourStepConfig` case in BOTH `analyze()` methods in `analysis.jl` (data-based and file-based)
+
+No changes to `analysis.jl` needed — the pipeline loop is pure dispatch on `(state_type, config_type)`. Wrong step ordering gives a MethodError.
 
 ### Re-exported Types
 
