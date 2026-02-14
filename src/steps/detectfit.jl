@@ -174,7 +174,7 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
         n_datasets_val, total_rois, total_fits, n_frames_per_dataset, t)
 
     if dir !== nothing
-        _save_detectfit_outputs!(dir, smld, camera, cfg, v, t, total_rois, total_fits,
+        _save_detectfit_outputs!(dir, outdir, smld, camera, cfg, v, t, total_rois, total_fits,
                                  n_datasets_val, n_frames_per_dataset,
                                  sample_images, sample_roi_batch, sample_original_frames,
                                  all_boxes_info, all_fit_info)
@@ -309,7 +309,7 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
         n_datasets_val, total_rois, total_fits, n_frames_per_dataset, t)
 
     if dir !== nothing
-        _save_detectfit_outputs!(dir, smld, camera, cfg, v, t, total_rois, total_fits,
+        _save_detectfit_outputs!(dir, outdir, smld, camera, cfg, v, t, total_rois, total_fits,
                                  n_datasets_val, n_frames_per_dataset,
                                  sample_images, sample_roi_batch, sample_original_frames,
                                  all_boxes_info, all_fit_info)
@@ -462,7 +462,7 @@ end
 # Output functions
 # ============================================================
 
-function _save_detectfit_outputs!(dir, smld, camera, cfg, v, t, n_rois, n_fits,
+function _save_detectfit_outputs!(dir, outdir, smld, camera, cfg, v, t, n_rois, n_fits,
                                   n_datasets, n_frames_per_dataset,
                                   sample_images, sample_roi_batch, sample_original_frames,
                                   all_boxes_info, all_fit_info)
@@ -488,13 +488,13 @@ function _save_detectfit_outputs!(dir, smld, camera, cfg, v, t, n_rois, n_fits,
     if v >= Verbosity.STANDARD
         _write_detectfit_stats(dir, smld, cfg, t, n_rois, n_fits, n_datasets, n_frames_per_dataset)
 
-        # Generate detection and fit overlays if we have sample data
+        # Generate detection overlay and save sample cache for filter step
         if sample_images !== nothing && sample_roi_batch !== nothing
             box_colors = fill(:yellow, length(sample_roi_batch))
             _save_box_overlay(dir, "detection_overlay.png", sample_images, sample_roi_batch, box_colors;
                               title_prefix="Detection Frame", frame_labels=sample_original_frames)
 
-            _save_fit_overlay(dir, smld, sample_roi_batch, sample_images, sample_original_frames)
+            _save_detectfit_sample_cache(outdir, smld, sample_images, sample_roi_batch, sample_original_frames)
         end
     end
 
@@ -719,69 +719,20 @@ function _save_detectfit_detailed(dir, smld)
 end
 
 """
-Generate fit overlay: boxes colored by fit quality (green=good, red/orange/purple=thresholds).
+Save sample frame data to pipeline cache for the filter step to generate fit_overlay.png.
 
-Uses reasonable defaults for overlay coloring since filter thresholds live in FilterConfig.
+Decomposes ROIBatch into plain arrays (avoids camera serialization issues with JLD2).
 """
-function _save_fit_overlay(dir, smld, sample_roi_batch, sample_images, sample_original_frames;
-                           min_photons=500.0, max_precision=0.007, min_pvalue=1e-3)
-    isempty(sample_roi_batch) && return
-
-    # Map sample index (1:N) to absolute frame number
-    sample_to_original = Dict(i => f for (i, f) in enumerate(sample_original_frames))
-    original_frame_set = Set(sample_original_frames)
-
-    # Build absolute frame for each emitter and filter to sampled frames
-    n_frames = smld.n_frames
-    emitter_abs_frames = [(e, (e.dataset - 1) * n_frames + e.frame) for e in smld.emitters]
-    sample_emitters = [(e, af) for (e, af) in emitter_abs_frames if af in original_frame_set]
-    isempty(sample_emitters) && return
-
-    # Color each ROI box by matching emitter quality
-    fit_colors = Symbol[]
-    pix_size = smld.camera.pixel_edges_x[2] - smld.camera.pixel_edges_x[1]
-    x_origin = smld.camera.pixel_edges_x[1]
-    y_origin = smld.camera.pixel_edges_y[1]
-
-    for i in 1:length(sample_roi_batch)
-        roi_frame_idx = sample_roi_batch.frame_indices[i]  # Remapped index (1:N)
-        original_frame = sample_to_original[roi_frame_idx]
-        roi_x = sample_roi_batch.x_corners[i] + sample_roi_batch.roi_size ÷ 2
-        roi_y = sample_roi_batch.y_corners[i] + sample_roi_batch.roi_size ÷ 2
-
-        # Find closest matching emitter by position in this frame
-        best_emitter = nothing
-        best_dist = Inf
-        for (e, af) in sample_emitters
-            if af == original_frame
-                ex_px = (e.x - x_origin) / pix_size
-                ey_px = (e.y - y_origin) / pix_size
-                dist = sqrt((ex_px - roi_x)^2 + (ey_px - roi_y)^2)
-                if dist < best_dist
-                    best_dist = dist
-                    best_emitter = e
-                end
-            end
-        end
-
-        if best_emitter !== nothing && best_dist < sample_roi_batch.roi_size
-            push!(fit_colors, _fit_box_color(best_emitter;
-                min_photons=min_photons, max_precision=max_precision, min_pvalue=min_pvalue))
-        else
-            push!(fit_colors, :gray)
-        end
-    end
-
-    prec_nm = round(max_precision * 1000, digits=1)
-    title = "Fit: green=pass  red=photons<$(round(Int, min_photons))  orange=prec>$(prec_nm)nm  purple=pval<$(min_pvalue)  gray=no match"
-    _save_box_overlay(dir, "fit_overlay.png", sample_images, sample_roi_batch, fit_colors;
-                      title_prefix="Frame", frame_labels=sample_original_frames, suptitle=title)
-end
-
-"""Determine box color based on fit quality."""
-function _fit_box_color(e; min_photons=500.0, max_precision=0.007, min_pvalue=1e-3)
-    e.photons < min_photons && return :red
-    max(e.σ_x, e.σ_y) > max_precision && return :orange
-    e.pvalue < min_pvalue && return :purple
-    return :green
+function _save_detectfit_sample_cache(outdir, smld, sample_images, sample_roi_batch, sample_original_frames)
+    save_cache(outdir, "detectfit_samples.jld2";
+        sample_images = sample_images,
+        sample_roi_data = sample_roi_batch.data,
+        sample_roi_x = sample_roi_batch.x_corners,
+        sample_roi_y = sample_roi_batch.y_corners,
+        sample_roi_frames = sample_roi_batch.frame_indices,
+        sample_roi_size = sample_roi_batch.roi_size,
+        sample_original_frames = sample_original_frames,
+        n_frames = smld.n_frames,
+        n_datasets = smld.n_datasets,
+    )
 end

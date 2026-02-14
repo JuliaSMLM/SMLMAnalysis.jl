@@ -245,3 +245,42 @@ end
 function _write_info_field!(io::IO, ::Symbol, ::Any)
     # Skip: AbstractVector, AbstractArray, AbstractDict, complex structs
 end
+
+# ============================================================
+# Pipeline cache helpers (inter-step data passing via filesystem)
+# ============================================================
+
+"""
+    cache_dir(outdir) -> Union{String, Nothing}
+
+Returns `joinpath(outdir, ".cache")` or nothing if outdir is nothing.
+"""
+cache_dir(outdir::Union{String,Nothing}) = outdir === nothing ? nothing : joinpath(outdir, ".cache")
+
+"""
+    save_cache(outdir, filename; kwargs...)
+
+Save data to `outdir/.cache/filename` via JLD2. No-op if outdir is nothing.
+"""
+function save_cache(outdir::Union{String,Nothing}, filename::String; kwargs...)
+    outdir === nothing && return nothing
+    dir = cache_dir(outdir)
+    mkpath(dir)
+    path = joinpath(dir, filename)
+    JLD2.jldsave(path; kwargs...)
+    return path
+end
+
+"""
+    load_cache(outdir, filename) -> Union{Dict, Nothing}
+
+Load data from `outdir/.cache/filename` via JLD2. Returns nothing if missing or outdir is nothing.
+"""
+function load_cache(outdir::Union{String,Nothing}, filename::String)
+    outdir === nothing && return nothing
+    dir = cache_dir(outdir)
+    dir === nothing && return nothing
+    path = joinpath(dir, filename)
+    isfile(path) || return nothing
+    JLD2.load(path)
+end

@@ -57,7 +57,7 @@ function filter_step(smld::BasicSMLD, cfg::FilterConfig;
     n_after = length(filtered.emitters)
 
     if dir !== nothing
-        _save_filter_outputs!(dir, cfg, v, t, n_before, n_after, smld_raw, filtered)
+        _save_filter_outputs!(dir, outdir, cfg, v, t, n_before, n_after, smld_raw, filtered)
     end
 
     v >= Verbosity.PROGRESS && @info "  → $n_after / $n_before ($(round(t, digits=2))s)"
@@ -140,7 +140,7 @@ function _get_psf_sigma_bounds(range_spec, values::Vector)
     end
 end
 
-function _save_filter_outputs!(dir::String, cfg::FilterConfig, v::Int, t::Float64,
+function _save_filter_outputs!(dir::String, outdir::Union{String,Nothing}, cfg::FilterConfig, v::Int, t::Float64,
                                n_before::Int, n_after::Int,
                                smld_raw::Union{BasicSMLD,Nothing}, smld_filtered::BasicSMLD)
     mkpath(dir)
@@ -152,6 +152,7 @@ function _save_filter_outputs!(dir::String, cfg::FilterConfig, v::Int, t::Float6
         # Fit quality figures showing distributions with filter thresholds
         if smld_raw !== nothing
             _save_filter_quality_figures(dir, smld_raw, cfg)
+            _save_fit_overlay_from_cache(dir, outdir, smld_raw, cfg)
         end
     end
 
@@ -426,4 +427,124 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
     ylims!(ax6, 0, 1)
 
     save(joinpath(dir, "fit_quality.png"), fig)
+end
+
+# ============================================================
+# Fit overlay from detectfit cache (colored by FilterConfig thresholds)
+# ============================================================
+
+"""
+Load detectfit sample cache and generate fit_overlay.png with FilterConfig thresholds.
+Gracefully skips if cache is missing (e.g., standalone filter without prior detectfit).
+"""
+function _save_fit_overlay_from_cache(dir, outdir, smld_raw, cfg::FilterConfig)
+    cache = load_cache(outdir, "detectfit_samples.jld2")
+    cache === nothing && return
+
+    # Reconstruct ROIBatch from cached components using smld_raw's camera
+    roi_batch = ROIBatch(
+        cache["sample_roi_data"],
+        cache["sample_roi_x"],
+        cache["sample_roi_y"],
+        cache["sample_roi_frames"],
+        smld_raw.camera,
+    )
+
+    _save_fit_overlay(dir, smld_raw, roi_batch,
+        cache["sample_images"], cache["sample_original_frames"],
+        cache["n_frames"], cache["n_datasets"], cfg)
+end
+
+"""
+Generate fit overlay: boxes colored by fit quality using FilterConfig thresholds.
+
+Colors: green=pass, red=photons fail, orange=precision fail, purple=pvalue fail, gray=no match.
+"""
+function _save_fit_overlay(dir, smld, sample_roi_batch, sample_images, sample_original_frames,
+                           n_frames, n_datasets, cfg::FilterConfig)
+    isempty(sample_roi_batch) && return
+
+    # Map sample index (1:N) to absolute frame number
+    sample_to_original = Dict(i => f for (i, f) in enumerate(sample_original_frames))
+    original_frame_set = Set(sample_original_frames)
+
+    # Build absolute frame for each emitter and filter to sampled frames
+    emitter_abs_frames = [(e, (e.dataset - 1) * n_frames + e.frame) for e in smld.emitters]
+    sample_emitters = [(e, af) for (e, af) in emitter_abs_frames if af in original_frame_set]
+    isempty(sample_emitters) && return
+
+    # Color each ROI box by matching emitter quality
+    fit_colors = Symbol[]
+    pix_size = smld.camera.pixel_edges_x[2] - smld.camera.pixel_edges_x[1]
+    x_origin = smld.camera.pixel_edges_x[1]
+    y_origin = smld.camera.pixel_edges_y[1]
+
+    for i in 1:length(sample_roi_batch)
+        roi_frame_idx = sample_roi_batch.frame_indices[i]
+        original_frame = sample_to_original[roi_frame_idx]
+        roi_x = sample_roi_batch.x_corners[i] + sample_roi_batch.roi_size ÷ 2
+        roi_y = sample_roi_batch.y_corners[i] + sample_roi_batch.roi_size ÷ 2
+
+        # Find closest matching emitter by position in this frame
+        best_emitter = nothing
+        best_dist = Inf
+        for (e, af) in sample_emitters
+            if af == original_frame
+                ex_px = (e.x - x_origin) / pix_size
+                ey_px = (e.y - y_origin) / pix_size
+                dist = sqrt((ex_px - roi_x)^2 + (ey_px - roi_y)^2)
+                if dist < best_dist
+                    best_dist = dist
+                    best_emitter = e
+                end
+            end
+        end
+
+        if best_emitter !== nothing && best_dist < sample_roi_batch.roi_size
+            push!(fit_colors, _fit_box_color(best_emitter, cfg))
+        else
+            push!(fit_colors, :gray)
+        end
+    end
+
+    title = _fit_overlay_title(cfg)
+    _save_box_overlay(dir, "fit_overlay.png", sample_images, sample_roi_batch, fit_colors;
+                      title_prefix="Frame", frame_labels=sample_original_frames, suptitle=title)
+end
+
+"""Determine box color based on FilterConfig thresholds. All-nothing filters = all green."""
+function _fit_box_color(e, cfg::FilterConfig)
+    if cfg.photons !== nothing
+        e.photons < cfg.photons[1] && return :red
+        e.photons > cfg.photons[2] && return :red
+    end
+    if cfg.precision !== nothing
+        max(e.σ_x, e.σ_y) > cfg.precision[2] && return :orange
+        max(e.σ_x, e.σ_y) < cfg.precision[1] && return :orange
+    end
+    if cfg.pvalue !== nothing
+        e.pvalue < cfg.pvalue[1] && return :purple
+        e.pvalue > cfg.pvalue[2] && return :purple
+    end
+    return :green
+end
+
+"""Build title string from actual FilterConfig thresholds."""
+function _fit_overlay_title(cfg::FilterConfig)
+    parts = String["green=pass"]
+    if cfg.photons !== nothing
+        lo = cfg.photons[1]
+        hi = cfg.photons[2]
+        hi_str = hi == Inf ? "" : "/>$(round(Int, hi))"
+        push!(parts, "red=photons<$(round(Int, lo))$hi_str")
+    end
+    if cfg.precision !== nothing
+        hi_nm = round(cfg.precision[2] * 1000, digits=1)
+        push!(parts, "orange=prec>$(hi_nm)nm")
+    end
+    if cfg.pvalue !== nothing
+        push!(parts, "purple=pval<$(cfg.pvalue[1])")
+    end
+    push!(parts, "gray=no match")
+    "Fit: " * join(parts, "  ")
 end
