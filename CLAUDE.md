@@ -94,8 +94,8 @@ config = AnalysisConfig(
             boxer=BoxerConfig(boxsize=9, psf_sigma=0.130),
             fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20)),
         FilterConfig(photons=(500.0, Inf)),
-        FrameConnectConfig(max_frame_gap=5),
-        CalibrationConfig(clamp_k_to_one=true),
+        FrameConnectConfig(max_frame_gap=5,
+            calibration=CalibrationConfig(clamp_k_to_one=true)),
         DriftConfig(degree=2, dataset_mode=:registered),
         RenderConfig(zoom=20, colormap=:inferno),
     ],
@@ -107,8 +107,8 @@ config = AnalysisConfig(
 (smld, df_info) = analyze(image_stacks, DetectFitConfig(
     camera=cam, boxer=BoxerConfig(boxsize=9, psf_sigma=0.130)))
 (smld, f_info) = analyze(smld, FilterConfig(photons=(500.0, Inf)))
-(smld, fc_info) = analyze(smld, FrameConnectConfig(max_frame_gap=5))
-(smld, cal_info) = analyze(smld, CalibrationConfig(); smld_connected=fc_info.smld_connected)
+(smld, fc_info) = analyze(smld, FrameConnectConfig(max_frame_gap=5,
+    calibration=CalibrationConfig(clamp_k_to_one=true)))
 (smld, dc_info) = analyze(smld, DriftConfig(degree=2))
 (img, r_info) = analyze(smld, RenderConfig(zoom=20))
 
@@ -129,12 +129,11 @@ src/
 │   ├── common.jl        # Shared helpers (step_outdir, _save_config!, _save_info!)
 │   ├── detectfit.jl     # DetectFitConfig, analyze(data, cfg) → (smld, info)
 │   ├── filter.jl        # FilterConfig, analyze(smld, cfg) → (smld, info)
-│   ├── frameconnect.jl  # Uses SMLMFrameConnection.FrameConnectConfig directly
-│   ├── calibration_step.jl # CalibrationConfig, analyze(smld, cfg) → (smld, info)
+│   ├── frameconnect.jl  # Uses SMLMFrameConnection.FrameConnectConfig directly (calibration integrated)
 │   ├── driftcorrect.jl  # Uses SMLMDriftCorrection.DriftConfig directly
 │   ├── densityfilter.jl # DensityFilterConfig, analyze(smld, cfg) → (smld, info)
 │   ├── render.jl        # analyze(smld, RenderConfig) → (image, info)
-├── calibration.jl       # Uncertainty calibration from frame connection
+│   ├── bagol.jl         # BaGoLConfig (legacy run_step! API, not yet ported to analyze() dispatch)
 └── io/
     ├── smld_io.jl       # HDF5 serialization (save_smld, load_smld)
     ├── smart_h5.jl      # SMART microscope HDF5 import
@@ -151,7 +150,6 @@ src/
 - **`DataSource`**: Lazy loading wrapper - holds `images` (single array), `images_vec` (Vector of arrays for multi-dataset), or `path` (file for deferred loading)
 - **`DetectFitInfo <: AbstractSMLMInfo`**: Info from detectfit step (boxes_info, fit_info, n_datasets, n_rois, n_fits)
 - **`FilterInfo <: AbstractSMLMInfo`**: Info from filter step (n_before, n_after, elapsed_s)
-- **`CalibrationInfo <: AbstractSMLMInfo`**: Info from calibration step (calibration_result, mean_chi2, k_scale, sigma_motion_nm)
 - **`DensityFilterInfo <: AbstractSMLMInfo`**: Info from density filter step (n_before, n_after, threshold)
 - **`Verbosity`**: Output detail levels (SILENT=0, PROGRESS=1, STANDARD=2, DETAILED=3, DEBUG=4)
 - **`MultiTargetConfig`**: Multi-channel analysis config with per-channel labels, colors, composite rendering
@@ -276,11 +274,9 @@ Each step has two layers:
 **Internal function** (NOT exported) — does the work, returns `(result, info::AbstractSMLMInfo)`:
 - `detectfit(data, camera, cfg)` → `(smld, DetectFitInfo)`
 - `filter_step(smld, cfg)` → `(filtered, FilterInfo)`
-- `frameconnect_step(smld, cfg)` → `(combined, FrameConnectInfo)` (upstream)
-- `calibration_step(smld, cfg; smld_connected)` → `(calibrated, CalibrationInfo)`
+- `frameconnect_step(smld, cfg)` → `(combined, FrameConnectInfo)` (upstream, calibration integrated via `cfg.calibration`)
 - `driftcorrect_step(smld, cfg)` → `(corrected, DriftInfo)` (upstream, config dispatch)
 - `densityfilter_step(smld, cfg)` → `(filtered, DensityFilterInfo)`
-- `render_step(smld, cfg)` → `(image, RenderInfo)` (upstream)
 
 **analyze() dispatch** — thin wrapper that times the call and creates StepInfo:
 ```julia
@@ -309,14 +305,16 @@ From ecosystem packages (available after `using SMLMAnalysis`):
 - **SMLMData**: AbstractCamera, IdealCamera, SCMOSCamera, Emitter2D/3D/2DFit/3DFit, BasicSMLD, ROIBatch, AbstractSMLMConfig, AbstractSMLMInfo
 - **GaussMLE**: GaussMLEConfig, GaussianXYNB/S/SXSY, AstigmaticXYZNB, GaussMLEFitInfo, fit
 - **SMLMBoxer**: getboxes, BoxerConfig (embedded in DetectFitConfig)
-- **SMLMFrameConnection**: frameconnect, FrameConnectConfig (aliased as `const FrameConnectConfig = SMLMFrameConnection.FrameConnectConfig`)
+- **SMLMFrameConnection**: frameconnect, FrameConnectConfig, CalibrationConfig, CalibrationResult (all aliased via `const`)
 - **SMLMDriftCorrection**: driftcorrect, DriftConfig (aliased as `const DriftConfig = SMLMDriftCorrection.DriftConfig`)
 - **SMLMRender**: render, save_image, HistogramRender, GaussianRender, CircleRender, EllipseRender, RenderConfig (aliased as `const RenderConfig = SMLMRender.RenderConfig`)
 - **SMLMSim**: StaticSMLMConfig, DiffusionSMLMConfig, simulate, gen_images, gen_image, Nmer2D, Nmer3D, Line2D, GenericFluor
 
-## Calibration Module
+## Uncertainty Calibration
 
-The calibration.jl module provides uncertainty calibration from frame connection analysis:
-- `analyze_frameconnect_drift(smld_connected)`: Analyzes frame-to-frame drift, returns chi-squared statistics and calibration model
-- `apply_uncertainty_calibration(smld, sigma_motion, k_scale)`: Applies calibration: sigma_corrected^2 = sigma_motion^2 + k^2 * sigma_CRLB^2
-- `recombine_tracks(smld_connected)`: Weighted average of track localizations with calibrated uncertainties
+Calibration is integrated into the frame connection step via `FrameConnectConfig.calibration`:
+- Set `calibration=CalibrationConfig(clamp_k_to_one=true)` in `FrameConnectConfig` to enable
+- Calibration runs inside `SMLMFrameConnection.frameconnect()`: link -> calibrate -> combine
+- Results available via `FrameConnectInfo.calibration::CalibrationResult` (k_scale, sigma_motion_nm, mean_chi2, r_squared)
+- Model: `sigma_corrected^2 = sigma_motion^2 + k^2 * sigma_CRLB^2`
+- `CalibrationConfig` and `CalibrationResult` are re-exported from SMLMFrameConnection (not standalone steps)
