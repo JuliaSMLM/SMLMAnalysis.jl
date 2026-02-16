@@ -10,6 +10,9 @@ _step_summary(::SMLMData.AbstractSMLMInfo) = Dict{Symbol, Any}()
 
 Calculate the mode of a distribution using histogram binning.
 Returns the center of the most populated bin.
+
+Uses a median-centered range (median ± 3×MAD) to avoid outlier peaks
+at large fitted PSF sigma pulling the mode away from the true peak.
 """
 function _calculate_mode(values::Vector{T}; n_bins=100) where T<:Real
     isempty(values) && return zero(T)
@@ -17,8 +20,14 @@ function _calculate_mode(values::Vector{T}; n_bins=100) where T<:Real
     valid = filter(x -> isfinite(x) && x > 0, values)
     isempty(valid) && return zero(T)
 
-    lo, hi = quantile(valid, [0.01, 0.99])
-    lo >= hi && return median(valid)
+    med = median(valid)
+    mad_val = median(abs.(valid .- med))
+    mad_val == 0 && return med
+
+    # Median-centered range: captures the primary peak, excludes outlier clusters
+    lo = max(med - 3 * mad_val, minimum(valid))
+    hi = med + 3 * mad_val
+    lo >= hi && return med
 
     edges = range(lo, hi, length=n_bins+1)
     counts = zeros(Int, n_bins)
