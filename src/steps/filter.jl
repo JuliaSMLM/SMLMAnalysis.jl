@@ -469,6 +469,9 @@ function _save_fit_overlay(dir, smld, sample_roi_batch, sample_images, sample_or
     sample_emitters = [(e, af) for (e, af) in emitter_abs_frames if af in original_frame_set]
     isempty(sample_emitters) && return
 
+    # Pre-resolve PSF sigma bounds (needed for box coloring)
+    psf_bounds = _resolve_psf_bounds(smld.emitters, cfg)
+
     # Color each ROI box by matching emitter quality
     fit_colors = Symbol[]
     pix_size = smld.camera.pixel_edges_x[2] - smld.camera.pixel_edges_x[1]
@@ -497,7 +500,7 @@ function _save_fit_overlay(dir, smld, sample_roi_batch, sample_images, sample_or
         end
 
         if best_emitter !== nothing && best_dist < sample_roi_batch.roi_size
-            push!(fit_colors, _fit_box_color(best_emitter, cfg))
+            push!(fit_colors, _fit_box_color(best_emitter, cfg, psf_bounds))
         else
             push!(fit_colors, :gray)
         end
@@ -508,8 +511,31 @@ function _save_fit_overlay(dir, smld, sample_roi_batch, sample_images, sample_or
                       title_prefix="Frame", frame_labels=sample_original_frames, suptitle=title)
 end
 
+"""
+    _resolve_psf_bounds(emitters, cfg) -> Union{NamedTuple, Nothing}
+
+Pre-resolve PSF sigma filter bounds from the emitter population.
+Returns named tuple with :iso or :aniso bounds, or nothing if psf_sigma filter is off.
+"""
+function _resolve_psf_bounds(emitters, cfg::FilterConfig)
+    cfg.psf_sigma === nothing && return nothing
+    isempty(emitters) && return nothing
+
+    if hasproperty(emitters[1], :σ)
+        lo, hi = _get_psf_sigma_bounds(cfg.psf_sigma, [e.σ for e in emitters])
+        (lo > 0 && hi > 0) || return nothing
+        return (kind=:iso, lo=lo, hi=hi)
+    elseif hasproperty(emitters[1], :σx) && hasproperty(emitters[1], :σy)
+        lo_x, hi_x = _get_psf_sigma_bounds(cfg.psf_sigma, [e.σx for e in emitters])
+        lo_y, hi_y = _get_psf_sigma_bounds(cfg.psf_sigma, [e.σy for e in emitters])
+        (lo_x > 0 && hi_x > 0 && lo_y > 0 && hi_y > 0) || return nothing
+        return (kind=:aniso, lo_x=lo_x, hi_x=hi_x, lo_y=lo_y, hi_y=hi_y)
+    end
+    return nothing
+end
+
 """Determine box color based on FilterConfig thresholds. All-nothing filters = all green."""
-function _fit_box_color(e, cfg::FilterConfig)
+function _fit_box_color(e, cfg::FilterConfig, psf_bounds)
     if cfg.photons !== nothing
         e.photons < cfg.photons[1] && return :red
         e.photons > cfg.photons[2] && return :red
@@ -521,6 +547,13 @@ function _fit_box_color(e, cfg::FilterConfig)
     if cfg.pvalue !== nothing
         e.pvalue < cfg.pvalue[1] && return :purple
         e.pvalue > cfg.pvalue[2] && return :purple
+    end
+    if psf_bounds !== nothing
+        if psf_bounds.kind === :iso
+            (psf_bounds.lo <= e.σ <= psf_bounds.hi) || return :cyan
+        elseif psf_bounds.kind === :aniso
+            (psf_bounds.lo_x <= e.σx <= psf_bounds.hi_x && psf_bounds.lo_y <= e.σy <= psf_bounds.hi_y) || return :cyan
+        end
     end
     return :green
 end
@@ -540,6 +573,9 @@ function _fit_overlay_title(cfg::FilterConfig)
     end
     if cfg.pvalue !== nothing
         push!(parts, "purple=pval<$(cfg.pvalue[1])")
+    end
+    if cfg.psf_sigma !== nothing
+        push!(parts, "cyan=psf_σ fail")
     end
     push!(parts, "gray=no match")
     "Fit: " * join(parts, "  ")
