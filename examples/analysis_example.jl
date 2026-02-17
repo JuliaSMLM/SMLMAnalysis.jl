@@ -72,9 +72,9 @@ config = AnalysisConfig(
         FrameConnectConfig(max_frame_gap = 5, calibration=CalibrationConfig()),
         DriftConfig(degree = 2),
         DensityFilterConfig(n_sigma=2.0, min_neighbors=:auto),
-        RenderConfig(zoom=20, colormap=:inferno),
-        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing),
-        RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),
+        RenderConfig(zoom=20, colormap=:inferno, scalebar=true),
+        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing, scalebar=true),
+        RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame, scalebar=true),
     ],
     outdir = OUTPUT_DIR,
     verbose = Verbosity.STANDARD

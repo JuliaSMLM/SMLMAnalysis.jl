@@ -153,6 +153,14 @@ end
 const StepConfig = SMLMData.AbstractSMLMConfig
 
 """
+    AbstractMultiTargetStep <: AbstractSMLMConfig
+
+Abstract supertype for steps that operate on `Vector{BasicSMLD}` in the
+multi-target pipeline (composite rendering, cross-channel alignment, etc.).
+"""
+abstract type AbstractMultiTargetStep <: SMLMData.AbstractSMLMConfig end
+
+"""
     step_name(cfg::AbstractSMLMConfig) -> String
 
 Derive step name from config type (e.g., `FilterConfig` → `"filter"`, `DriftConfig` → `"drift"`).
@@ -247,6 +255,31 @@ struct DensityFilterInfo <: SMLMData.AbstractSMLMInfo
     n_before::Int
     n_after::Int
     threshold::Int
+    elapsed_s::Float64
+end
+
+"""
+    CompositeRenderInfo <: AbstractSMLMInfo
+
+Info from a multi-channel composite render step.
+"""
+struct CompositeRenderInfo <: SMLMData.AbstractSMLMInfo
+    render_info::SMLMRender.RenderInfo
+    strategy::Symbol
+    zoom::Float64
+    n_channels::Int
+    elapsed_s::Float64
+end
+
+"""
+    CrossAlignInfo <: AbstractSMLMInfo
+
+Info from cross-channel alignment step.
+"""
+struct CrossAlignInfo <: SMLMData.AbstractSMLMInfo
+    align_info::SMLMDriftCorrection.AlignInfo
+    shifts::Vector{Vector{Float64}}
+    max_shift_nm::Float64
     elapsed_s::Float64
 end
 
@@ -392,10 +425,11 @@ end
     _default_colors(n::Int) -> Vector{Symbol}
 
 Default color palette for multi-target rendering.
+2 channels: cyan/magenta. 3 channels: cyan/magenta/yellow.
 Supports up to 6 channels; provide explicit colors for more.
 """
 function _default_colors(n::Int)
-    defaults = [:red, :green, :cyan, :magenta, :yellow, :blue]
+    defaults = [:cyan, :magenta, :yellow, :red, :green, :blue]
     n <= length(defaults) || error("Provide explicit colors for >$(length(defaults)) channels")
     defaults[1:n]
 end
@@ -406,14 +440,13 @@ end
 Configuration for multi-target (multi-color) SMLM analysis.
 
 Each channel runs an independent `analyze(data, AnalysisConfig)` pipeline,
-then results are composited into multi-channel renders.
+then cross-channel steps (composite rendering, alignment) are executed
+via dispatch on `AbstractMultiTargetStep` configs.
 
 # Fields
 - `labels::Vector{Symbol}`: Channel labels (e.g., `[:IgG, :C1q]`)
-- `colors::Vector{Symbol}`: Colors per channel (default: automatic palette)
-- `render_zoom::Float64`: Zoom factor for composite renders
-- `render_strategies::Vector{SMLMRender.RenderingStrategy}`: Rendering strategies for composites
-- `clip_percentile::Union{Float64, Nothing}`: Intensity clipping for composite renders (default: 0.99). Lower values (e.g., 0.95) increase contrast for sparse data. `nothing` for saturate mode.
+- `colors::Vector{Symbol}`: Colors per channel (default: cyan/magenta for 2, CMY for 3)
+- `steps::Vector{AbstractMultiTargetStep}`: Ordered multi-target steps (renders, alignment, etc.)
 - `outdir::String`: Output directory
 - `verbose::Int`: Verbosity level
 
@@ -421,8 +454,11 @@ then results are composited into multi-channel renders.
 ```julia
 mt = MultiTargetConfig(
     labels = [:IgG, :C1q],
-    colors = [:red, :green],
-    render_zoom = 20,
+    steps = [
+        CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
+        CrossAlignConfig(method=:entropy),
+        CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
+    ],
     outdir = "output/cell1/",
 )
 ```
@@ -430,9 +466,7 @@ mt = MultiTargetConfig(
 @kwdef struct MultiTargetConfig <: SMLMData.AbstractSMLMConfig
     labels::Vector{Symbol}
     colors::Vector{Symbol} = _default_colors(length(labels))
-    render_zoom::Float64 = 20.0
-    render_strategies::Vector{SMLMRender.RenderingStrategy} = [GaussianRender(), CircleRender()]
-    clip_percentile::Union{Float64, Nothing} = 0.99
+    steps::Vector{AbstractMultiTargetStep} = AbstractMultiTargetStep[]
     outdir::String
     verbose::Int = Verbosity.STANDARD
 end
@@ -445,9 +479,9 @@ the final SMLD vectors for composite rendering.
 
 # Fields
 - `labels::Vector{Symbol}`: Channel labels in order
-- `smlds::Vector{SMLMData.BasicSMLD}`: Per-channel SMLD results
+- `smlds::Vector{SMLMData.BasicSMLD}`: Per-channel SMLD results (may be aligned)
 - `channels::Dict{Symbol, AnalysisResult}`: Per-channel results
-- `channel_registration::Any`: Reserved for future registration transforms
+- `step_infos::Vector{StepInfo}`: Multi-target step history
 - `outdir::String`: Output directory
 
 # Indexing
@@ -461,7 +495,7 @@ struct MultiTargetResult
     labels::Vector{Symbol}
     smlds::Vector{SMLMData.BasicSMLD}
     channels::Dict{Symbol, AnalysisResult}
-    channel_registration::Any    # Reserved for future registration transforms
+    step_infos::Vector{StepInfo}
     outdir::String
 end
 
@@ -476,12 +510,14 @@ Aggregated metadata from a multi-target analysis.
 # Fields
 - `elapsed_s::Float64`: Total elapsed time in seconds
 - `channels::Dict{Symbol, AnalysisInfo}`: Per-channel analysis info
-- `composite_renders::Vector{SMLMRender.RenderInfo}`: Info from composite renders
+- `step_infos::Vector{StepInfo}`: Multi-target step history (composite renders, alignment, etc.)
+- `steps::Dict{Symbol, Any}`: Step name → info mapping for convenience
 """
 struct MultiTargetInfo <: SMLMData.AbstractSMLMInfo
     elapsed_s::Float64
     channels::Dict{Symbol, AnalysisInfo}
-    composite_renders::Vector{SMLMRender.RenderInfo}
+    step_infos::Vector{StepInfo}
+    steps::Dict{Symbol, Any}
 end
 
 function Base.show(io::IO, mtr::MultiTargetResult)

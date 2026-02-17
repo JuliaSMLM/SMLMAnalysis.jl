@@ -2,13 +2,23 @@
 Multi-target (multi-color) analysis orchestration.
 
 Loops over per-channel `analyze(data, config)` calls, saves per-channel SMLDs,
-and produces composite multi-channel renders.
+then dispatches multi-target steps (composite renders, cross-channel alignment, etc.)
+on the resulting `Vector{BasicSMLD}`.
 """
+
+"""
+    _resolve_colors(cfg::CompositeRenderConfig, defaults::Vector{Symbol}) -> Vector{Symbol}
+
+Use per-step colors if specified, otherwise fall back to MultiTargetConfig defaults.
+"""
+_resolve_colors(cfg::CompositeRenderConfig, defaults::Vector{Symbol}) = cfg.colors !== nothing ? cfg.colors : defaults
+_resolve_colors(::AbstractMultiTargetStep, defaults::Vector{Symbol}) = defaults
 
 """
     analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig) -> (MultiTargetResult, MultiTargetInfo)
 
-Run independent analysis pipelines for each channel and produce composite renders.
+Run independent analysis pipelines for each channel, then execute multi-target
+steps (composite rendering, cross-channel alignment, etc.) via dispatch.
 
 Each element of `channels` is a `(data, AnalysisConfig)` tuple where `data` is an
 image stack (or Vector of stacks) or file path. The `config.labels` must match the
@@ -16,7 +26,7 @@ number of channels.
 
 # Arguments
 - `channels`: Vector of `(data, AnalysisConfig)` tuples, one per target/color
-- `config`: MultiTargetConfig with labels, colors, rendering, and output settings
+- `config`: MultiTargetConfig with labels, colors, steps, and output settings
 
 # Returns
 `(MultiTargetResult, MultiTargetInfo)` tuple following the JuliaSMLM convention.
@@ -25,8 +35,11 @@ number of channels.
 ```julia
 mt = MultiTargetConfig(
     labels = [:IgG, :C1q],
-    colors = [:red, :green],
-    render_zoom = 20,
+    steps = [
+        CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
+        CrossAlignConfig(method=:entropy),
+        CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
+    ],
     outdir = "output/cell1/",
 )
 
@@ -54,7 +67,7 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
 
     v >= Verbosity.PROGRESS && @info "Multi-target analysis: $(n) channels $(config.labels)"
 
-    # Run per-channel pipelines
+    # Phase 1: Per-channel pipelines
     channel_results = Dict{Symbol, AnalysisResult}()
     channel_infos = Dict{Symbol, AnalysisInfo}()
     smlds = SMLMData.BasicSMLD[]
@@ -85,46 +98,75 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
         v >= Verbosity.PROGRESS && @info "  Saved $smld_path ($(length(result.smld.emitters)) localizations)"
     end
 
-    # Composite renders
+    # Phase 2: Multi-target step dispatch
     composite_dir = joinpath(config.outdir, "composite")
     mkpath(composite_dir)
-    composite_render_infos = SMLMRender.RenderInfo[]
+    step_infos = StepInfo[]
+    steps_dict = Dict{Symbol, Any}()
 
-    for strategy in config.render_strategies
-        strategy_name = lowercase(string(nameof(typeof(strategy))))
-        zoom_str = "$(round(Int, config.render_zoom))x"
-        filename = joinpath(composite_dir, "$(strategy_name)_$(zoom_str).png")
+    state = smlds
+    for (i, step_cfg) in enumerate(config.steps)
+        colors = _resolve_colors(step_cfg, config.colors)
+        (state, step_info) = analyze(state, step_cfg;
+            outdir=composite_dir, step_number=i, verbose=v, colors=colors)
+        push!(step_infos, step_info)
 
-        v >= Verbosity.PROGRESS && @info "Composite render: $strategy_name $(zoom_str)"
-
-        # Histogram overlays: saturate mode (count=1 = full brightness, clamp handles >1)
-        # Other strategies: clip+normalize for smooth intensity scaling
-        is_histogram = strategy isa HistogramRender
-        cp = is_histogram ? nothing : config.clip_percentile
-        ne = is_histogram ? false : true
-
-        (_, render_info) = SMLMRender.render(smlds;
-            colors = config.colors,
-            strategy = strategy,
-            zoom = config.render_zoom,
-            clip_percentile = cp,
-            normalize_each = ne,
-            filename = filename,
-        )
-        push!(composite_render_infos, render_info)
+        # Store in steps dict (use step_name with index for duplicates)
+        sname = step_name(step_cfg)
+        key = haskey(steps_dict, Symbol(sname)) ? Symbol("$(sname)_$i") : Symbol(sname)
+        steps_dict[key] = step_info.info
     end
+
+    # Write composite readme
+    _write_composite_readme!(composite_dir, config, state, step_infos)
 
     # Save config
     _save_multitarget_config!(config)
 
     # Build result
     elapsed_s = (time_ns() - t_start) / 1e9
-    result = MultiTargetResult(config.labels, smlds, channel_results, nothing, config.outdir)
-    info = MultiTargetInfo(elapsed_s, channel_infos, composite_render_infos)
+    result = MultiTargetResult(config.labels, state, channel_results, step_infos, config.outdir)
+    info = MultiTargetInfo(elapsed_s, channel_infos, step_infos, steps_dict)
 
-    v >= Verbosity.PROGRESS && @info "Multi-target complete: $(sum(length(s.emitters) for s in smlds)) total localizations ($(round(elapsed_s, digits=1))s)"
+    v >= Verbosity.PROGRESS && @info "Multi-target complete: $(sum(length(s.emitters) for s in state)) total localizations ($(round(elapsed_s, digits=1))s)"
 
     (result, info)
+end
+
+"""
+    _write_composite_readme!(composite_dir, config, smlds, step_infos)
+
+Write a README.md in the composite directory documenting the color scheme,
+channel labels, multi-target steps, and per-channel localization counts.
+"""
+function _write_composite_readme!(composite_dir::String, config::MultiTargetConfig,
+                                  smlds::Vector{<:SMLMData.BasicSMLD},
+                                  step_infos::Vector{StepInfo})
+    filepath = joinpath(composite_dir, "README.md")
+    open(filepath, "w") do io
+        println(io, "# Composite Output")
+        println(io)
+        println(io, "## Color Scheme")
+        println(io)
+        println(io, "| Channel | Label | Color | Localizations |")
+        println(io, "|---------|-------|-------|---------------|")
+        for (i, label) in enumerate(config.labels)
+            color = config.colors[i]
+            n = length(smlds[i].emitters)
+            println(io, "| $i | $label | $color | $n |")
+        end
+        println(io)
+
+        # Steps
+        println(io, "## Steps")
+        println(io)
+        for si in step_infos
+            println(io, "- **$(si.number). $(si.name)** ($(round(si.elapsed_s, digits=2))s)")
+            for (k, v) in si.summary
+                println(io, "  - $k: $v")
+            end
+        end
+    end
 end
 
 """
@@ -139,14 +181,15 @@ function _save_multitarget_config!(config::MultiTargetConfig)
         println(io, "type = \"MultiTargetConfig\"")
         println(io, "labels = [$(join(["\"$l\"" for l in config.labels], ", "))]")
         println(io, "colors = [$(join(["\"$c\"" for c in config.colors], ", "))]")
-        println(io, "render_zoom = $(config.render_zoom)")
         println(io, "verbose = $(config.verbose)")
         println(io, "outdir = \"$(config.outdir)\"")
         println(io, "")
-        println(io, "# Rendering strategies")
-        for (i, s) in enumerate(config.render_strategies)
-            println(io, "[[render_strategies]]")
+        println(io, "# Steps")
+        for (i, s) in enumerate(config.steps)
+            println(io, "[[steps]]")
             println(io, "type = \"$(nameof(typeof(s)))\"")
+            _write_config_fields!(io, s)
+            println(io)
         end
     end
 end

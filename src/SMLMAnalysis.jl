@@ -99,6 +99,10 @@ export CalibrationConfig, CalibrationResult
 
 # Re-export from SMLMDriftCorrection
 export driftcorrect
+# Re-export alignment API (used by CrossAlignConfig step)
+const AlignConfig = SMLMDriftCorrection.AlignConfig
+const AlignInfo = SMLMDriftCorrection.AlignInfo
+export align_smld, AlignConfig, AlignInfo
 
 # Re-export from SMLMRender
 export render, save_image
@@ -115,6 +119,8 @@ export Verbosity
 export DataSource, get_images, n_datasets, n_frames_per_dataset
 export AnalysisConfig, AnalysisResult, AnalysisInfo, StepInfo
 export DetectFitInfo, FilterInfo, DensityFilterInfo
+export CompositeRenderInfo, CrossAlignInfo
+export AbstractMultiTargetStep
 export MultiTargetConfig, MultiTargetResult, MultiTargetInfo
 export crop_camera, crop_images
 export step_name
@@ -148,6 +154,12 @@ include("steps/densityfilter.jl")
 export DensityFilterConfig
 
 include("steps/render.jl")
+
+include("steps/composite_render.jl")
+export CompositeRenderConfig
+
+include("steps/cross_align.jl")
+export CrossAlignConfig
 
 # ============================================================
 # I/O

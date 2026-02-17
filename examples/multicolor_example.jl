@@ -53,8 +53,8 @@ config_clusters = AnalysisConfig(
     camera = camera,
     steps = [
         DetectFitConfig(
-            boxer = BoxerConfig(boxsize=7, backend=:cpu),
-            fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20, backend=:cpu),
+            boxer = BoxerConfig(boxsize=7, min_photons=500.0, psf_sigma=psf_sigma),
+            fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20),
         ),
         FilterConfig(
             photons = (500.0, Inf),
@@ -63,9 +63,10 @@ config_clusters = AnalysisConfig(
         ),
         FrameConnectConfig(max_frame_gap = 5, calibration=CalibrationConfig()),
         DriftConfig(degree = 2),
-        RenderConfig(zoom=20, colormap=:inferno),
-        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing),
-        RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),
+        DensityFilterConfig(n_sigma=2.0, min_neighbors=:auto),
+        RenderConfig(zoom=20, colormap=:inferno, scalebar=true),
+        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing, scalebar=true),
+        RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame, scalebar=true),
     ],
     verbose = Verbosity.STANDARD,
 )
@@ -74,8 +75,8 @@ config_lines = AnalysisConfig(
     camera = camera,
     steps = [
         DetectFitConfig(
-            boxer = BoxerConfig(boxsize=7, backend=:cpu),
-            fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20, backend=:cpu),
+            boxer = BoxerConfig(boxsize=7, min_photons=500.0, psf_sigma=psf_sigma),
+            fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20),
         ),
         FilterConfig(
             photons = (500.0, Inf),
@@ -84,9 +85,10 @@ config_lines = AnalysisConfig(
         ),
         FrameConnectConfig(max_frame_gap = 5, calibration=CalibrationConfig()),
         DriftConfig(degree = 2),
-        RenderConfig(zoom=20, colormap=:inferno),
-        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing),
-        RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),
+        DensityFilterConfig(n_sigma=2.0, min_neighbors=:auto),
+        RenderConfig(zoom=20, colormap=:inferno, scalebar=true),
+        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing, scalebar=true),
+        RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame, scalebar=true),
     ],
     verbose = Verbosity.STANDARD,
 )
@@ -101,9 +103,11 @@ println("="^60)
 
 mt = MultiTargetConfig(
     labels = [:clusters, :lines],
-    colors = [:red, :green],
-    render_zoom = 20,
-    render_strategies = [GaussianRender(), HistogramRender()],
+    steps = [
+        CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
+        CompositeRenderConfig(zoom=10.0, strategy=HistogramRender()),
+        CompositeRenderConfig(zoom=50.0, strategy=CircleRender()),
+    ],
     outdir = let d = joinpath(@__DIR__, "output", "multicolor_example"); rm(d; force=true, recursive=true); d end,
 )
 

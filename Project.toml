@@ -53,15 +53,12 @@ SMLMBoxer = "0.3"
 SMLMData = "0.7"
 SMLMDriftCorrection = "0.2"
 SMLMFrameConnection = "0.2, 0.3"
-SMLMRender = "0.3"
+SMLMRender = "0.3, 0.4"
 SMLMSim = "0.7"
 Statistics = "1"
 StatsBase = "0.34"
 TOML = "1"
 julia = "1.12"
-
-[sources]
-SMLMDriftCorrection = {url = "https://github.com/JuliaSMLM/SMLMDriftCorrection.jl"}
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

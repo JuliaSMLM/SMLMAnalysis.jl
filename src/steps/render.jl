@@ -46,12 +46,16 @@ function render_step(smld::BasicSMLD, cfg::SMLMRender.RenderConfig;
         cmap = cfg.colormap === nothing ? "" : "_$(cfg.colormap)"
         zoom_str = cfg.zoom === nothing ? "" : "_$(round(Int, cfg.zoom))x"
         filename = joinpath(dir, "$(strategy_name)$(cmap)$(color_suffix)$(zoom_str).png")
-        # Reconstruct with filename set (immutable struct)
-        SMLMRender.RenderConfig(
-            cfg.strategy, cfg.pixel_size, cfg.zoom, cfg.roi, cfg.target,
-            cfg.colormap, cfg.color_by, cfg.color, cfg.categorical,
-            cfg.clip_percentile, cfg.field_range, cfg.field_clip_percentiles,
-            cfg.backend, filename
+        # Reconstruct with filename set (immutable struct) - use kwargs to be robust to field additions
+        SMLMRender.RenderConfig(;
+            strategy=cfg.strategy, pixel_size=cfg.pixel_size, zoom=cfg.zoom,
+            roi=cfg.roi, target=cfg.target, colormap=cfg.colormap,
+            color_by=cfg.color_by, color=cfg.color, categorical=cfg.categorical,
+            clip_percentile=cfg.clip_percentile, field_range=cfg.field_range,
+            field_clip_percentiles=cfg.field_clip_percentiles,
+            backend=cfg.backend, filename=filename,
+            scalebar=cfg.scalebar, scalebar_length=cfg.scalebar_length,
+            scalebar_position=cfg.scalebar_position, scalebar_color=cfg.scalebar_color,
         )
     else
         cfg

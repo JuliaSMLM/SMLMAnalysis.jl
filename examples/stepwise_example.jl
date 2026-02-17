@@ -69,8 +69,8 @@ println("="^60)
 
 (smld, df_info) = analyze(image_stacks, DetectFitConfig(
     camera = camera,
-    boxer = BoxerConfig(boxsize=7, min_photons=500.0, psf_sigma=psf_sigma, backend=:cpu),
-    fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20, backend=:cpu),
+    boxer = BoxerConfig(boxsize=7, min_photons=500.0, psf_sigma=psf_sigma, backend=:auto),
+    fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20, backend=:auto),
 ); outdir=OUTPUT_DIR, step_number=1, verbose=Verbosity.STANDARD)
 
 smld_raw = smld  # Raw SMLD from detectfit, before filtering
@@ -153,7 +153,7 @@ println("="^60)
 println("Step 5: Render (Gaussian)")
 println("="^60)
 
-(_, r_info) = analyze(smld, RenderConfig(zoom=20, colormap=:inferno);
+(_, r_info) = analyze(smld, RenderConfig(zoom=20, colormap=:inferno, scalebar=true);
     outdir=OUTPUT_DIR, step_number=5, verbose=Verbosity.STANDARD)
 
 println()
@@ -162,7 +162,7 @@ println("="^60)
 println("Step 6: Render (Histogram)")
 println("="^60)
 
-(_, _) = analyze(smld, RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing);
+(_, _) = analyze(smld, RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing, scalebar=true);
     outdir=OUTPUT_DIR, step_number=6, verbose=Verbosity.STANDARD)
 
 println()
@@ -171,7 +171,7 @@ println("="^60)
 println("Step 7: Render (Circle)")
 println("="^60)
 
-(_, _) = analyze(smld, RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame);
+(_, _) = analyze(smld, RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame, scalebar=true);
     outdir=OUTPUT_DIR, step_number=7, verbose=Verbosity.STANDARD)
 
 println()
@@ -188,15 +188,15 @@ config = AnalysisConfig(
     camera = camera,
     steps = [
         DetectFitConfig(
-            boxer=BoxerConfig(boxsize=7, min_photons=500.0, psf_sigma=psf_sigma, backend=:cpu),
-            fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20, backend=:cpu)),
+            boxer=BoxerConfig(boxsize=7, min_photons=500.0, psf_sigma=psf_sigma, backend=:auto),
+            fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20, backend=:auto)),
         FilterConfig(photons=(500.0, Inf), precision=(0.0, 0.015), pvalue=(1e-3, 1.0)),
         FrameConnectConfig(max_frame_gap=5, max_sigma_dist=5.0,
             calibration=CalibrationConfig(clamp_k_to_one=true)),
         DriftConfig(degree=2, dataset_mode=:registered),
-        RenderConfig(zoom=20, colormap=:inferno),
-        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing),
-        RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame),
+        RenderConfig(zoom=20, colormap=:inferno, scalebar=true),
+        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing, scalebar=true),
+        RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame, scalebar=true),
     ],
     outdir = OUTPUT_DIR,
 )
@@ -232,7 +232,7 @@ To iterate on parameters (in REPL):
   (smld2, _) = analyze(smld, FilterConfig(photons=(300.0, Inf), precision=(0.0, 0.020)))
   (smld2, _) = analyze(smld2, FrameConnectConfig(max_frame_gap=5))
   (smld2, _) = analyze(smld2, DriftConfig(degree=2))
-  (_, _) = analyze(smld2, RenderConfig(zoom=20, colormap=:inferno))
+  (_, _) = analyze(smld2, RenderConfig(zoom=20, colormap=:inferno, scalebar=true))
 
   # Or use the config for a full re-run:
   (result, info) = analyze(new_image_stacks, config)

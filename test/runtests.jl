@@ -1,5 +1,6 @@
 using SMLMAnalysis
 using SMLMFrameConnection
+using SMLMDriftCorrection
 using Test
 
 @testset "SMLMAnalysis.jl" begin
@@ -92,6 +93,70 @@ using Test
         @test DetectFitInfo <: AbstractSMLMInfo
         @test FilterInfo <: AbstractSMLMInfo
         @test DensityFilterInfo <: AbstractSMLMInfo
+        @test CompositeRenderInfo <: AbstractSMLMInfo
+        @test CrossAlignInfo <: AbstractSMLMInfo
         @test AnalysisInfo <: AbstractSMLMInfo
+    end
+
+    @testset "Multi-target step types" begin
+        # Type hierarchy
+        @test AbstractMultiTargetStep <: AbstractSMLMConfig
+        @test CompositeRenderConfig <: AbstractMultiTargetStep
+        @test CrossAlignConfig <: AbstractMultiTargetStep
+
+        # CompositeRenderConfig defaults
+        cr = CompositeRenderConfig()
+        @test cr.strategy isa GaussianRender
+        @test cr.zoom == 20.0
+        @test cr.colors === nothing
+        @test cr.clip_percentile == 0.99
+        @test cr.normalize_each === nothing
+        @test cr.scalebar == true
+        @test cr.scalebar_position == :br
+
+        # CompositeRenderConfig with custom fields
+        cr2 = CompositeRenderConfig(strategy=HistogramRender(), zoom=10.0, colors=[:red, :blue])
+        @test cr2.strategy isa HistogramRender
+        @test cr2.zoom == 10.0
+        @test cr2.colors == [:red, :blue]
+
+        # CrossAlignConfig defaults
+        ca = CrossAlignConfig()
+        @test ca.method == :entropy
+        @test ca.maxn == 100
+        @test ca.histbinsize == 0.05
+
+        # CrossAlignConfig custom
+        ca2 = CrossAlignConfig(method=:fft, maxn=50)
+        @test ca2.method == :fft
+        @test ca2.maxn == 50
+
+        # step_name dispatch
+        @test SMLMAnalysis.step_name(cr) == "compositerender"
+        @test SMLMAnalysis.step_name(ca) == "crossalign"
+
+        # analyze dispatch methods exist for multi-target steps
+        @test hasmethod(analyze, Tuple{Vector{<:BasicSMLD}, CompositeRenderConfig})
+        @test hasmethod(analyze, Tuple{Vector{<:BasicSMLD}, CrossAlignConfig})
+
+        # MultiTargetConfig with steps vector
+        mt = MultiTargetConfig(
+            labels=[:A, :B],
+            steps=[
+                CompositeRenderConfig(zoom=20.0),
+                CrossAlignConfig(),
+                CompositeRenderConfig(zoom=10.0, strategy=HistogramRender()),
+            ],
+            outdir="/tmp/test_mt",
+        )
+        @test length(mt.steps) == 3
+        @test mt.steps[1] isa CompositeRenderConfig
+        @test mt.steps[2] isa CrossAlignConfig
+        @test mt.steps[3] isa CompositeRenderConfig
+        @test mt.colors == [:cyan, :magenta]
+
+        # AlignConfig/AlignInfo re-exports
+        @test AlignConfig === SMLMDriftCorrection.AlignConfig
+        @test AlignInfo === SMLMDriftCorrection.AlignInfo
     end
 end

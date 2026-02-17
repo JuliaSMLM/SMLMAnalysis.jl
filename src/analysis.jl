@@ -181,6 +181,9 @@ function analyze(config::AnalysisConfig)
     _run_pipeline(nothing, config.steps, config.camera, config.outdir, config.verbose)
 end
 
+# Allow analyze(nothing, config) so multi-target can pass nothing for file-based channels
+analyze(::Nothing, config::AnalysisConfig) = analyze(config)
+
 # ============================================================
 # Pipeline loop (pure dispatch, no isa routing)
 # ============================================================

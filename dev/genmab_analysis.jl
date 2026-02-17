@@ -73,7 +73,8 @@ config = AnalysisConfig(
             degree = 2,
             dataset_mode = :registered,
             quality = :iterative,
-            auto_roi = false
+            auto_roi = false,
+            maxn = 200
         ),
         DensityFilterConfig(
             n_sigma = 2.0,
