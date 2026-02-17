@@ -133,6 +133,8 @@ src/
 │   ├── driftcorrect.jl  # Uses SMLMDriftCorrection.DriftConfig directly
 │   ├── densityfilter.jl # DensityFilterConfig, analyze(smld, cfg) → (smld, info)
 │   ├── render.jl        # analyze(smld, RenderConfig) → (image, info)
+│   ├── composite_render.jl  # CompositeRenderConfig <: AbstractMultiTargetStep, multi-channel rendering
+│   ├── cross_align.jl       # CrossAlignConfig <: AbstractMultiTargetStep, cross-channel alignment
 │   ├── bagol.jl         # BaGoLConfig (NOT included in module - legacy, not yet ported)
 └── io/
     ├── smld_io.jl       # HDF5 serialization (save_smld, load_smld)
@@ -152,8 +154,14 @@ src/
 - **`FilterInfo <: AbstractSMLMInfo`**: Info from filter step (n_before, n_after, elapsed_s)
 - **`DensityFilterInfo <: AbstractSMLMInfo`**: Info from density filter step (n_before, n_after, threshold)
 - **`Verbosity`**: Output detail levels (SILENT=0, PROGRESS=1, STANDARD=2, DETAILED=3, DEBUG=4)
-- **`MultiTargetConfig`**: Multi-channel analysis config with per-channel labels, colors, composite rendering
-- **`MultiTargetResult`**: Multi-channel result with per-channel `AnalysisResult` access via `result[:label]`
+- **`AbstractMultiTargetStep <: AbstractSMLMConfig`**: Abstract supertype for steps operating on `Vector{BasicSMLD}` in the multi-target pipeline
+- **`MultiTargetConfig`**: Multi-channel analysis config with `labels`, `colors`, and `steps::Vector{AbstractMultiTargetStep}` for step-dispatch
+- **`MultiTargetResult`**: Multi-channel result with per-channel `AnalysisResult` access via `result[:label]`, also has `result.smlds`
+- **`MultiTargetInfo`**: Aggregated info with `channels::Dict{Symbol,AnalysisInfo}` and multi-target `step_infos`
+- **`CompositeRenderConfig <: AbstractMultiTargetStep`**: Multi-channel composite rendering (zoom, strategy, colors, scalebar)
+- **`CompositeRenderInfo`**: Info from composite render (render_info, strategy, zoom, n_channels)
+- **`CrossAlignConfig <: AbstractMultiTargetStep`**: Cross-channel alignment via entropy or FFT (wraps `SMLMDriftCorrection.align_smld`)
+- **`CrossAlignInfo`**: Info from cross-channel alignment (shifts, max_shift_nm)
 
 ### Tuple-Pattern API
 
@@ -300,6 +308,41 @@ The orchestrator in `analysis.jl` calls `analyze()` for each step, collecting `S
 
 No changes to `analysis.jl` needed — the pipeline loop is pure dispatch on `(state_type, config_type)`. Wrong step ordering gives a MethodError.
 
+### Multi-Target Step Dispatch
+
+Multi-target (multi-color) analysis uses a two-phase architecture:
+
+1. **Per-channel pipelines**: Each channel runs `analyze(data, AnalysisConfig)` independently
+2. **Multi-target steps**: Step dispatch on `Vector{BasicSMLD}` via `AbstractMultiTargetStep` configs
+
+```julia
+mt = MultiTargetConfig(
+    labels = [:IgG, :C1q],
+    colors = [:cyan, :magenta],  # default: cyan/magenta for 2, CMY for 3
+    steps = [
+        CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
+        CrossAlignConfig(method=:entropy),
+        CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),  # post-alignment render
+    ],
+    outdir = "output/cell1/",
+)
+
+(result, info) = analyze([
+    (images_647, config_647),
+    (images_568, config_568),
+], mt)
+
+result[:IgG].smld         # Per-channel access
+result.smlds              # Vector{BasicSMLD} (may be aligned)
+info.channels[:IgG]       # Per-channel AnalysisInfo
+```
+
+Multi-target steps dispatch on `analyze(smlds::Vector{BasicSMLD}, cfg::AbstractMultiTargetStep)`:
+- **`CompositeRenderConfig`**: Renders multi-channel composite image (pass-through: SMLDs not modified)
+- **`CrossAlignConfig`**: Aligns channels via entropy/FFT cross-correlation (state-modifying: returns aligned SMLDs)
+
+Output structure: `outdir/{label}/` for per-channel results, `outdir/composite/` for multi-target step outputs.
+
 ### Re-exported Types
 
 From ecosystem packages (available after `using SMLMAnalysis`):
@@ -307,7 +350,7 @@ From ecosystem packages (available after `using SMLMAnalysis`):
 - **GaussMLE**: GaussMLEConfig, GaussianXYNB/S/SXSY, AstigmaticXYZNB, GaussMLEFitInfo, fit
 - **SMLMBoxer**: getboxes, BoxerConfig (embedded in DetectFitConfig)
 - **SMLMFrameConnection**: frameconnect, FrameConnectConfig, CalibrationConfig, CalibrationResult (all aliased via `const`)
-- **SMLMDriftCorrection**: driftcorrect, DriftConfig (aliased as `const DriftConfig = SMLMDriftCorrection.DriftConfig`)
+- **SMLMDriftCorrection**: driftcorrect, DriftConfig (aliased as `const DriftConfig = SMLMDriftCorrection.DriftConfig`), align_smld, AlignConfig, AlignInfo
 - **SMLMRender**: render, save_image, HistogramRender, GaussianRender, CircleRender, EllipseRender, RenderConfig (aliased as `const RenderConfig = SMLMRender.RenderConfig`)
 - **SMLMSim**: StaticSMLMConfig, DiffusionSMLMConfig, simulate, gen_images, gen_image, Nmer2D, Nmer3D, Line2D, GenericFluor
 
