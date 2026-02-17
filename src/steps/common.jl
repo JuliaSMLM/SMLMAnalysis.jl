@@ -76,13 +76,11 @@ function _save_box_overlay(dir, filename, images, roi_batch, box_colors; title_p
     # Use provided frame_labels for display, or fall back to frame_indices
     display_labels = frame_labels !== nothing ? frame_labels : frame_indices
 
-    # For SMLM data: high-contrast stretch with dark background
-    # Clip at background level for dark base, aggressive upper clip for bright spots
+    # Contrast stretch: dark background, spot cores retain structure
     sample_frames = frame_indices[1:min(4, length(frame_indices))]
     sample_data = vec(images[:, :, sample_frames])
-    bg_level = median(sample_data)
-    pmin = Float64(bg_level)  # Clip at background for dark base
-    pmax = Float64(quantile(sample_data, 0.995))  # Aggressive clip to brighten spots
+    pmin = Float64(quantile(sample_data, 0.25))   # Below background -> solid black
+    pmax = Float64(quantile(sample_data, 0.9995))  # Above most spot peaks -> preserve core detail
 
     fig = Figure(size=_grid_figure_size(images))
     box_size = roi_batch.roi_size
