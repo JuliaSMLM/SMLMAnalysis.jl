@@ -46,6 +46,11 @@ localizations via GaussMLE in a single step, with per-dataset processing.
 
     # H5 format: :auto (detect), :smart (SMART microscope), :mic (MATLAB Instrument Control)
     h5_format::Symbol = :auto
+
+    # Auto-camera from MIC H5: when set with camera=nothing and h5_format=:mic,
+    # SCMOSCamera is built from H5 calibration at detectfit time
+    pixel_size::Union{Float64, Nothing} = nothing
+    qe::Float64 = 1.0
 end
 
 """
@@ -334,6 +339,25 @@ function _inject_camera(cfg::DetectFitConfig, camera::SMLMData.AbstractCamera)
     DetectFitConfig(; camera=camera, [f => getfield(cfg, f) for f in fieldnames(DetectFitConfig) if f != :camera]...)
 end
 
+"""
+    _auto_camera(cfg::DetectFitConfig) -> AbstractCamera
+
+Resolve camera from DetectFitConfig. Uses cfg.camera if set, otherwise auto-builds
+from MIC H5 calibration when pixel_size is provided.
+"""
+function _auto_camera(cfg::DetectFitConfig)
+    cfg.camera !== nothing && return cfg.camera
+    if cfg.pixel_size !== nothing
+        h5_path = cfg.path !== nothing ? cfg.path :
+                  cfg.paths !== nothing ? cfg.paths[1] :
+                  error("Auto-camera requires path or paths in DetectFitConfig")
+        format = cfg.h5_format == :auto ? _detect_h5_format(h5_path) : cfg.h5_format
+        format == :mic || error("Auto-camera from H5 only supported for :mic format, got :$format")
+        return build_camera_from_mic_h5(h5_path; pixel_size=cfg.pixel_size, qe=cfg.qe)
+    end
+    error("DetectFitConfig requires camera or pixel_size for auto-camera from MIC H5")
+end
+
 # ============================================================
 # analyze() dispatch methods
 # ============================================================
@@ -352,8 +376,8 @@ Run combined detection and fitting. Camera must be set in `cfg.camera`.
 """
 function analyze(data::Vector{<:AbstractArray{<:Real,3}}, cfg::DetectFitConfig;
                  outdir=nothing, step_number::Int=1, verbose::Int=Verbosity.STANDARD, kwargs...)
-    cfg.camera === nothing && error("DetectFitConfig.camera is required for analyze(). Set camera=... in the config.")
-    t = @elapsed (smld, detect_info) = detectfit(data, cfg.camera, cfg;
+    camera = _auto_camera(cfg)
+    t = @elapsed (smld, detect_info) = detectfit(data, camera, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose)
     (smld, StepInfo(step_number, cfg, t, _step_summary(detect_info); info=detect_info))
 end
@@ -373,8 +397,8 @@ File-based detection and fitting. Requires `cfg.path` or `cfg.paths` and `cfg.ca
 """
 function analyze(cfg::DetectFitConfig;
                  outdir=nothing, step_number::Int=1, verbose::Int=Verbosity.STANDARD, kwargs...)
-    cfg.camera === nothing && error("DetectFitConfig.camera is required for analyze(). Set camera=... in the config.")
-    t = @elapsed (smld, detect_info) = detectfit(cfg.camera, cfg;
+    camera = _auto_camera(cfg)
+    t = @elapsed (smld, detect_info) = detectfit(camera, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose)
     (smld, StepInfo(step_number, cfg, t, _step_summary(detect_info); info=detect_info))
 end

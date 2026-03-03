@@ -117,6 +117,25 @@ function load_mic_h5_calibration_for_scmos(filepath::String)
 end
 
 """
+    build_camera_from_mic_h5(filepath; pixel_size, qe=1.0) -> SCMOSCamera
+
+Build an SCMOSCamera from MIC H5 per-pixel calibration data (offset, readnoise, gain).
+
+Pixel size and QE are not stored in MIC H5 files and must be provided.
+
+# Arguments
+- `filepath`: Path to MIC H5 file with Calibration/ group
+- `pixel_size`: Pixel size in μm (required)
+- `qe`: Quantum efficiency 0-1 (default: 1.0)
+"""
+function build_camera_from_mic_h5(filepath::String; pixel_size::Real, qe::Real=1.0)
+    cal = load_mic_h5_calibration_for_scmos(filepath)
+    ny, nx = size(cal.readnoise)
+    SCMOSCamera(nx, ny, Float32(pixel_size), cal.readnoise;
+                offset=cal.offset, gain=cal.gain, qe=Float32(qe))
+end
+
+"""
     load_mic_h5_block(filepath, block_num::Int) -> Array{Float32,3}
 
 Load a single data block from MIC H5 file.
