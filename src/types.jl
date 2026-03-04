@@ -283,6 +283,36 @@ struct CrossAlignInfo <: SMLMData.AbstractSMLMInfo
     elapsed_s::Float64
 end
 
+"""
+    CrossCorrInfo <: AbstractSMLMInfo
+
+Info from pair cross-correlation g(r) step.
+
+# Fields
+- `r::Vector{Float64}`: Bin centers (μm)
+- `g::Vector{Float64}`: g(r) values
+- `n_a::Int`: Emitter count in channel A
+- `n_b::Int`: Emitter count in channel B
+- `area::Float64`: FOV area (μm²)
+- `r_max::Float64`: Maximum correlation distance (μm)
+- `dr::Float64`: Bin width (μm)
+- `channel_a::Symbol`: Label for channel A
+- `channel_b::Symbol`: Label for channel B
+- `elapsed_s::Float64`: Elapsed time (s)
+"""
+struct CrossCorrInfo <: SMLMData.AbstractSMLMInfo
+    r::Vector{Float64}
+    g::Vector{Float64}
+    n_a::Int
+    n_b::Int
+    area::Float64
+    r_max::Float64
+    dr::Float64
+    channel_a::Symbol
+    channel_b::Symbol
+    elapsed_s::Float64
+end
+
 # ============================================================
 # AnalysisInfo - aggregated info from all steps (tuple-pattern)
 # ============================================================

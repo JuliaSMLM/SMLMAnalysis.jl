@@ -119,7 +119,7 @@ export Verbosity
 export DataSource, get_images, n_datasets, n_frames_per_dataset
 export AnalysisConfig, AnalysisResult, AnalysisInfo, StepInfo
 export DetectFitInfo, FilterInfo, DensityFilterInfo
-export CompositeRenderInfo, CrossAlignInfo
+export CompositeRenderInfo, CrossAlignInfo, CrossCorrInfo
 export AbstractMultiTargetStep
 export MultiTargetConfig, MultiTargetResult, MultiTargetInfo
 export crop_camera, crop_images
@@ -160,6 +160,9 @@ export CompositeRenderConfig
 
 include("steps/cross_align.jl")
 export CrossAlignConfig
+
+include("steps/crosscorr.jl")
+export CrossCorrConfig
 
 # ============================================================
 # I/O
