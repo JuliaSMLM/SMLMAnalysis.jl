@@ -5,7 +5,7 @@
 [![Build Status](https://github.com/JuliaSMLM/SMLMAnalysis.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/JuliaSMLM/SMLMAnalysis.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Coverage](https://codecov.io/gh/JuliaSMLM/SMLMAnalysis.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/JuliaSMLM/SMLMAnalysis.jl)
 
-Complete SMLM (Single Molecule Localization Microscopy) analysis pipeline: detection, fitting, filtering, frame connection, drift correction, density filtering, and super-resolution rendering. Orchestrates the [JuliaSMLM](https://github.com/JuliaSMLM) ecosystem into reproducible workflows with provenance tracking. All coordinates are in microns.
+SMLM analysis pipeline for the [JuliaSMLM](https://github.com/JuliaSMLM) ecosystem: detection, fitting, filtering, frame connection, drift correction, and super-resolution rendering with provenance tracking.
 
 ## Installation
 
@@ -16,202 +16,81 @@ Pkg.add("SMLMAnalysis")
 
 ## Quick Start
 
-### Pipeline with AnalysisConfig
-
 ```julia
 using SMLMAnalysis
 
-# Define camera (512x512 pixels, 100nm pixel size)
-cam = IdealCamera(512, 512, 0.1)
+cam = IdealCamera(512, 512, 0.1)  # 512x512, 100nm pixels
 
-# Configure and run the full pipeline
 config = AnalysisConfig(
     camera = cam,
     steps = [
-        DetectFitConfig(
-            boxer=BoxerConfig(boxsize=9, psf_sigma=0.130),
+        DetectFitConfig(boxer=BoxerConfig(boxsize=9, psf_sigma=0.130),
             fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20)),
         FilterConfig(photons=(500.0, Inf), precision=(0.0, 0.007)),
         FrameConnectConfig(max_frame_gap=5),
-        CalibrationConfig(),
-        DriftConfig(degree=2),
+        DriftConfig(degree=2, dataset_mode=:registered),
         RenderConfig(zoom=20, colormap=:inferno),
     ],
     outdir = "output/",
 )
 (result, info) = analyze(image_stacks, config)
-
-result.smld               # Final BasicSMLD with corrected localizations
-result.drift_model        # Drift model (if DriftConfig was used)
-info.steps[:detectfit]    # Per-step info from upstream packages
-info.elapsed_s            # Total wall time
 ```
 
-### Step-by-step with analyze() dispatch
+![Super-resolution render](docs/src/assets/render_gaussian.png)
 
-Each step uses `analyze()` with a typed config:
+## Pipeline Architecture
+
+The pipeline folds `analyze()` over a steps vector, with Julia's method dispatch routing each call by `(state_type, config_type)`:
+
+```
+for (i, cfg) in enumerate(steps)
+    (state, step_info) = analyze(state, cfg)
+end
+```
+
+Each step defines `analyze(input, ::MyConfig)` and returns `(result, StepInfo)`. Adding a step means defining a config type, implementing `analyze()` for it, and exporting -- it works immediately in both config-driven and step-by-step workflows.
+
+Steps from upstream packages (`DriftConfig`, `FrameConnectConfig`, `RenderConfig`) are re-exported and dispatch directly to their source implementations.
+
+## Step-by-Step Usage
+
+Each step works standalone with the same `analyze()` dispatch:
 
 ```julia
-using SMLMAnalysis
-
 cam = IdealCamera(512, 512, 0.1)
 
-# 1. Detect ROIs and fit localizations (GPU-accelerated)
-(smld, df_info) = analyze(image_stacks, DetectFitConfig(
+(smld, _) = analyze(image_stacks, DetectFitConfig(
     camera=cam, boxer=BoxerConfig(boxsize=9, psf_sigma=0.130)))
-
-# 2. Filter by quality
 (smld, _) = analyze(smld, FilterConfig(photons=(500.0, Inf)))
+(smld, _) = analyze(smld, FrameConnectConfig(max_frame_gap=5))
+(smld, _) = analyze(smld, DriftConfig(degree=2))
+(img, _)  = analyze(smld, RenderConfig(zoom=20, colormap=:inferno))
 
-# 3. Link localizations across frames
-(smld, fc_info) = analyze(smld, FrameConnectConfig(max_frame_gap=5))
-
-# 4. Calibrate localization uncertainties
-(smld, cal_info) = analyze(smld, CalibrationConfig())
-
-# 5. Correct sample drift
-(smld, dc_info) = analyze(smld, DriftConfig(degree=2))
-
-# 6. Render super-resolution image
-(img, _) = analyze(smld, RenderConfig(zoom=20, colormap=:inferno))
-
-# Save/load intermediate results for parameter iteration
+# Save/load intermediate results
 save_smld("checkpoint.h5", smld)
 smld = load_smld("checkpoint.h5")
 ```
 
-## Composable Pipeline
+## Composability
 
-The `steps` vector is composable — after `DetectFitConfig` (which must be first since it produces localizations from raw images), you can use any combination, order, or repetition of steps. The pipeline uses Julia's method dispatch on `(state_type, config_type)` for routing: there is no step registry or `if/elseif` chain. Wrong step ordering gives a `MethodError`, not a silent failure.
-
-**Minimal pipeline** — detect+fit and render, skipping all intermediate processing:
+After `DetectFitConfig` (which produces localizations from images), steps can be used in any combination, order, or repetition:
 
 ```julia
-config = AnalysisConfig(
-    camera = cam,
-    steps = [DetectFitConfig(boxer=BoxerConfig(boxsize=9)), RenderConfig(zoom=20)],
-)
-```
+# Minimal: detect and render
+steps = [DetectFitConfig(boxer=BoxerConfig(boxsize=9)), RenderConfig(zoom=20)]
 
-**Multiple renders** — different zooms or colormaps in one pipeline:
+# Multiple renders at different scales
+steps = [DetectFitConfig(...), DriftConfig(degree=2),
+         RenderConfig(zoom=10, colormap=:viridis),
+         RenderConfig(zoom=20, colormap=:inferno)]
 
-```julia
-steps = [
-    DetectFitConfig(boxer=BoxerConfig(boxsize=9)),
-    FilterConfig(photons=(500.0, Inf)),
-    DriftConfig(degree=2),
-    RenderConfig(zoom=10, colormap=:viridis),
-    RenderConfig(zoom=20, colormap=:inferno),
-]
-```
-
-**Repeated filtering** — filter, process, filter again:
-
-```julia
-steps = [
-    DetectFitConfig(boxer=BoxerConfig(boxsize=9)),
-    FilterConfig(photons=(500.0, Inf)),           # coarse filter
-    FrameConnectConfig(max_frame_gap=5),
-    CalibrationConfig(),
-    FilterConfig(precision=(0.0, 0.005)),          # tighter filter after connection
-    DriftConfig(degree=2),
-    RenderConfig(zoom=20),
-]
-```
-
-**Config provenance**: `DetectFitConfig` and `FilterConfig` are defined in SMLMAnalysis. `FrameConnectConfig` and `DriftConfig` are re-exported from upstream packages (SMLMFrameConnection, SMLMDriftCorrection). `RenderConfig` is re-exported from SMLMRender.
-
-**Extensibility**: Adding a step requires no changes to the pipeline orchestrator. Define `struct YourConfig <: AbstractSMLMConfig`, implement `analyze(smld::BasicSMLD, cfg::YourConfig; kwargs...)` returning `(result, StepInfo(...))`, and your step works in both config-driven and step-by-step workflows. See the [Guide](https://JuliaSMLM.github.io/SMLMAnalysis.jl/stable/guide/#Extending-the-Pipeline) for a worked example.
-
-### Rendered output
-
-![Super-resolution render](docs/src/assets/render_gaussian.png)
-
-## Configuration Reference
-
-### DetectFitConfig
-
-Combined ROI detection (SMLMBoxer) and MLE fitting (GaussMLE). Embeds native upstream configs for full access to all detection/fitting parameters.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `boxer` | `BoxerConfig(boxsize=11, psf_sigma=0.135)` | Detection config (SMLMBoxer) |
-| `fitter` | `GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20)` | Fitting config (GaussMLE) |
-| `camera` | `nothing` | Camera model (required for step-by-step; injected by AnalysisConfig) |
-| `path` | `nothing` | H5 file path (file-based workflow) |
-| `paths` | `nothing` | Vector of H5 paths (one per dataset) |
-| `h5_format` | `:auto` | H5 format: `:auto`, `:smart`, `:mic` |
-
-**BoxerConfig** key fields: `boxsize` (ROI size in pixels), `min_photons` (detection threshold), `psf_sigma` (expected PSF width in microns), `backend` (`:auto`/`:gpu`/`:cpu`).
-
-**GaussMLEConfig** key fields: `psf_model` (PSF type, e.g. `GaussianXYNBS()` for variable width), `iterations` (MLE iterations), `backend`, `constraints`, `batch_size`.
-
-**PSF model guidance:** `GaussianXYNBS()` (default) fits per-emitter PSF width -- use for most data. `GaussianXYNB(sigma)` uses a known PSF sigma (faster). `GaussianXYNBSXSY()` fits independent sigma_x and sigma_y (for astigmatic 3D).
-
-### FilterConfig
-
-Quality-based filtering. All criteria use `(min, max)` tuples; `nothing` disables.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `photons` | `nothing` | Photon count range, e.g. `(500.0, Inf)` |
-| `precision` | `nothing` | Localization precision range (microns), e.g. `(0.0, 0.007)` |
-| `pvalue` | `nothing` | Goodness-of-fit p-value range, e.g. `(1e-3, 1.0)` |
-| `psf_sigma` | `nothing` | PSF width filter: `:auto` (mode +/- 10%) or `(min, max)` |
-
-### FrameConnectConfig
-
-Links localizations of the same emitter across consecutive frames. Re-exported from SMLMFrameConnection.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `max_frame_gap` | `5` | Maximum dark frames allowed in a track |
-| `max_sigma_dist` | `5.0` | Spatial matching threshold (in sigma units) |
-
-### CalibrationConfig
-
-Uncertainty calibration from frame connection analysis. Uses connected tracks to estimate motion blur and CRLB scale factors.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `clamp_k_to_one` | `true` | Prevent CRLB scale factor k < 1 |
-| `filter_high_chi2` | `false` | Remove tracks with high chi-squared pairs |
-| `chi2_filter_threshold` | `6.0` | Chi-squared threshold for track removal |
-
-### DriftConfig
-
-Entropy-based drift correction. Re-exported from SMLMDriftCorrection.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `degree` | `2` | Legendre polynomial degree |
-| `dataset_mode` | `:registered` | `:registered` for independent multi-dataset, `:continuous` for one long acquisition |
-| `quality` | `:singlepass` | `:singlepass` or `:iterative` |
-| `chunk_frames` | `0` | Split continuous data into chunks of N frames (0 = no chunking) |
-| `auto_roi` | `true` | Use dense ROI subset for faster estimation |
-| `maxn` | `200` | Maximum neighbors for entropy calculation |
-| `max_iterations` | `100` | Maximum iterations for optimization |
-
-**Mode guidance:** Use `dataset_mode=:registered` (default) when datasets are independent acquisitions of the same FOV. Use `dataset_mode=:continuous` when data is one long acquisition split across files, with `chunk_frames=4000` for long acquisitions.
-
-### DensityFilterConfig
-
-Removes isolated localizations by neighbor density.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `n_sigma` | `2.0` | Search radius in localization uncertainty units |
-| `min_neighbors` | `:auto` | Minimum neighbor count; `:auto` uses valley detection |
-
-### RenderConfig
-
-Super-resolution image rendering via SMLMRender.
-
-```julia
-RenderConfig(zoom=20, colormap=:inferno)                    # Gaussian render (default)
-RenderConfig(zoom=20, strategy=HistogramRender())            # Histogram render
-RenderConfig(zoom=20, strategy=CircleRender())               # Circle render
-RenderConfig(zoom=20, color_by=:absolute_frame, colormap=:turbo)  # Temporal coloring
+# Repeated filtering: coarse before connection, tight after
+steps = [DetectFitConfig(...),
+         FilterConfig(photons=(500.0, Inf)),
+         FrameConnectConfig(max_frame_gap=5),
+         FilterConfig(precision=(0.0, 0.005)),
+         DriftConfig(degree=2),
+         RenderConfig(zoom=20)]
 ```
 
 ## Multi-Dataset Workflows
@@ -219,11 +98,10 @@ RenderConfig(zoom=20, color_by=:absolute_frame, colormap=:turbo)  # Temporal col
 Dataset boundaries are encoded in the data structure:
 
 ```julia
-# Vector of 3D arrays = multiple datasets
-image_stacks = [dataset1, dataset2, dataset3]  # each is (height, width, frames)
-(result, info) = analyze(image_stacks, config)
+# Vector of arrays = multiple datasets
+(result, info) = analyze([dataset1, dataset2, dataset3], config)
 
-# Single 3D array = one dataset
+# Single array = one dataset
 (result, info) = analyze(single_stack, config)
 
 # File-based: MIC format auto-detects blocks as datasets
@@ -231,61 +109,53 @@ config = AnalysisConfig(
     camera = cam,
     steps = [DetectFitConfig(path="data.h5", h5_format=:mic), ...],
 )
-(result, info) = analyze(config)  # No data argument needed
-```
-
-## Output Format
-
-`analyze()` returns `(AnalysisResult, AnalysisInfo)`.
-
-| Output | Description |
-|--------|-------------|
-| `result.smld` | Final drift-corrected BasicSMLD |
-| `result.smld_connected` | Connected SMLD with track info (if FrameConnectConfig used) |
-| `result.drift_model` | Fitted drift model (if DriftConfig used) |
-| `info.elapsed_s` | Total wall time (seconds) |
-| `info.steps[:detectfit]` | Per-step upstream info struct |
-| `info.step_infos` | Vector of StepInfos with timing, config, and summary stats |
-
-When `outdir` is set, each step writes to `outdir/01_detectfit/`, `outdir/02_filter/`, etc., with `config.toml`, `stats.md`, and diagnostic plots.
-
-## I/O
-
-```julia
-# Save/load SMLD checkpoints (HDF5 format)
-save_smld("results.h5", smld; drift_model=dm, source_file="raw_data.h5")
-smld = load_smld("results.h5")
-smld_info("results.h5")  # Print file summary without loading
-
-# Load microscope data
-images, info = load_smart_h5("smart_data.h5")           # SMART microscope format
-images, info = load_mic_h5("mic_data.h5")              # MIC format
-block_images = load_mic_h5_block("mic_data.h5", 1)  # Load single block
+(result, info) = analyze(config)
 ```
 
 ## Multi-Target (Multi-Color)
 
+Each channel runs its own `AnalysisConfig` pipeline, then cross-channel steps (alignment, composite rendering) run via `AbstractMultiTargetStep` dispatch:
+
 ```julia
-mt_config = MultiTargetConfig(
+mt = MultiTargetConfig(
     labels = [:IgG, :C1q],
-    colors = [:red, :green],
-    render_zoom = 20,
+    colors = [:cyan, :magenta],
+    steps = [
+        CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
+        CrossAlignConfig(method=:entropy),
+        CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
+    ],
     outdir = "output/cell1/",
 )
 
 (result, info) = analyze([
     (images_647, config_647),
     (images_568, config_568),
-], mt_config)
+], mt)
 
 result[:IgG].smld    # Per-channel access
 result.smlds         # All SMLDs
 ```
 
+## Output and Provenance
+
+Every `analyze()` call returns `(result, info)`:
+
+| Field | Description |
+|-------|-------------|
+| `result.smld` | Final BasicSMLD with corrected localizations |
+| `result.smld_connected` | Connected SMLD with track info |
+| `result.drift_model` | Fitted drift model |
+| `info.elapsed_s` | Total wall time |
+| `info.steps[:detectfit]` | Typed info struct from upstream package |
+| `info.step_infos` | Vector of StepInfos with per-step timing, config, and summary |
+
+When `outdir` is set, each step writes to `outdir/01_detectfit/`, `outdir/02_filter/`, etc. with saved configs, summary stats, and diagnostic plots.
+
 ## JuliaSMLM Ecosystem
 
 ```
-SMLMData (core types)
+SMLMData (core types: Emitter, Camera, BasicSMLD)
     +-- SMLMBoxer (ROI detection)
     +-- GaussMLE (GPU-accelerated MLE fitting)
     +-- SMLMFrameConnection (linking across frames)
@@ -296,17 +166,13 @@ SMLMData (core types)
     +-- SMLMAnalysis (integrates all)
 ```
 
-## Related Packages
+All packages share [SMLMData.jl](https://github.com/JuliaSMLM/SMLMData.jl) types. Coordinates are in microns throughout.
 
-- **[SMLMData.jl](https://github.com/JuliaSMLM/SMLMData.jl)** - Core types: Emitter, Camera, BasicSMLD
-- **[SMLMBoxer.jl](https://github.com/JuliaSMLM/SMLMBoxer.jl)** - ROI detection from raw images
-- **[GaussMLE.jl](https://github.com/JuliaSMLM/GaussMLE.jl)** - GPU-accelerated MLE fitting
-- **[SMLMFrameConnection.jl](https://github.com/JuliaSMLM/SMLMFrameConnection.jl)** - Linking localizations across frames
-- **[SMLMDriftCorrection.jl](https://github.com/JuliaSMLM/SMLMDriftCorrection.jl)** - Entropy-based drift correction
-- **[SMLMRender.jl](https://github.com/JuliaSMLM/SMLMRender.jl)** - Super-resolution image rendering
-- **[SMLMSim.jl](https://github.com/JuliaSMLM/SMLMSim.jl)** - SMLM data simulation
-- **[MicroscopePSFs.jl](https://github.com/JuliaSMLM/MicroscopePSFs.jl)** - PSF models
+## Documentation
+
+- [Stable docs](https://JuliaSMLM.github.io/SMLMAnalysis.jl/stable/) - Full guide, configuration reference, and API
+- [API Overview](api_overview.md) - LLM-parseable API reference
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) file.
