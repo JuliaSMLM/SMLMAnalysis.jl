@@ -108,7 +108,7 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
     for (i, step_cfg) in enumerate(config.steps)
         colors = _resolve_colors(step_cfg, config.colors)
         (state, step_info) = analyze(state, step_cfg;
-            outdir=composite_dir, step_number=i, verbose=v, colors=colors)
+            outdir=composite_dir, step_number=i, verbose=v, colors=colors, labels=config.labels)
         push!(step_infos, step_info)
 
         # Store in steps dict (use step_name with index for duplicates)

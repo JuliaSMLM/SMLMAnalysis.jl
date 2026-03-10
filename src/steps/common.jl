@@ -117,6 +117,44 @@ function _save_box_overlay(dir, filename, images, roi_batch, box_colors; title_p
 end
 
 # ============================================================
+# Sample frame planning (for overlay plots)
+# ============================================================
+
+"""
+    _plan_sample_frames(ds_frame_counts::Vector{Int}, n_samples::Int=12)
+
+Precompute which frames to sample across all datasets for overlay plots.
+Always includes first and last absolute frames, with equal spacing between.
+
+Returns `(plan, abs_frames)`:
+- `plan::Dict{Int, Vector{Int}}`: dataset index → local frame indices to capture
+- `abs_frames::Vector{Int}`: absolute frame numbers for display labels (in order)
+"""
+function _plan_sample_frames(ds_frame_counts::Vector{Int}, n_samples::Int=12)
+    total = sum(ds_frame_counts)
+    total == 0 && return Dict{Int,Vector{Int}}(), Int[]
+
+    n = min(n_samples, total)
+    abs_targets = unique([round(Int, x) for x in range(1, total, length=n)])
+
+    cumulative = cumsum(ds_frame_counts)
+    plan = Dict{Int,Vector{Int}}()
+    abs_frames = Int[]
+
+    for abs_frame in abs_targets
+        ds = findfirst(c -> abs_frame <= c, cumulative)
+        local_frame = ds == 1 ? abs_frame : abs_frame - cumulative[ds-1]
+        if !haskey(plan, ds)
+            plan[ds] = Int[]
+        end
+        push!(plan[ds], local_frame)
+        push!(abs_frames, abs_frame)
+    end
+
+    (plan, abs_frames)
+end
+
+# ============================================================
 # Dataset assignment helpers
 # ============================================================
 

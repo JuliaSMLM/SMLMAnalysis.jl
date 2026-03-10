@@ -345,22 +345,24 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
         psf02 = quantile(psf_data, 0.02)
         mode_x = _calculate_mode([e.σx for e in emitters]) * 1000
         mode_y = _calculate_mode([e.σy for e in emitters]) * 1000
-        mode_avg = (mode_x + mode_y) / 2
 
-        ax5 = Axis(fig[3, 1], xlabel="Fitted PSF σ (nm)", ylabel="Count", title="PSF Width Distribution")
-        # Show PSF sigma filter bounds if configured
+        # Compute per-axis bounds matching _filter_smld logic
         if cfg.psf_sigma !== nothing
             if cfg.psf_sigma === :auto
                 tol = 0.10
-                vspan!(ax5, psf02 * 0.9, mode_avg * (1 - tol), color=REJECTED_COLOR)
-                vspan!(ax5, mode_avg * (1 + tol), psf98 * 1.1, color=REJECTED_COLOR)
-                vlines!(ax5, [mode_avg * (1 - tol), mode_avg * (1 + tol)], color=THRESHOLD_COLOR, linestyle=:dot, linewidth=2)
-            elseif cfg.psf_sigma isa Tuple
-                lo_nm, hi_nm = cfg.psf_sigma[1] * 1000, cfg.psf_sigma[2] * 1000
-                vspan!(ax5, psf02 * 0.9, lo_nm, color=REJECTED_COLOR)
-                vspan!(ax5, hi_nm, psf98 * 1.1, color=REJECTED_COLOR)
-                vlines!(ax5, [lo_nm, hi_nm], color=THRESHOLD_COLOR, linestyle=:dot, linewidth=2)
+                lo_x_nm, hi_x_nm = mode_x * (1 - tol), mode_x * (1 + tol)
+                lo_y_nm, hi_y_nm = mode_y * (1 - tol), mode_y * (1 + tol)
+            else
+                lo_x_nm, hi_x_nm = cfg.psf_sigma[1] * 1000, cfg.psf_sigma[2] * 1000
+                lo_y_nm, hi_y_nm = lo_x_nm, hi_x_nm
             end
+        end
+
+        ax5 = Axis(fig[3, 1], xlabel="Fitted PSF σ (nm)", ylabel="Count", title="PSF Width Distribution")
+        # Show per-axis filter bounds (matching actual filter behavior)
+        if cfg.psf_sigma !== nothing
+            vlines!(ax5, [lo_x_nm, hi_x_nm], color=:blue, linestyle=:dot, linewidth=2, label="σx bounds")
+            vlines!(ax5, [lo_y_nm, hi_y_nm], color=:red, linestyle=:dot, linewidth=2, label="σy bounds")
         end
         hist!(ax5, psf_σx[(psf_σx .>= psf02) .& (psf_σx .<= psf98)], bins=50, color=(:blue, 0.5), label="σx")
         hist!(ax5, psf_σy[(psf_σy .>= psf02) .& (psf_σy .<= psf98)], bins=50, color=(:red, 0.5), label="σy")

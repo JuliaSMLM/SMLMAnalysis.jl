@@ -107,6 +107,7 @@ mt = MultiTargetConfig(
         CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
         CompositeRenderConfig(zoom=10.0, strategy=HistogramRender()),
         CompositeRenderConfig(zoom=50.0, strategy=CircleRender()),
+        CrossCorrConfig(r_max=0.5, dr=0.005),
     ],
     outdir = let d = joinpath(@__DIR__, "output", "multicolor_example"); rm(d; force=true, recursive=true); d end,
 )
