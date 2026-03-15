@@ -259,6 +259,38 @@ struct DensityFilterInfo <: SMLMData.AbstractSMLMInfo
 end
 
 """
+    IntensityFilterInfo <: AbstractSMLMInfo
+
+Info from intensity-based multi-emitter rejection step.
+
+# Fields
+- `n_before::Int`: Emitter count before filtering
+- `n_after::Int`: Emitter count after filtering
+- `field_mode::Symbol`: Actual field mode used (`:uniform` or `:gaussian`, may fallback)
+- `lambda_max_global::Float64`: Global mode photon count
+- `field_params::Union{NamedTuple, Nothing}`: Gaussian field params `(A, x0, y0, w, bg)` or nothing
+- `field_fit_r2::Float64`: R² of field fit (0.0 for uniform)
+- `elapsed_s::Float64`: Elapsed time (s)
+- `p2_estimate::Union{Float64, Nothing}`: Estimated double-emitter fraction
+- `p2_tail_threshold::Float64`: Normalized threshold used for p₂ estimation
+- `p2_tail_obs::Union{Float64, Nothing}`: Observed tail mass fraction above threshold
+- `p2_tail_f2::Union{Float64, Nothing}`: Double-distribution tail mass fraction above threshold
+"""
+struct IntensityFilterInfo <: SMLMData.AbstractSMLMInfo
+    n_before::Int
+    n_after::Int
+    field_mode::Symbol
+    lambda_max_global::Float64
+    field_params::Union{NamedTuple, Nothing}
+    field_fit_r2::Float64
+    elapsed_s::Float64
+    p2_estimate::Union{Float64, Nothing}
+    p2_tail_threshold::Float64
+    p2_tail_obs::Union{Float64, Nothing}
+    p2_tail_f2::Union{Float64, Nothing}
+end
+
+"""
     CompositeRenderInfo <: AbstractSMLMInfo
 
 Info from a multi-channel composite render step.

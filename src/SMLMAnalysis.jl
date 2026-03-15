@@ -64,6 +64,7 @@ using JLD2
 using CairoMakie
 using NearestNeighbors
 using Optim
+using Distributions: Poisson, ccdf
 
 # Re-export from SMLMData
 export AbstractCamera, IdealCamera, SCMOSCamera
@@ -118,7 +119,7 @@ include("types.jl")
 export Verbosity
 export DataSource, get_images, n_datasets, n_frames_per_dataset
 export AnalysisConfig, AnalysisResult, AnalysisInfo, StepInfo
-export DetectFitInfo, FilterInfo, DensityFilterInfo
+export DetectFitInfo, FilterInfo, DensityFilterInfo, IntensityFilterInfo
 export CompositeRenderInfo, CrossAlignInfo, CrossCorrInfo
 export AbstractMultiTargetStep
 export MultiTargetConfig, MultiTargetResult, MultiTargetInfo
@@ -152,6 +153,9 @@ export DriftConfig
 
 include("steps/densityfilter.jl")
 export DensityFilterConfig
+
+include("steps/intensityfilter.jl")
+export IntensityFilterConfig
 
 include("steps/render.jl")
 
