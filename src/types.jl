@@ -345,6 +345,30 @@ struct CrossCorrInfo <: SMLMData.AbstractSMLMInfo
     elapsed_s::Float64
 end
 
+"""
+    BaGoLInfo <: AbstractSMLMInfo
+
+Info from BaGoL grouping step.
+
+# Fields
+- `n_locs_in::Int`: Input localization count
+- `n_emitters::Int`: Output emitter count
+- `compression::Float64`: Compression ratio (n_locs_in / n_emitters)
+- `final_μ::Float64`: Final mean localizations per emitter
+- `final_shape::Float64`: Final NegBin shape parameter
+- `n_partitions::Int`: Number of spatial partitions used
+- `diagnostics::SMLMBaGoL.BaGoLDiagnostics`: Full diagnostics for advanced use
+"""
+struct BaGoLInfo <: SMLMData.AbstractSMLMInfo
+    n_locs_in::Int
+    n_emitters::Int
+    compression::Float64
+    final_μ::Float64
+    final_shape::Float64
+    n_partitions::Int
+    diagnostics::SMLMBaGoL.BaGoLDiagnostics
+end
+
 # ============================================================
 # AnalysisInfo - aggregated info from all steps (tuple-pattern)
 # ============================================================

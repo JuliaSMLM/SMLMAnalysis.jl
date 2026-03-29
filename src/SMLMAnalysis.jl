@@ -58,6 +58,7 @@ using GaussMLE
 using SMLMFrameConnection
 using SMLMRender
 using SMLMDriftCorrection
+using SMLMBaGoL
 using MicroscopePSFs
 using HDF5
 using JLD2
@@ -105,6 +106,9 @@ const AlignConfig = SMLMDriftCorrection.AlignConfig
 const AlignInfo = SMLMDriftCorrection.AlignInfo
 export align_smld, AlignConfig, AlignInfo
 
+# Re-export from SMLMBaGoL
+export run_bagol, BaGoLDiagnostics
+
 # Re-export from SMLMRender
 export render, save_image
 export HistogramRender, GaussianRender, CircleRender, EllipseRender
@@ -119,7 +123,7 @@ include("types.jl")
 export Verbosity
 export DataSource, get_images, n_datasets, n_frames_per_dataset
 export AnalysisConfig, AnalysisResult, AnalysisInfo, StepInfo
-export DetectFitInfo, FilterInfo, DensityFilterInfo, IntensityFilterInfo
+export DetectFitInfo, FilterInfo, DensityFilterInfo, IntensityFilterInfo, BaGoLInfo
 export CompositeRenderInfo, CrossAlignInfo, CrossCorrInfo
 export AbstractMultiTargetStep
 export MultiTargetConfig, MultiTargetResult, MultiTargetInfo
@@ -167,6 +171,9 @@ export CrossAlignConfig
 
 include("steps/crosscorr.jl")
 export CrossCorrConfig
+
+include("steps/bagol.jl")
+export BaGoLConfig
 
 # ============================================================
 # I/O

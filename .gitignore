@@ -12,4 +12,5 @@ output/
 gatta_ruler/
 data/
 dev/output/
+dev/paths.jl
 *.log

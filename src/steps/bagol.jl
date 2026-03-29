@@ -1,234 +1,120 @@
 """
 BaGoL (Bayesian Grouping of Localizations) step for SMLMAnalysis.
 
-This step groups localizations into emitters using Bayesian inference.
-Requires frame-connected and calibrated data (a.smld).
+Groups localizations into emitters using Bayesian inference via RJMCMC.
+Requires frame-connected (and ideally calibrated) data.
 """
 
-using SMLMBaGoL
-
 """
-    BaGoLConfig
+    BaGoLConfig <: AbstractSMLMConfig
 
-Configuration for BaGoL grouping step.
+Configuration for BaGoL grouping step. Fields map directly to `SMLMBaGoL.run_bagol` kwargs.
 
-# Fields
-- `name`: Step name (default: "bagol")
-- `verbose`: Verbosity level (default: Verbosity.STANDARD)
-- `n_iterations`: Number of MCMC iterations (default: 10000)
-- `burn_in`: Burn-in iterations before recording samples (default: 2000)
-- `α`: Shape parameter for count distribution. Float64 or :auto (default: :auto)
-- `learn_α`: Whether to update α during MCMC (default: true)
-- `λ_K`: Poisson prior mean for emitter count K. Nothing = use default (n_locs/5) (default: nothing)
-- `partition_threshold`: Use partitioning if n_locs > threshold (default: 500)
-- `nsigma`: DBSCAN threshold in sigma units (default: 3.0)
-- `min_partition_size`: Minimum locs per partition (smaller dropped as noise) (default: 0)
-- `max_partition_size`: Maximum locs per partition (default: 1000)
-- `render_zoom`: Zoom factor for renders (default: 50)
+# Keywords
+- `μ::Float64`: Mean localizations per emitter (default: 10.0)
+- `shape::Float64`: NegBin shape parameter — 1.0 = exponential/dSTORM, >1 = peaked/DNA-PAINT (default: 2.0)
+- `learn_distribution::Union{Bool,Symbol}`: Count distribution learning — `true` = learn both μ and shape,
+  `false` = fix both, `:mu` = learn μ only, `:shape` = learn shape only (default: `true`)
+- `n_iterations::Int`: Total MCMC iterations (default: 10000)
+- `burn_in::Int`: Burn-in iterations before recording (default: 2000)
+- `sync_interval::Int`: Iterations between global μ/shape updates (default: 500)
+- `partition_sigma::Float64`: DBSCAN threshold in sigma units (default: 3.0)
+- `min_partition_size::Int`: Minimum locs per partition; smaller dropped as noise (default: 0)
+- `max_partition_size::Int`: Maximum locs per partition; larger are split (default: 1000)
+- `skip_partition_size::Int`: Skip partitions larger than this (default: typemax(Int))
+- `posterior_pixel_size::Float64`: Rao-Blackwellized posterior image pixel size in μm; 0.0 to disable (default: 0.002)
 """
-Base.@kwdef struct BaGoLConfig <: SMLMData.AbstractSMLMConfig
-    # RJMCMC parameters
+@kwdef struct BaGoLConfig <: SMLMData.AbstractSMLMConfig
+    # Count model
+    μ::Float64 = 10.0
+    shape::Float64 = 2.0
+    learn_distribution::Union{Bool, Symbol} = true
+
+    # MCMC
     n_iterations::Int = 10000
     burn_in::Int = 2000
-    α::Union{Float64, Symbol} = :auto
-    learn_α::Bool = true
-    λ_K::Union{Float64, Nothing} = nothing  # Poisson prior mean for K
+    sync_interval::Int = 500
+
     # Partitioning
-    partition_threshold::Int = 500
-    nsigma::Float64 = 3.0
-    min_partition_size::Int = 0  # Keep ALL clusters (was 10, dropped most emitters)
+    partition_sigma::Float64 = 3.0
+    min_partition_size::Int = 0
     max_partition_size::Int = 1000
-    # Output
-    render_zoom::Int = 50  # 50x for ellipse/circle plots (2nm effective pixel)
+    skip_partition_size::Int = typemax(Int)
+
+    # Posterior image
+    posterior_pixel_size::Float64 = 0.002
 end
 
 """
-    run_step!(a::Analysis, cfg::BaGoLConfig)
+    bagol_step(smld, cfg; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)
 
-Run BaGoL grouping on calibrated, frame-connected localizations.
-
-Requires:
-- `a.smld` to contain calibrated localizations (from frameconnect + calibration)
-
-Produces:
-- `a.bagol_result`: BaGoLDiagnostics with posterior info
-- Updates a.smld with grouped emitters (optional, controlled by replace_smld)
-- Renders via SMLMRender if verbosity >= STANDARD
+Group localizations into emitters via BaGoL. Returns `(bagol_smld, BaGoLInfo)`.
 """
-function run_step!(a::Analysis, cfg::BaGoLConfig)
-    a.smld === nothing && error("No smld - run detectfit, filter, and frameconnect first")
+function bagol_step(smld::BasicSMLD, cfg::BaGoLConfig;
+                    outdir::Union{String,Nothing}=nothing,
+                    step_number::Int=0,
+                    verbose::Int=Verbosity.STANDARD)
+    v = verbose
+    dir = step_outdir(outdir, step_number, cfg)
 
-    a.step_counter += 1
-    t0 = time()
-    verbose = a.verbose
+    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" μ=cfg.μ shape=cfg.shape n_iterations=cfg.n_iterations
 
-    if verbose >= Verbosity.PROGRESS
-        @info "Step $(a.step_counter): $(step_name(cfg))"
-    end
+    n_locs_in = length(smld.emitters)
 
-    n_locs = length(a.smld.emitters)
-
-    # Compute λ_K if not specified (default: n_locs / 5)
-    λ_K = cfg.λ_K === nothing ? Float64(n_locs) / 5.0 : cfg.λ_K
-
-    # Run BaGoL - returns (BasicSMLD, BaGoLDiagnostics)
-    bagol_smld, diagnostics = SMLMBaGoL.run_bagol(
-        a.smld;
+    bagol_smld, diagnostics = SMLMBaGoL.run_bagol(smld;
+        μ = cfg.μ,
+        shape = cfg.shape,
+        learn_distribution = cfg.learn_distribution,
         n_iterations = cfg.n_iterations,
         burn_in = cfg.burn_in,
-        α = cfg.α,
-        learn_α = cfg.learn_α,
-        λ_K = λ_K,
-        partition_threshold = cfg.partition_threshold,
-        nsigma = cfg.nsigma,
+        sync_interval = cfg.sync_interval,
+        partition_sigma = cfg.partition_sigma,
         min_partition_size = cfg.min_partition_size,
         max_partition_size = cfg.max_partition_size,
-        verbose = verbose >= Verbosity.PROGRESS
+        skip_partition_size = cfg.skip_partition_size,
+        posterior_pixel_size = cfg.posterior_pixel_size,
+        verbose = v >= Verbosity.PROGRESS,
     )
 
-    # Store results for QC and downstream use
-    a.bagol_result = diagnostics
-    a.bagol_smld = bagol_smld
     n_emitters = diagnostics.n_emitters
+    compression = n_locs_in > 0 ? round(n_locs_in / max(1, n_emitters), digits=1) : 0.0
 
-    # Record timing and summary
-    t = time() - t0
-    summary = Dict{Symbol, Any}(
-        :n_locs_in => n_locs,
-        :n_emitters => n_emitters,
-        :compression => n_locs > 0 ? round(n_locs / max(1, n_emitters), digits=1) : 0.0
-    )
-    # diagnostics is the BaGoL info struct (tuple-pattern)
-    _record!(a, cfg, t, summary; info=diagnostics)
+    info = BaGoLInfo(n_locs_in, n_emitters, compression,
+                     diagnostics.final_μ, diagnostics.final_shape,
+                     diagnostics.n_partitions, diagnostics)
 
-    # Save outputs using SMLMRender
-    if verbose >= Verbosity.STANDARD
-        _save_bagol_outputs!(a, cfg, bagol_smld, diagnostics, verbose)
+    # Diagnostic outputs via SMLMBaGoL report system
+    if dir !== nothing && v >= Verbosity.STANDARD
+        mkpath(dir)
+        _save_config!(dir, cfg)
+        _save_info!(dir, diagnostics)
+        report = SMLMBaGoL.compute_report(bagol_smld, diagnostics; locs_smld=smld)
+        SMLMBaGoL.write_report(report; output_dir=dir)
+        SMLMBaGoL.plot_report(report; output_dir=dir)
     end
 
-    _checkpoint!(a)
+    v >= Verbosity.PROGRESS && @info "  → $n_emitters emitters from $n_locs_in locs ($(compression)x compression, $(round(diagnostics.final_μ, digits=1)) locs/emitter)"
 
-    if verbose >= Verbosity.PROGRESS
-        @info "  BaGoL: $(n_locs) locs → $(n_emitters) emitters ($(summary[:compression])x compression)"
-    end
-
-    a
+    (bagol_smld, info)
 end
 
-"""
-Save BaGoL output renders and statistics using SMLMRender.
-
-Renders generated:
-- `overlay.png`: PRIMARY QC - Input (gray) + Output (red) ellipses showing σ
-- `input_gaussian.png`: Input SR image (inferno colormap)
-- `bagol_gaussian.png`: Output SR image (viridis colormap)
-- `k_posterior.png`: P(K|data) histogram
-- `stats.md`: Summary with precision improvement metrics
-"""
-function _save_bagol_outputs!(a::Analysis, cfg::BaGoLConfig, bagol_smld::BasicSMLD, diagnostics, verbose::Int)
-    stepdir = _stepdir(a, cfg)
-    stepdir === nothing && return
-    mkpath(stepdir)
-
-    # Save config and info
-    _save_config!(stepdir, cfg)
-    _save_info!(stepdir, diagnostics)
-
-    zoom = cfg.render_zoom
-
-    # 1. PRIMARY QC: Input/Output Overlay with ellipses showing σ
-    # Gray ellipses = input locs (many, small σ)
-    # Red ellipses = output emitters (few, even smaller σ from combining)
-    # Tuple-pattern: render returns (image, RenderInfo), ignore here
-    if diagnostics.n_emitters > 0
-        _ = SMLMRender.render([a.smld, bagol_smld];
-            colors = [:gray, :red],
-            strategy = EllipseRender(),
-            zoom = zoom,
-            filename = joinpath(stepdir, "overlay.png")
-        )
-    end
-
-    # 2. Gaussian renders for detail/publication
-    _ = SMLMRender.render(a.smld;
-        strategy = GaussianRender(),
-        zoom = zoom,
-        colormap = :inferno,
-        filename = joinpath(stepdir, "input_gaussian.png")
-    )
-
-    if diagnostics.n_emitters > 0
-        _ = SMLMRender.render(bagol_smld;
-            strategy = GaussianRender(),
-            zoom = zoom,
-            colormap = :viridis,
-            filename = joinpath(stepdir, "bagol_gaussian.png")
-        )
-    end
-
-    # 3. K posterior histogram
-    _plot_k_posterior(diagnostics, joinpath(stepdir, "k_posterior.png"))
-
-    # 4. Save summary stats with precision comparison
-    _save_bagol_stats!(stepdir, a.smld, bagol_smld, diagnostics)
-end
+_step_summary(info::BaGoLInfo) = Dict{Symbol,Any}(
+    :n_locs_in => info.n_locs_in,
+    :n_emitters => info.n_emitters,
+    :compression => info.compression,
+    :final_μ => round(info.final_μ, digits=2),
+    :final_shape => round(info.final_shape, digits=2),
+    :n_partitions => info.n_partitions,
+)
 
 """
-Save BaGoL statistics including precision improvement metrics.
+    analyze(smld, cfg::BaGoLConfig; kwargs...) -> (bagol_smld, StepInfo)
+
+Group localizations into emitters via Bayesian inference (BaGoL).
 """
-function _save_bagol_stats!(stepdir::String, input_smld::BasicSMLD, bagol_smld::BasicSMLD, diagnostics)
-    open(joinpath(stepdir, "stats.md"), "w") do io
-        println(io, "# BaGoL Results\n")
-
-        n_in = length(input_smld.emitters)
-        n_out = diagnostics.n_emitters
-
-        println(io, "## Grouping")
-        println(io, "- Input localizations: $n_in")
-        println(io, "- Output emitters: $n_out")
-        println(io, "- Compression: $(round(n_in / max(1, n_out), digits=1))x")
-        println(io, "")
-
-        println(io, "## Model Parameters")
-        println(io, "- Final μ: $(round(diagnostics.final_μ, digits=2)) (mean locs/emitter)")
-        println(io, "- Final shape: $(round(diagnostics.final_shape, digits=2))")
-        println(io, "")
-
-        # Precision improvement comparison
-        println(io, "## Precision")
-        if n_in > 0
-            σ_in = mean(sqrt(e.σ_x^2 + e.σ_y^2) for e in input_smld.emitters)
-            println(io, "- Mean input σ: $(round(σ_in * 1000, digits=1)) nm")
-        end
-        if n_out > 0 && !isempty(bagol_smld.emitters)
-            σ_out = mean(sqrt(e.σ_x^2 + e.σ_y^2) for e in bagol_smld.emitters)
-            println(io, "- Mean output σ: $(round(σ_out * 1000, digits=1)) nm")
-            if n_in > 0
-                improvement = σ_in / σ_out
-                println(io, "- Precision improvement: $(round(improvement, digits=1))x")
-            end
-        end
-    end
-end
-
-"""
-Plot K posterior histogram.
-"""
-function _plot_k_posterior(diagnostics, filepath::String)
-    fig = Figure(size=(600, 400))
-    ax = Axis(fig[1, 1],
-              xlabel="K (number of emitters)",
-              ylabel="Count",
-              title="Posterior P(K|data)")
-
-    posterior_k = diagnostics.posterior_k
-    ks = 0:(length(posterior_k) - 1)
-    barplot!(ax, ks, posterior_k, color=:steelblue)
-
-    # Mark MAP
-    map_k = argmax(posterior_k) - 1
-    vlines!(ax, [map_k], color=:red, linestyle=:dash, label="MAP K = $map_k")
-    axislegend(ax, position=:rt)
-
-    save(filepath, fig)
+function analyze(smld::BasicSMLD, cfg::BaGoLConfig;
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
+    t = @elapsed (bagol_smld, bagol_info) = bagol_step(smld, cfg;
+        outdir=outdir, step_number=step_number, verbose=verbose)
+    (bagol_smld, StepInfo(step_number, cfg, t, _step_summary(bagol_info); info=bagol_info))
 end
