@@ -24,6 +24,8 @@ SMLMBoxer  GaussMLE  SMLMRender  SMLMFrameConnection  SMLMSim
 SMLMDriftCorrection (also depends on SMLMSim)
       |
 SMLMAnalysis (integrates all)
+      |
+  SMLMBaGoL (Bayesian grouping, also depends on SMLMData)
 ```
 
 ### Package Details
@@ -38,6 +40,7 @@ SMLMAnalysis (integrates all)
 | SMLMRender | `../SMLMRender` | @render | Super-resolution image rendering |
 | SMLMSim | `../SMLMSim` | @sim | SMLM data simulation, fluorophore kinetics |
 | MicroscopePSFs | `../MicroscopePSFs` | @psf | PSF models (Gaussian, Airy, etc.) |
+| SMLMBaGoL | `../SMLMBaGoL` | @bagol | Bayesian grouping of localizations (RJMCMC) |
 
 ### Agent Communication
 
@@ -132,10 +135,12 @@ src/
 │   ├── frameconnect.jl  # Uses SMLMFrameConnection.FrameConnectConfig directly (calibration integrated)
 │   ├── driftcorrect.jl  # Uses SMLMDriftCorrection.DriftConfig directly
 │   ├── densityfilter.jl # DensityFilterConfig, analyze(smld, cfg) → (smld, info)
+│   ├── intensityfilter.jl # IntensityFilterConfig, Poisson upper-tail test with field estimation
 │   ├── render.jl        # analyze(smld, RenderConfig) → (image, info)
 │   ├── composite_render.jl  # CompositeRenderConfig <: AbstractMultiTargetStep, multi-channel rendering
 │   ├── cross_align.jl       # CrossAlignConfig <: AbstractMultiTargetStep, cross-channel alignment
-│   ├── bagol.jl         # BaGoLConfig (NOT included in module - legacy, not yet ported)
+│   ├── crosscorr.jl         # CrossCorrConfig, cross-correlation analysis
+│   ├── bagol.jl         # BaGoLConfig, analyze(smld, cfg) → (smld, BaGoLInfo) via SMLMBaGoL.run_bagol
 └── io/
     ├── smld_io.jl       # HDF5 serialization (save_smld, load_smld)
     ├── smart_h5.jl      # SMART microscope HDF5 import
@@ -153,6 +158,9 @@ src/
 - **`DetectFitInfo <: AbstractSMLMInfo`**: Info from detectfit step (boxes_info, fit_info, n_datasets, n_rois, n_fits)
 - **`FilterInfo <: AbstractSMLMInfo`**: Info from filter step (n_before, n_after, elapsed_s)
 - **`DensityFilterInfo <: AbstractSMLMInfo`**: Info from density filter step (n_before, n_after, threshold)
+- **`IntensityFilterInfo <: AbstractSMLMInfo`**: Info from intensity filter step (n_before, n_after, field parameters, optional p₂ estimate)
+- **`BaGoLConfig <: AbstractSMLMConfig`**: BaGoL grouping config — fields pass directly to `SMLMBaGoL.run_bagol` kwargs (μ, shape, learn_distribution, n_iterations, burn_in, partition_sigma, posterior_pixel_size, etc.)
+- **`BaGoLInfo <: AbstractSMLMInfo`**: Info from BaGoL step (n_locs_in, n_emitters, compression, final_μ, final_shape, n_partitions, diagnostics::BaGoLDiagnostics)
 - **`Verbosity`**: Output detail levels (SILENT=0, PROGRESS=1, STANDARD=2, DETAILED=3, DEBUG=4)
 - **`AbstractMultiTargetStep <: AbstractSMLMConfig`**: Abstract supertype for steps operating on `Vector{BasicSMLD}` in the multi-target pipeline
 - **`MultiTargetConfig`**: Multi-channel analysis config with `labels`, `colors`, and `steps::Vector{AbstractMultiTargetStep}` for step-dispatch
@@ -195,6 +203,7 @@ Each step uses config dispatch to upstream packages:
 - `SMLMFrameConnection.frameconnect(smld, cfg)` → `(combined, FrameConnectInfo)` with `.connected` in info
 - `SMLMDriftCorrection.driftcorrect(smld, cfg)` → `(corrected_smld, DriftInfo)` with `.model` in info
 - `SMLMRender.render(smld, cfg)` → `(image, RenderInfo)`
+- `SMLMBaGoL.run_bagol(smld; kwargs...)` → `(grouped_smld, BaGoLDiagnostics)`
 
 ### Data Flow
 
@@ -282,9 +291,11 @@ Each step has two layers:
 **Internal function** (NOT exported) — does the work, returns `(result, info::AbstractSMLMInfo)`:
 - `detectfit(data, camera, cfg)` → `(smld, DetectFitInfo)`
 - `filter_step(smld, cfg)` → `(filtered, FilterInfo)`
+- `intensityfilter_step(smld, cfg)` → `(filtered, IntensityFilterInfo)`
 - `frameconnect_step(smld, cfg)` → `(combined, FrameConnectInfo)` (upstream, calibration integrated via `cfg.calibration`)
 - `driftcorrect_step(smld, cfg)` → `(corrected, DriftInfo)` (upstream, config dispatch)
 - `densityfilter_step(smld, cfg)` → `(filtered, DensityFilterInfo)`
+- `bagol_step(smld, cfg)` → `(grouped_smld, BaGoLInfo)` (via `SMLMBaGoL.run_bagol`)
 
 **analyze() dispatch** — thin wrapper that times the call and creates StepInfo:
 ```julia
@@ -353,6 +364,7 @@ From ecosystem packages (available after `using SMLMAnalysis`):
 - **SMLMDriftCorrection**: driftcorrect, DriftConfig (aliased as `const DriftConfig = SMLMDriftCorrection.DriftConfig`), align_smld, AlignConfig, AlignInfo
 - **SMLMRender**: render, save_image, HistogramRender, GaussianRender, CircleRender, EllipseRender, RenderConfig (aliased as `const RenderConfig = SMLMRender.RenderConfig`)
 - **SMLMSim**: StaticSMLMConfig, DiffusionSMLMConfig, simulate, gen_images, gen_image, Nmer2D, Nmer3D, Line2D, GenericFluor
+- **SMLMBaGoL**: run_bagol, BaGoLDiagnostics
 
 ## Uncertainty Calibration
 
@@ -362,3 +374,44 @@ Calibration is integrated into the frame connection step via `FrameConnectConfig
 - Results available via `FrameConnectInfo.calibration::CalibrationResult` (k_scale, sigma_motion_nm, mean_chi2, r_squared)
 - Model: `sigma_corrected^2 = sigma_motion^2 + k^2 * sigma_CRLB^2`
 - `CalibrationConfig` and `CalibrationResult` are re-exported from SMLMFrameConnection (not standalone steps)
+
+## BaGoL (Bayesian Grouping of Localizations)
+
+BaGoL groups multiple localizations of the same emitter into a single high-precision position estimate via RJMCMC. Use after FrameConnect, before Render.
+
+```julia
+# BaGoL step — config fields pass directly to SMLMBaGoL.run_bagol kwargs
+(smld_bagol, step_info) = analyze(smld, BaGoLConfig(
+    μ = 10.0,                     # Expected locs per emitter
+    shape = 2.0,                  # NegBin shape (1=dSTORM, >1=DNA-PAINT)
+    learn_distribution = true,    # true/false/:mu/:shape
+    n_iterations = 10000,
+    burn_in = 2000,
+    partition_sigma = 3.0,        # DBSCAN threshold in sigma units
+    posterior_pixel_size = 0.002, # 2nm posterior image (0.0 to disable)
+))
+
+step_info.info.n_emitters     # Number of grouped emitters
+step_info.info.compression    # Locs-to-emitters ratio
+step_info.info.diagnostics    # Full BaGoLDiagnostics from SMLMBaGoL
+```
+
+BaGoL replaces `smld` in the pipeline (state-modifying step). Diagnostic outputs use SMLMBaGoL's report system (`compute_report` + `write_report` + `plot_report`), not inline rendering. SR rendering is done via a subsequent `RenderConfig` step.
+
+Typical BaGoL pipeline rendering: 3 pre-BaGoL renders (Gaussian, Histogram, Circle), then post-BaGoL Gaussian render of MAP-N emitters + circle overlay (locs white, MAP-N red).
+
+## Intensity Filter
+
+IntensityFilterConfig rejects multi-emitter events via Poisson upper-tail test against a spatially-varying excitation field model:
+
+```julia
+(smld, step_info) = analyze(smld, IntensityFilterConfig(
+    cutoff = 0.01,             # p-value cutoff
+    field_mode = :gaussian,    # :uniform or :gaussian (2D Gaussian beam fit)
+    rate_percentile = 0.95,    # Percentile for single-emitter rate estimation
+    estimate_p2 = true,        # Estimate double-emitter fraction
+))
+```
+
+- `:gaussian` mode fits a 2D Gaussian beam to estimate λ(x,y) variation across FOV
+- p₂ estimation via self-convolution of field-normalized photon distribution
