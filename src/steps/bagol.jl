@@ -88,9 +88,16 @@ function bagol_step(smld::BasicSMLD, cfg::BaGoLConfig;
         mkpath(dir)
         _save_config!(dir, cfg)
         _save_info!(dir, diagnostics)
+        # Zero out track_id before compute_report — FC link IDs are not GT emitter assignments
+        for e in smld.emitters
+            e.track_id = 0
+        end
         report = SMLMBaGoL.compute_report(bagol_smld, diagnostics; locs_smld=smld)
         SMLMBaGoL.write_report(report; output_dir=dir)
         SMLMBaGoL.plot_report(report; output_dir=dir)
+
+        # BaGoL-specific renders: partition circles + overlay
+        _render_bagol_diagnostics(smld, bagol_smld, diagnostics, dir, cfg)
     end
 
     v >= Verbosity.PROGRESS && @info "  → $n_emitters emitters from $n_locs_in locs ($(compression)x compression, $(round(diagnostics.final_μ, digits=1)) locs/emitter)"
@@ -106,6 +113,52 @@ _step_summary(info::BaGoLInfo) = Dict{Symbol,Any}(
     :final_shape => round(info.final_shape, digits=2),
     :n_partitions => info.n_partitions,
 )
+
+"""
+Render BaGoL-specific diagnostic images: partition ellipses and loc/emitter overlay.
+
+Matches SMLMBaGoL.render_report naming: `circles.png` (locs + MAP-N overlay)
+and `partitions.png` (partition-colored localizations).
+
+These renders need the pre-BaGoL localizations, so they are produced inside the BaGoL
+step rather than as separate pipeline steps.
+"""
+function _render_bagol_diagnostics(smld::BasicSMLD, bagol_smld::BasicSMLD,
+                                   diagnostics::SMLMBaGoL.BaGoLDiagnostics,
+                                   dir::String, cfg::BaGoLConfig)
+    zoom = 50.0
+    partition_ids = diagnostics.partition_ids
+
+    # Shared target so both renders have identical bounds
+    target = SMLMRender.create_target_from_smld(smld; zoom=zoom)
+
+    # Circles overlay: white localizations + red MAP-N emitters
+    try
+        (bg_img, _) = SMLMRender.render(smld; strategy=EllipseRender(),
+            color=:white, target=target, clip_percentile=nothing)
+        (fg_img, _) = SMLMRender.render(bagol_smld; strategy=EllipseRender(),
+            color=:red, target=target, clip_percentile=nothing)
+        combined = SMLMRender.compose(bg_img, fg_img; blend=:replace)
+        SMLMRender.save_image(joinpath(dir, "circles.png"), combined)
+    catch e
+        @warn "BaGoL circles render failed" exception=e
+    end
+
+    # Partition-colored localizations
+    if length(partition_ids) == length(smld.emitters)
+        try
+            for (i, e) in enumerate(smld.emitters)
+                e.dataset = partition_ids[i]
+            end
+            part_smld = BasicSMLD(smld.emitters, smld.camera, smld.n_frames, 1)
+            SMLMRender.render(part_smld; strategy=EllipseRender(),
+                color_by=:dataset, categorical=true, zoom=zoom,
+                filename=joinpath(dir, "partitions.png"))
+        catch e
+            @warn "BaGoL partitions render failed" exception=e
+        end
+    end
+end
 
 """
     analyze(smld, cfg::BaGoLConfig; kwargs...) -> (bagol_smld, StepInfo)
