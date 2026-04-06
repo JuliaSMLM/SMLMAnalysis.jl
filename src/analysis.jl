@@ -44,14 +44,18 @@ function _with_log_file(f, outdir)
     outdir === nothing && return f()
 
     logpath = joinpath(outdir, "log.txt")
-    open(logpath, "a") do io
-        println(io, "=== SMLMAnalysis $(Dates.now()) ===")
-        file_logger = Logging.SimpleLogger(io, Logging.Info)
-        tee = TeeLogger(Logging.AbstractLogger[Logging.current_logger(), file_logger])
-        Logging.with_logger(tee) do
-            f()
+    try
+        open(logpath, "w") do io
+            println(io, "=== SMLMAnalysis $(Dates.now()) ===")
+            file_logger = Logging.SimpleLogger(io, Logging.Info)
+            tee = TeeLogger(Logging.AbstractLogger[Logging.current_logger(), file_logger])
+            Logging.with_logger(tee) do
+                f()
+            end
+            flush(io)
         end
-        flush(io)
+    catch
+        f()
     end
 end
 

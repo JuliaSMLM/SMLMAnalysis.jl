@@ -5,45 +5,8 @@ Groups localizations into emitters using Bayesian inference via RJMCMC.
 Requires frame-connected (and ideally calibrated) data.
 """
 
-"""
-    BaGoLConfig <: AbstractSMLMConfig
-
-Configuration for BaGoL grouping step. Fields map directly to `SMLMBaGoL.run_bagol` kwargs.
-
-# Keywords
-- `μ::Float64`: Mean localizations per emitter (default: 10.0)
-- `shape::Float64`: NegBin shape parameter — 1.0 = exponential/dSTORM, >1 = peaked/DNA-PAINT (default: 2.0)
-- `learn_distribution::Union{Bool,Symbol}`: Count distribution learning — `true` = learn both μ and shape,
-  `false` = fix both, `:mu` = learn μ only, `:shape` = learn shape only (default: `true`)
-- `n_iterations::Int`: Total MCMC iterations (default: 10000)
-- `burn_in::Int`: Burn-in iterations before recording (default: 2000)
-- `sync_interval::Int`: Iterations between global μ/shape updates (default: 500)
-- `partition_sigma::Float64`: DBSCAN threshold in sigma units (default: 3.0)
-- `min_partition_size::Int`: Minimum locs per partition; smaller dropped as noise (default: 0)
-- `max_partition_size::Int`: Maximum locs per partition; larger are split (default: 1000)
-- `skip_partition_size::Int`: Skip partitions larger than this (default: typemax(Int))
-- `posterior_pixel_size::Float64`: Rao-Blackwellized posterior image pixel size in μm; 0.0 to disable (default: 0.002)
-"""
-@kwdef struct BaGoLConfig <: SMLMData.AbstractSMLMConfig
-    # Count model
-    μ::Float64 = 10.0
-    shape::Float64 = 2.0
-    learn_distribution::Union{Bool, Symbol} = true
-
-    # MCMC
-    n_iterations::Int = 10000
-    burn_in::Int = 2000
-    sync_interval::Int = 500
-
-    # Partitioning
-    partition_sigma::Float64 = 3.0
-    min_partition_size::Int = 0
-    max_partition_size::Int = 1000
-    skip_partition_size::Int = typemax(Int)
-
-    # Posterior image
-    posterior_pixel_size::Float64 = 0.002
-end
+# BaGoLConfig is defined in SMLMBaGoL (upstream owns config, like DriftConfig/RenderConfig)
+const BaGoLConfig = SMLMBaGoL.BaGoLConfig
 
 """
     bagol_step(smld, cfg; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)
@@ -61,20 +24,11 @@ function bagol_step(smld::BasicSMLD, cfg::BaGoLConfig;
 
     n_locs_in = length(smld.emitters)
 
-    bagol_smld, diagnostics = SMLMBaGoL.run_bagol(smld;
-        μ = cfg.μ,
-        shape = cfg.shape,
-        learn_distribution = cfg.learn_distribution,
-        n_iterations = cfg.n_iterations,
-        burn_in = cfg.burn_in,
-        sync_interval = cfg.sync_interval,
-        partition_sigma = cfg.partition_sigma,
-        min_partition_size = cfg.min_partition_size,
-        max_partition_size = cfg.max_partition_size,
-        skip_partition_size = cfg.skip_partition_size,
-        posterior_pixel_size = cfg.posterior_pixel_size,
-        verbose = v >= Verbosity.PROGRESS,
-    )
+    # Config dispatch: BaGoLConfig fields map 1:1 to run_bagol kwargs
+    # Override verbose from pipeline verbosity level
+    cfg_run = BaGoLConfig(; (f => getfield(cfg, f) for f in fieldnames(BaGoLConfig))...,
+                            verbose = v >= Verbosity.PROGRESS)
+    bagol_smld, diagnostics = SMLMBaGoL.run_bagol(smld, cfg_run)
 
     n_emitters = diagnostics.n_emitters
     compression = n_locs_in > 0 ? round(n_locs_in / max(1, n_emitters), digits=1) : 0.0
