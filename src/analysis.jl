@@ -54,7 +54,8 @@ function _with_log_file(f, outdir)
             end
             flush(io)
         end
-    catch
+    catch err
+        err isa Union{IOError, SystemError} || rethrow()
         f()
     end
 end

@@ -287,12 +287,12 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
     ax3 = Axis(fig[2, 1], xlabel="Localization Precision (nm)", ylabel="Count", title="Precision Distribution")
     if cfg.precision !== nothing
         prec_hi = cfg.precision[2] * 1000  # convert um to nm
-        prec_xlim = max(prec98, prec_hi * 1.5)
+        prec_xlim = max(prec98, prec_hi * 1.2)
         vspan!(ax3, prec_hi, prec_xlim, color=REJECTED_COLOR)
         vlines!(ax3, [prec_hi], color=THRESHOLD_COLOR, linestyle=:dot, linewidth=2)
     end
-    hist!(ax3, σ_x[σ_x .<= prec98], bins=50, color=(:blue, 0.5), label="σ_x")
-    hist!(ax3, σ_y[σ_y .<= prec98], bins=50, color=(:red, 0.5), label="σ_y")
+    hist!(ax3, σ_x[σ_x .<= prec_xlim], bins=50, color=(:blue, 0.5), label="σ_x")
+    hist!(ax3, σ_y[σ_y .<= prec_xlim], bins=50, color=(:red, 0.5), label="σ_y")
     xlims!(ax3, 0, prec_xlim)
     axislegend(ax3, position=:rt, framevisible=false, labelsize=9)
     text!(ax3, 0.97, 0.70, text="σ_x: $(round(median(σ_x), digits=1)) nm\nσ_y: $(round(median(σ_y), digits=1)) nm",
