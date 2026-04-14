@@ -120,7 +120,7 @@ export RenderConfig
 # Core types
 # ============================================================
 include("types.jl")
-export Verbosity
+export Verbosity, Checkpoint
 export DataSource, get_images, n_datasets, n_frames_per_dataset
 export AnalysisConfig, AnalysisResult, AnalysisInfo, StepInfo
 export DetectFitInfo, FilterInfo, DensityFilterInfo, IntensityFilterInfo, BaGoLInfo

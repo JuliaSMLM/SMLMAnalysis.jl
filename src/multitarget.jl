@@ -85,6 +85,7 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
             roi = acfg.roi,
             outdir = channel_outdir,
             verbose = acfg.verbose,
+            checkpoint = acfg.checkpoint,
         )
 
         (result, info) = analyze(data, channel_cfg)

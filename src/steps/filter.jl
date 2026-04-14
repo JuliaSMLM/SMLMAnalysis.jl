@@ -76,9 +76,16 @@ _step_summary(info::FilterInfo) = Dict{Symbol,Any}(
 Filter localizations by quality criteria.
 """
 function analyze(smld::BasicSMLD, cfg::FilterConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
+                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
     t = @elapsed (filtered, filter_info) = filter_step(smld, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose)
+
+    if checkpoint >= Checkpoint.ALL
+        dir = step_outdir(outdir, step_number, cfg)
+        _save_step_smld(dir, filtered; filename="smld_filtered.jld2")
+    end
+
     (filtered, StepInfo(step_number, cfg, t, _step_summary(filter_info); info=filter_info))
 end
 
@@ -150,6 +157,7 @@ function _save_filter_outputs!(dir::String, outdir::Union{String,Nothing}, cfg::
         _write_filter_stats(dir, cfg, n_before, n_after, t)
         _save_filter_quality_figures(dir, smld_input, cfg)
         _save_fit_overlay_from_cache(dir, outdir, smld_input, cfg)
+        _save_loc_per_frame(dir, smld_filtered; title="Localizations per Frame (post-filter)")
     end
 
     if v >= Verbosity.DETAILED

@@ -16,6 +16,38 @@ module Verbosity
 end
 
 # ============================================================
+# Checkpoint Levels (SMLD JLD2 persistence per step)
+# ============================================================
+"""
+    Checkpoint
+
+Checkpoint level controls per-step SMLD persistence to disk for downstream
+iteration without re-running upstream pipeline steps. Mirrors the `Verbosity`
+pattern: a single integer level passed via `checkpoint=` kwarg or
+`AnalysisConfig.checkpoint`. Each step's `analyze()` dispatch decides what
+the level means for itself by inlining `if checkpoint >= Checkpoint.X` checks
+(symmetric with how `verbose >= Verbosity.STANDARD` works).
+
+# Levels
+- `NONE = 0`: no SMLD checkpoints written
+- `END = 1`: orchestrator writes only the final SMLD-producing step's output
+- `EXPENSIVE = 2` (default): expensive steps (DetectFit, FrameConnect, Drift, BaGoL)
+  write their output SMLD; cheap filters do not
+- `ALL = 3`: every SMLD-producing step writes its output
+
+# Default
+The default is `EXPENSIVE`. This guarantees that no expensive step ever runs
+producing only image/diagnostic outputs — the SMLD is always on disk for
+downstream iteration.
+"""
+module Checkpoint
+    const NONE      = 0   # no SMLD checkpoints
+    const END       = 1   # final SMLD step only (orchestrator handles)
+    const EXPENSIVE = 2   # expensive steps + final (default)
+    const ALL       = 3   # every SMLD-producing step
+end
+
+# ============================================================
 # Data Source - lazy loading wrapper
 # ============================================================
 
@@ -466,6 +498,7 @@ config = AnalysisConfig(
     roi::Union{@NamedTuple{x::UnitRange{Int}, y::UnitRange{Int}}, Nothing} = nothing
     outdir::Union{String, Nothing} = nothing
     verbose::Int = Verbosity.STANDARD
+    checkpoint::Int = Checkpoint.EXPENSIVE
 end
 
 # Varargs constructor: AnalysisConfig(step1, step2, ...; camera=cam, outdir="out/")

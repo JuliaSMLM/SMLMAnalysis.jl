@@ -116,6 +116,147 @@ function _save_box_overlay(dir, filename, images, roi_batch, box_colors; title_p
     save(joinpath(dir, filename), fig)
 end
 
+"""
+    _estimate_bleaching_rate(frame_counts) -> NamedTuple or nothing
+
+Fit `N(t) = a + b*exp(-k*t)` to a per-frame localization count vector via
+linearized initial guess + Nelder-Mead refinement.
+
+This is the OBSERVED decay rate, not the true k_bleach for GenericFluor:
+bleaching only occurs from the On state, so `k_observed = k_bleach * P_on`,
+where `P_on = k_on/(k_on+k_off)` is the duty cycle. To get true k_bleach:
+`k_bleach = k_observed / P_on`.
+
+Returns `(k_bleach, N_0, offset, half_life, r_squared, valid_frames, smoothed)`
+or `nothing` if the fit fails.
+"""
+function _estimate_bleaching_rate(frame_counts::Vector{Int})
+    valid_mask = frame_counts .> 0
+    valid_frames = findall(valid_mask)
+    valid_counts = frame_counts[valid_mask]
+
+    length(valid_counts) < 10 && return nothing
+
+    window = min(50, length(valid_counts) ÷ 10)
+    if window > 1
+        smoothed = [mean(valid_counts[max(1, i-window):min(end, i+window)]) for i in 1:length(valid_counts)]
+    else
+        smoothed = Float64.(valid_counts)
+    end
+
+    # Initial guess from linearized fit
+    tail_start = max(1, round(Int, 0.9 * length(smoothed)))
+    a0 = mean(smoothed[tail_start:end])
+
+    shifted = smoothed .- a0
+    pos_mask = shifted .> 0
+    sum(pos_mask) < 10 && return nothing
+
+    x_lin = Float64.(valid_frames[pos_mask])
+    y_lin = log.(shifted[pos_mask])
+
+    n = length(x_lin)
+    sum_x = sum(x_lin)
+    sum_y = sum(y_lin)
+    sum_xy = sum(x_lin .* y_lin)
+    sum_x2 = sum(x_lin .^ 2)
+    denom = n * sum_x2 - sum_x^2
+    abs(denom) < 1e-10 && return nothing
+
+    slope = (n * sum_xy - sum_x * sum_y) / denom
+    intercept = (sum_y - slope * sum_x) / n
+    k0 = -slope
+    b0 = exp(intercept)
+    k0 <= 0 && return nothing
+
+    # Nelder-Mead refinement
+    t = Float64.(valid_frames)
+    function cost(p)
+        a, b, k = p
+        k <= 0 && return Inf
+        pred = a .+ b .* exp.(-k .* t)
+        sum((smoothed .- pred) .^ 2)
+    end
+
+    result = Optim.optimize(cost, [a0, b0, k0], Optim.NelderMead(),
+                            Optim.Options(iterations=5000, g_tol=1e-8))
+
+    a_fit, b_fit, k_fit = Optim.minimizer(result)
+    k_fit <= 0 && return nothing
+
+    half_life = log(2) / k_fit
+
+    y_pred = a_fit .+ b_fit .* exp.(-k_fit .* t)
+    ss_res = sum((smoothed .- y_pred) .^ 2)
+    ss_tot = sum((smoothed .- mean(smoothed)) .^ 2)
+    r_squared = ss_tot > 0 ? 1 - ss_res / ss_tot : 0.0
+
+    (k_bleach=k_fit, N_0=b_fit, offset=a_fit, half_life=half_life, r_squared=r_squared,
+     valid_frames=valid_frames, smoothed=smoothed)
+end
+
+"""
+    _save_loc_per_frame(dir, smld; filename, title) -> bleach_result or nothing
+
+Plot localizations per absolute frame across all datasets, with photobleaching
+exponential decay fit overlay (`a + b*exp(-k*t)`). Marks dataset boundaries for
+multi-dataset SMLDs.
+
+Used by detectfit (raw fits) and filter (post-filter fits) steps.
+"""
+function _save_loc_per_frame(dir::String, smld::BasicSMLD;
+                              filename::String="localizations_per_frame.png",
+                              title::String="Localizations per Frame")
+    emitters = smld.emitters
+    isempty(emitters) && return nothing
+
+    n_frames = smld.n_frames
+    n_total = n_frames * smld.n_datasets
+    frame_counts = zeros(Int, n_total)
+    for e in emitters
+        abs_frame = (e.dataset - 1) * n_frames + e.frame
+        if abs_frame >= 1 && abs_frame <= n_total
+            frame_counts[abs_frame] += 1
+        end
+    end
+
+    bleach_result = _estimate_bleaching_rate(frame_counts)
+
+    fig = Figure(size=(900, 400))
+    ax = Axis(fig[1, 1], xlabel="Absolute Frame", ylabel="Localizations", title=title)
+    lines!(ax, 1:n_total, frame_counts, color=(:blue, 0.5), linewidth=0.5, label="Raw")
+
+    if bleach_result !== nothing
+        lines!(ax, bleach_result.valid_frames, bleach_result.smoothed,
+               color=:blue, linewidth=1.5, label="Smoothed")
+
+        k = round(bleach_result.k_bleach, sigdigits=3)
+        tau = round(bleach_result.half_life, digits=0)
+        a = round(Int, bleach_result.offset)
+        R2 = round(bleach_result.r_squared, digits=3)
+        fit_frames = 1:n_total
+        fit_counts = bleach_result.N_0 .* exp.(-bleach_result.k_bleach .* fit_frames) .+ bleach_result.offset
+        lines!(ax, fit_frames, fit_counts, color=:red, linewidth=2, linestyle=:dash,
+               label="Fit: k=$k/frame, t1/2=$(Int(tau)), a=$a, R^2=$R2")
+
+        hlines!(ax, [bleach_result.offset], color=(:red, 0.3), linestyle=:dot, linewidth=1)
+    else
+        hlines!(ax, [mean(frame_counts)], color=:red, linestyle=:dash,
+                label="mean ($(round(mean(frame_counts), digits=1)))")
+    end
+
+    axislegend(ax, position=:rt, framevisible=false, labelsize=10)
+
+    if smld.n_datasets > 1
+        for ds in 2:smld.n_datasets
+            vlines!(ax, [(ds - 1) * n_frames + 0.5], color=(:gray, 0.5), linestyle=:dash)
+        end
+    end
+
+    save(joinpath(dir, filename), fig)
+    return bleach_result
+end
+
 # ============================================================
 # Sample frame planning (for overlay plots)
 # ============================================================
@@ -289,6 +430,36 @@ function _write_info_field!(io::IO, name::Symbol, v::Tuple)
 end
 function _write_info_field!(io::IO, ::Symbol, ::Any)
     # Skip: AbstractVector, AbstractArray, AbstractDict, complex structs
+end
+
+# ============================================================
+# Step SMLD checkpointing (opt-in via checkpoint=true on analyze())
+# ============================================================
+
+"""
+    _save_step_smld(dir, smld; filename, kwargs...)
+
+Persist a step's output SMLD via JLD2 so downstream iteration (e.g., diagnostic
+plots, parameter sweeps, BaGoL re-runs) can resume without re-running the
+upstream pipeline. The SMLD is stored under the `smld` key:
+
+```julia
+data = JLD2.load("path/smld_corrected.jld2")
+smld = data["smld"]   # full BasicSMLD with camera, n_frames, n_datasets
+```
+
+Extra named values are stored as additional top-level keys (e.g., pass
+`drift_model=drift_model` to embed the drift model alongside the SMLD).
+
+No-op if `dir` is nothing.
+"""
+function _save_step_smld(dir::Union{String,Nothing}, smld::BasicSMLD;
+                          filename::String="smld.jld2",
+                          kwargs...)
+    dir === nothing && return nothing
+    path = joinpath(dir, filename)
+    JLD2.jldsave(path; smld=smld, kwargs...)
+    return path
 end
 
 # ============================================================

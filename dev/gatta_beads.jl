@@ -66,6 +66,7 @@ config = AnalysisConfig(
             pvalue = (1e-6, 1.0),
             psf_sigma = :auto
         ),
+        IntensityFilterConfig(),
         FrameConnectConfig(
             max_frame_gap = 5,
             max_sigma_dist = 5.0,

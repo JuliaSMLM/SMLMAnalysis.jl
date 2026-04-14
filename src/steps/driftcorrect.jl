@@ -23,7 +23,8 @@ result, plus the upstream DriftInfo.
 function driftcorrect_step(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig;
                            outdir::Union{String,Nothing}=nothing,
                            step_number::Int=0,
-                           verbose::Int=Verbosity.STANDARD)
+                           verbose::Int=Verbosity.STANDARD,
+                           checkpoint::Int=Checkpoint.EXPENSIVE)
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
 
@@ -68,6 +69,12 @@ function driftcorrect_step(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig
         converged = hasproperty(drift_info, :converged) ? drift_info.converged : nothing
         iterations = hasproperty(drift_info, :iterations) ? drift_info.iterations : nothing
         _save_driftcorrect_outputs!(dir, drift_model, cfg, v, t, max_drift, inter_shifts, n_frames, converged, iterations, drift_info)
+
+        if checkpoint >= Checkpoint.EXPENSIVE
+            _save_step_smld(dir, corrected_smld;
+                            filename="smld_corrected.jld2",
+                            drift_model=drift_model)
+        end
     end
 
     v >= Verbosity.PROGRESS && @info "  -> max drift $(round(max_drift, digits=1))nm, inter-shift $(round(max_intershift, digits=1))nm ($(round(t, digits=2))s)"
@@ -80,10 +87,11 @@ end
 Run drift correction on localizations.
 """
 function analyze(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
+                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
     n_frames = smld.n_frames
     t = @elapsed (corrected, drift_info) = driftcorrect_step(smld, cfg;
-        outdir=outdir, step_number=step_number, verbose=verbose)
+        outdir=outdir, step_number=step_number, verbose=verbose, checkpoint=checkpoint)
 
     # Build summary (needs smld.n_frames for max_drift calculation)
     drift_model = drift_info.model
@@ -94,6 +102,9 @@ function analyze(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig;
     converged = hasproperty(drift_info, :converged) ? drift_info.converged : nothing
     iterations = hasproperty(drift_info, :iterations) ? drift_info.iterations : nothing
 
+    entropy = hasproperty(drift_info, :entropy) ? drift_info.entropy : nothing
+    backend = hasproperty(drift_info, :backend) ? drift_info.backend : nothing
+
     summary = Dict{Symbol,Any}(
         :max_drift_nm => round(max_drift, digits=1),
         :max_intershift_nm => round(max_intershift, digits=1),
@@ -102,7 +113,9 @@ function analyze(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig;
         :dataset_mode => cfg.dataset_mode,
         :quality => cfg.quality,
         :converged => converged,
-        :iterations => iterations
+        :iterations => iterations,
+        :entropy => entropy,
+        :backend => backend,
     )
 
     (corrected, StepInfo(step_number, cfg, t, summary; info=drift_info))
@@ -143,7 +156,7 @@ function _save_driftcorrect_outputs!(dir::String, drift_model, cfg::SMLMDriftCor
     _save_info!(dir, drift_info)
 
     if v >= Verbosity.STANDARD
-        _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n_frames, converged, iterations)
+        _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n_frames, converged, iterations, drift_info)
         _save_drift_figures(dir, drift_model, n_frames, cfg.dataset_mode; n_chunks=cfg.n_chunks)
     end
 
@@ -153,7 +166,8 @@ function _save_driftcorrect_outputs!(dir::String, drift_model, cfg::SMLMDriftCor
 end
 
 function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n_frames,
-                            converged::Union{Bool,Nothing}, iterations::Union{Int,Nothing})
+                            converged::Union{Bool,Nothing}, iterations::Union{Int,Nothing},
+                            drift_info=nothing)
     n_datasets = drift_model.ndatasets
     max_intershift = n_datasets > 1 ? maximum(inter_shifts[2:end]) : 0.0
 
@@ -176,6 +190,19 @@ function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n
         println(io, "- **Datasets**: $n_datasets")
         println(io, "- **Frames per dataset**: $n_frames")
         println(io, "- **Time**: $(round(t, digits=2))s")
+
+        # Entropy and convergence diagnostics
+        if drift_info !== nothing
+            entropy = hasproperty(drift_info, :entropy) ? drift_info.entropy : nothing
+            if entropy !== nothing
+                println(io, "- **Final entropy**: $(round(entropy, sigdigits=6))")
+            end
+            backend = hasproperty(drift_info, :backend) ? drift_info.backend : nothing
+            if backend !== nothing
+                println(io, "- **Backend**: $backend")
+            end
+        end
+
         println(io, "")
         println(io, "## Parameters")
         println(io, "- degree: $(cfg.degree)")
@@ -183,6 +210,12 @@ function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n
         println(io, "- quality: $(cfg.quality)")
         if cfg.n_chunks > 0
             println(io, "- n_chunks: $(cfg.n_chunks)")
+        end
+        if cfg.chunk_frames > 0
+            println(io, "- chunk_frames: $(cfg.chunk_frames)")
+        end
+        if cfg.auto_roi
+            println(io, "- auto_roi: true")
         end
 
         if n_datasets > 1
@@ -193,6 +226,73 @@ function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n
             for (ds, shift) in enumerate(inter_shifts)
                 println(io, "| $ds | $(round(shift, digits=1)) |")
             end
+        end
+
+        # Residual correlation diagnostics
+        if drift_info !== nothing && hasproperty(drift_info, :residual_correlation) &&
+                drift_info.residual_correlation !== nothing
+            _write_residual_correlation!(io, drift_info.residual_correlation, n_datasets)
+        end
+
+        # Entropy history (iterative quality)
+        if drift_info !== nothing && hasproperty(drift_info, :history) && drift_info.history !== nothing && !isempty(drift_info.history)
+            h = drift_info.history
+            println(io, "")
+            println(io, "## Entropy History")
+            println(io, "- **Initial**: $(round(h[1], sigdigits=6))")
+            println(io, "- **Final**: $(round(h[end], sigdigits=6))")
+            if abs(h[1]) > 0
+                println(io, "- **Improvement**: $(round((h[end] - h[1]) / abs(h[1]) * 100, digits=2))%")
+            end
+            println(io, "- **Iterations**: $(length(h))")
+        end
+
+        # ROI auto-selection
+        if drift_info !== nothing && hasproperty(drift_info, :roi_indices) && drift_info.roi_indices !== nothing
+            println(io, "")
+            println(io, "## Auto-ROI")
+            println(io, "- **Emitters used**: $(length(drift_info.roi_indices)) / total")
+        end
+    end
+end
+
+"""Format a possibly-nothing numeric value for stats output."""
+_fmt_corr(v) = v === nothing ? "N/A" : "$(round(v, sigdigits=3))"
+
+"""Write residual correlation section to stats.md."""
+function _write_residual_correlation!(io::IO, rc, n_datasets::Int)
+    println(io, "")
+    println(io, "## Residual Correlation")
+
+    if hasproperty(rc, :intra_summary) && rc.intra_summary !== nothing
+        s = rc.intra_summary
+        println(io, "")
+        println(io, "### Intra-Dataset (mean |correlation|)")
+        println(io, "- x: $(_fmt_corr(s.mean_abs_corr_x))")
+        println(io, "- y: $(_fmt_corr(s.mean_abs_corr_y))")
+        if s.mean_abs_corr_z !== nothing && s.mean_abs_corr_z != 0
+            println(io, "- z: $(_fmt_corr(s.mean_abs_corr_z))")
+        end
+    end
+
+    if hasproperty(rc, :intra_per_dataset) && rc.intra_per_dataset !== nothing && length(rc.intra_per_dataset) > 1
+        println(io, "")
+        println(io, "### Per-Dataset Residual Correlation")
+        println(io, "| Dataset | n_locs | corr_x | corr_y |")
+        println(io, "|---------|--------|--------|--------|")
+        for entry in rc.intra_per_dataset
+            println(io, "| $(entry.dataset) | $(entry.n_locs) | $(_fmt_corr(entry.corr_x)) | $(_fmt_corr(entry.corr_y)) |")
+        end
+    end
+
+    if hasproperty(rc, :inter) && rc.inter !== nothing && n_datasets > 1
+        inter_rc = rc.inter
+        println(io, "")
+        println(io, "### Inter-Dataset")
+        println(io, "- corr_x: $(_fmt_corr(inter_rc.corr_x))")
+        println(io, "- corr_y: $(_fmt_corr(inter_rc.corr_y))")
+        if inter_rc.corr_z !== nothing && inter_rc.corr_z != 0
+            println(io, "- corr_z: $(_fmt_corr(inter_rc.corr_z))")
         end
     end
 end

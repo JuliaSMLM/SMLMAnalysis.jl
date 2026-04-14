@@ -16,7 +16,8 @@ Group localizations into emitters via BaGoL. Returns `(bagol_smld, BaGoLInfo)`.
 function bagol_step(smld::BasicSMLD, cfg::BaGoLConfig;
                     outdir::Union{String,Nothing}=nothing,
                     step_number::Int=0,
-                    verbose::Int=Verbosity.STANDARD)
+                    verbose::Int=Verbosity.STANDARD,
+                    checkpoint::Int=Checkpoint.EXPENSIVE)
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
 
@@ -52,6 +53,10 @@ function bagol_step(smld::BasicSMLD, cfg::BaGoLConfig;
 
         # BaGoL-specific renders: partition circles + overlay
         _render_bagol_diagnostics(smld, bagol_smld, diagnostics, dir, cfg)
+    end
+
+    if dir !== nothing && checkpoint >= Checkpoint.EXPENSIVE
+        _save_step_smld(dir, bagol_smld; filename="smld_bagol.jld2")
     end
 
     v >= Verbosity.PROGRESS && @info "  → $n_emitters emitters from $n_locs_in locs ($(compression)x compression, $(round(diagnostics.final_μ, digits=1)) locs/emitter)"
@@ -120,8 +125,9 @@ end
 Group localizations into emitters via Bayesian inference (BaGoL).
 """
 function analyze(smld::BasicSMLD, cfg::BaGoLConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
+                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
     t = @elapsed (bagol_smld, bagol_info) = bagol_step(smld, cfg;
-        outdir=outdir, step_number=step_number, verbose=verbose)
+        outdir=outdir, step_number=step_number, verbose=verbose, checkpoint=checkpoint)
     (bagol_smld, StepInfo(step_number, cfg, t, _step_summary(bagol_info); info=bagol_info))
 end

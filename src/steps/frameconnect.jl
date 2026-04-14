@@ -20,7 +20,8 @@ link -> calibrate -> combine (single pass with correct weights).
 function frameconnect_step(smld::BasicSMLD, cfg::SMLMFrameConnection.FrameConnectConfig;
                            outdir::Union{String,Nothing}=nothing,
                            step_number::Int=0,
-                           verbose::Int=Verbosity.STANDARD)
+                           verbose::Int=Verbosity.STANDARD,
+                           checkpoint::Int=Checkpoint.EXPENSIVE)
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
 
@@ -39,6 +40,10 @@ function frameconnect_step(smld::BasicSMLD, cfg::SMLMFrameConnection.FrameConnec
     if dir !== nothing
         _save_frameconnect_outputs!(dir, cfg, v, t, n_before, n_after,
                                     smld_connected, connect_info)
+
+        if checkpoint >= Checkpoint.EXPENSIVE
+            _save_step_smld(dir, combined; filename="smld_combined.jld2")
+        end
     end
 
     cal = connect_info.calibration
@@ -71,9 +76,10 @@ end
 Run frame connection on localizations.
 """
 function analyze(smld::BasicSMLD, cfg::SMLMFrameConnection.FrameConnectConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
+                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
     t = @elapsed (combined, connect_info) = frameconnect_step(smld, cfg;
-        outdir=outdir, step_number=step_number, verbose=verbose)
+        outdir=outdir, step_number=step_number, verbose=verbose, checkpoint=checkpoint)
     (combined, StepInfo(step_number, cfg, t, _step_summary(connect_info); info=connect_info))
 end
 

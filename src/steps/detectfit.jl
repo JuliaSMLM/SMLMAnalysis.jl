@@ -74,7 +74,8 @@ Run combined detection and fitting on image data.
 function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
                    outdir::Union{String,Nothing}=nothing,
                    step_number::Int=1,
-                   verbose::Int=Verbosity.STANDARD)
+                   verbose::Int=Verbosity.STANDARD,
+                   checkpoint::Int=Checkpoint.EXPENSIVE)
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
     n_datasets_val = length(data)
@@ -183,6 +184,10 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
                                  n_datasets_val, n_frames_per_dataset,
                                  sample_images, sample_roi_batch, sample_original_frames,
                                  all_boxes_info, all_fit_info)
+
+        if checkpoint >= Checkpoint.EXPENSIVE
+            _save_step_smld(dir, smld; filename="smld_raw.jld2")
+        end
     end
 
     v >= Verbosity.PROGRESS && @info "  -> $total_fits fits from $total_rois ROIs across $n_datasets_val datasets ($(round(t, digits=2))s)"
@@ -208,7 +213,8 @@ Each data source is loaded one at a time for memory efficiency.
 function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
                    outdir::Union{String,Nothing}=nothing,
                    step_number::Int=1,
-                   verbose::Int=Verbosity.STANDARD)
+                   verbose::Int=Verbosity.STANDARD,
+                   checkpoint::Int=Checkpoint.EXPENSIVE)
     (cfg.path !== nothing || cfg.paths !== nothing) || error("File-based detectfit requires path or paths in config")
     sources = _resolve_file_sources(cfg)
 
@@ -318,6 +324,10 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
                                  n_datasets_val, n_frames_per_dataset,
                                  sample_images, sample_roi_batch, sample_original_frames,
                                  all_boxes_info, all_fit_info)
+
+        if checkpoint >= Checkpoint.EXPENSIVE
+            _save_step_smld(dir, smld; filename="smld_raw.jld2")
+        end
     end
 
     v >= Verbosity.PROGRESS && @info "  -> $total_fits fits from $total_rois ROIs across $n_datasets_val datasets ($(round(t, digits=2))s)"
@@ -375,10 +385,11 @@ _step_summary(info::DetectFitInfo) = Dict{Symbol,Any}(
 Run combined detection and fitting. Camera must be set in `cfg.camera`.
 """
 function analyze(data::Vector{<:AbstractArray{<:Real,3}}, cfg::DetectFitConfig;
-                 outdir=nothing, step_number::Int=1, verbose::Int=Verbosity.STANDARD, kwargs...)
+                 outdir=nothing, step_number::Int=1, verbose::Int=Verbosity.STANDARD,
+                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
     camera = _auto_camera(cfg)
     t = @elapsed (smld, detect_info) = detectfit(data, camera, cfg;
-        outdir=outdir, step_number=step_number, verbose=verbose)
+        outdir=outdir, step_number=step_number, verbose=verbose, checkpoint=checkpoint)
     (smld, StepInfo(step_number, cfg, t, _step_summary(detect_info); info=detect_info))
 end
 
@@ -396,10 +407,11 @@ analyze(::Nothing, cfg::DetectFitConfig; kwargs...) = analyze(cfg; kwargs...)
 File-based detection and fitting. Requires `cfg.path` or `cfg.paths` and `cfg.camera`.
 """
 function analyze(cfg::DetectFitConfig;
-                 outdir=nothing, step_number::Int=1, verbose::Int=Verbosity.STANDARD, kwargs...)
+                 outdir=nothing, step_number::Int=1, verbose::Int=Verbosity.STANDARD,
+                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
     camera = _auto_camera(cfg)
     t = @elapsed (smld, detect_info) = detectfit(camera, cfg;
-        outdir=outdir, step_number=step_number, verbose=verbose)
+        outdir=outdir, step_number=step_number, verbose=verbose, checkpoint=checkpoint)
     (smld, StepInfo(step_number, cfg, t, _step_summary(detect_info); info=detect_info))
 end
 
@@ -524,10 +536,8 @@ function _save_detectfit_outputs!(dir, outdir, smld, camera, cfg, v, t, n_rois, 
 
             _save_detectfit_sample_cache(outdir, smld, sample_images, sample_roi_batch, sample_original_frames)
         end
-    end
 
-    if v >= Verbosity.DETAILED
-        _save_detectfit_detailed(dir, smld)
+        _save_loc_per_frame(dir, smld; title="Localizations per Frame (raw fits)")
     end
 end
 
@@ -600,150 +610,6 @@ function _write_detectfit_stats(dir, smld, cfg, t, n_rois, n_fits, n_datasets, n
         println(io, "- pvalue > 0.001: $(round(100*pval_pass, digits=1))%")
         println(io, "- pvalue > 0.01: $(round(100*sum(pvalue .> 0.01)/n, digits=1))%")
     end
-end
-
-"""
-Estimate observed bleaching rate from localizations per frame decay.
-Fits N(t) = a + b*exp(-k*t) using Nelder-Mead optimization.
-
-Initial guess from linearized fit: estimate offset from tail, then linear regression
-on log(N - offset) to get b and k. Nelder-Mead refines all three parameters.
-
-Note: This gives the OBSERVED decay rate, not the true k_bleach for GenericFluor.
-Since bleaching only occurs from the On state:
-    k_observed = k_bleach * P_on
-    where P_on = k_on/(k_on+k_off) is the duty cycle
-
-To get true k_bleach: k_bleach = k_observed / P_on
-
-Returns (k_bleach, N_0, offset, half_life, r_squared) or nothing if fit fails.
-"""
-function _estimate_bleaching_rate(frame_counts::Vector{Int})
-    # Filter out zero counts and use frames with sufficient data
-    valid_mask = frame_counts .> 0
-    valid_frames = findall(valid_mask)
-    valid_counts = frame_counts[valid_mask]
-
-    length(valid_counts) < 10 && return nothing
-
-    # Smooth the data (rolling average) to reduce noise
-    window = min(50, length(valid_counts) ÷ 10)
-    if window > 1
-        smoothed = [mean(valid_counts[max(1, i-window):min(end, i+window)]) for i in 1:length(valid_counts)]
-    else
-        smoothed = Float64.(valid_counts)
-    end
-
-    # --- Initial guess from linearized fit ---
-    tail_start = max(1, round(Int, 0.9 * length(smoothed)))
-    a0 = mean(smoothed[tail_start:end])
-
-    shifted = smoothed .- a0
-    pos_mask = shifted .> 0
-    sum(pos_mask) < 10 && return nothing
-
-    x_lin = Float64.(valid_frames[pos_mask])
-    y_lin = log.(shifted[pos_mask])
-
-    n = length(x_lin)
-    sum_x = sum(x_lin)
-    sum_y = sum(y_lin)
-    sum_xy = sum(x_lin .* y_lin)
-    sum_x2 = sum(x_lin .^ 2)
-    denom = n * sum_x2 - sum_x^2
-    abs(denom) < 1e-10 && return nothing
-
-    slope = (n * sum_xy - sum_x * sum_y) / denom
-    intercept = (sum_y - slope * sum_x) / n
-    k0 = -slope
-    b0 = exp(intercept)
-    k0 <= 0 && return nothing
-
-    # --- Nelder-Mead refinement ---
-    t = Float64.(valid_frames)
-    function cost(p)
-        a, b, k = p
-        k <= 0 && return Inf
-        pred = a .+ b .* exp.(-k .* t)
-        sum((smoothed .- pred) .^ 2)
-    end
-
-    result = optimize(cost, [a0, b0, k0], NelderMead(),
-                      Optim.Options(iterations=5000, g_tol=1e-8))
-
-    a_fit, b_fit, k_fit = Optim.minimizer(result)
-    k_fit <= 0 && return nothing
-
-    half_life = log(2) / k_fit
-
-    # R^2 on smoothed data
-    y_pred = a_fit .+ b_fit .* exp.(-k_fit .* t)
-    ss_res = sum((smoothed .- y_pred) .^ 2)
-    ss_tot = sum((smoothed .- mean(smoothed)) .^ 2)
-    r_squared = ss_tot > 0 ? 1 - ss_res / ss_tot : 0.0
-
-    (k_bleach=k_fit, N_0=b_fit, offset=a_fit, half_life=half_life, r_squared=r_squared,
-     valid_frames=valid_frames, smoothed=smoothed)
-end
-
-"""Generate detailed plots for DETAILED verbosity"""
-function _save_detectfit_detailed(dir, smld)
-    emitters = smld.emitters
-    isempty(emitters) && return nothing
-
-    # ROIs per frame plot (absolute frames across all datasets)
-    n_frames = smld.n_frames
-    n_total = n_frames * smld.n_datasets
-    frame_counts = zeros(Int, n_total)
-    for e in emitters
-        abs_frame = (e.dataset - 1) * n_frames + e.frame
-        if abs_frame >= 1 && abs_frame <= n_total
-            frame_counts[abs_frame] += 1
-        end
-    end
-
-    # Estimate photobleaching rate
-    bleach_result = _estimate_bleaching_rate(frame_counts)
-
-    fig = Figure(size=(900, 400))
-    ax = Axis(fig[1, 1], xlabel="Absolute Frame", ylabel="Localizations", title="Localizations per Frame")
-    lines!(ax, 1:n_total, frame_counts, color=(:blue, 0.5), linewidth=0.5, label="Raw")
-
-    # Add exponential decay + offset fit if successful
-    if bleach_result !== nothing
-        # Plot smoothed data
-        lines!(ax, bleach_result.valid_frames, bleach_result.smoothed,
-               color=:blue, linewidth=1.5, label="Smoothed")
-
-        # Plot fitted model: a + b*exp(-k*t)
-        k = round(bleach_result.k_bleach, sigdigits=3)
-        tau = round(bleach_result.half_life, digits=0)
-        a = round(Int, bleach_result.offset)
-        R2 = round(bleach_result.r_squared, digits=3)
-        fit_frames = 1:n_total
-        fit_counts = bleach_result.N_0 .* exp.(-bleach_result.k_bleach .* fit_frames) .+ bleach_result.offset
-        lines!(ax, fit_frames, fit_counts, color=:red, linewidth=2, linestyle=:dash,
-               label="Fit: k=$k/frame, t1/2=$(Int(tau)), a=$a, R^2=$R2")
-
-        # Plot offset line
-        hlines!(ax, [bleach_result.offset], color=(:red, 0.3), linestyle=:dot, linewidth=1)
-    else
-        hlines!(ax, [mean(frame_counts)], color=:red, linestyle=:dash,
-                label="mean ($(round(mean(frame_counts), digits=1)))")
-    end
-
-    axislegend(ax, position=:rt, framevisible=false, labelsize=10)
-
-    # Add dataset boundary lines for multi-dataset
-    if smld.n_datasets > 1
-        for ds in 2:smld.n_datasets
-            vlines!(ax, [(ds - 1) * n_frames + 0.5], color=(:gray, 0.5), linestyle=:dash)
-        end
-    end
-
-    save(joinpath(dir, "localizations_per_frame.png"), fig)
-
-    return bleach_result
 end
 
 """

@@ -21,7 +21,11 @@ println("="^60)
 # =============================================================================
 # Data Path - Single cell (RGY mutant, Cell_01 from 20250611)
 # =============================================================================
-h5file = "/mnt/nas/cellpath/Genmab/Data/20250611_A431_SaturatingIgG10min+C1q/A431_IgG1-2F8-RGY-AF647_5ugml_10min+C1q/Cell_01/Label_01/Data_2025-6-11-17-5-42.h5"
+include(joinpath(@__DIR__, "paths.jl"))
+h5file = joinpath(dataroot("cellpath"), "Genmab", "Data",
+    "20250611_A431_SaturatingIgG10min+C1q",
+    "A431_IgG1-2F8-RGY-AF647_5ugml_10min+C1q",
+    "Cell_01", "Label_01", "Data_2025-6-11-17-5-42.h5")
 
 # Check file info
 info = load_mic_h5_info(h5file)

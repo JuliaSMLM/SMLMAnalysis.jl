@@ -18,7 +18,11 @@ println()
 # =============================================================================
 # Data Path - Hexabody dataset
 # =============================================================================
-h5file = "/mnt/nas/cellpath/Genmab/Data/20250603_A431_SaturatingIgG10min+C1q/A431_IgG1-2F8-AF647_5ugml_10min+C1q/Cell_01/Label_01/Data_2025-6-4-17-24-11.h5"
+include(joinpath(@__DIR__, "paths.jl"))
+h5file = joinpath(dataroot("cellpath"), "Genmab", "Data",
+    "20250603_A431_SaturatingIgG10min+C1q",
+    "A431_IgG1-2F8-AF647_5ugml_10min+C1q",
+    "Cell_01", "Label_01", "Data_2025-6-4-17-24-11.h5")
 
 # Check file exists
 if !isfile(h5file)

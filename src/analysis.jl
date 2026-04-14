@@ -55,7 +55,7 @@ function _with_log_file(f, outdir)
             flush(io)
         end
     catch err
-        err isa Union{IOError, SystemError} || rethrow()
+        err isa Union{Base.IOError, SystemError} || rethrow()
         f()
     end
 end
@@ -134,7 +134,7 @@ function analyze(data, config::AnalysisConfig)
         camera = crop_camera(camera, config.roi.x, config.roi.y)
     end
 
-    _run_pipeline(_normalize_data(data), config.steps, camera, config.outdir, config.verbose)
+    _run_pipeline(_normalize_data(data), config.steps, camera, config.outdir, config.verbose, config.checkpoint)
 end
 
 """
@@ -183,11 +183,35 @@ config = AnalysisConfig(
 ```
 """
 function analyze(config::AnalysisConfig)
-    _run_pipeline(nothing, config.steps, config.camera, config.outdir, config.verbose)
+    _run_pipeline(nothing, config.steps, config.camera, config.outdir, config.verbose, config.checkpoint)
 end
 
 # Allow analyze(nothing, config) so multi-target can pass nothing for file-based channels
 analyze(::Nothing, config::AnalysisConfig) = analyze(config)
+
+# ============================================================
+# Final SMLD step locator (for Checkpoint.END mode)
+# ============================================================
+
+"""
+    _find_final_smld_step(steps) -> Int
+
+Walk steps in reverse and return the 1-based index of the last step that
+produces a `BasicSMLD` (i.e., not a terminal render). Returns 0 if no
+SMLD-producing step is found.
+
+Used by `_run_pipeline` to translate `Checkpoint.END` into a per-step
+"this is the final, save it" decision.
+"""
+_produces_smld(::SMLMData.AbstractSMLMConfig) = true
+_produces_smld(::SMLMRender.RenderConfig) = false
+
+function _find_final_smld_step(steps::Vector{SMLMData.AbstractSMLMConfig})
+    for i in length(steps):-1:1
+        _produces_smld(steps[i]) && return i
+    end
+    return 0
+end
 
 # ============================================================
 # Pipeline loop (pure dispatch, no isa routing)
@@ -205,9 +229,15 @@ DetectFitConfig gives `no method matching analyze(::Vector{...}, ::FilterConfig)
 """
 function _run_pipeline(initial_state, steps::Vector{SMLMData.AbstractSMLMConfig},
                        camera::SMLMData.AbstractCamera,
-                       outdir::Union{String,Nothing}, v::Int)
+                       outdir::Union{String,Nothing}, v::Int,
+                       cp_level::Int=Checkpoint.EXPENSIVE)
     t_start = time_ns()
     outdir !== nothing && mkpath(outdir)
+
+    # For Checkpoint.END: locate the index of the last SMLD-producing step.
+    # We approximate "produces SMLD" by walking step types in reverse and
+    # picking the first that isn't a terminal/non-SMLD step (currently RenderConfig).
+    final_smld_idx = _find_final_smld_step(steps)
 
     step_infos = StepInfo[]
     state = initial_state
@@ -217,8 +247,16 @@ function _run_pipeline(initial_state, steps::Vector{SMLMData.AbstractSMLMConfig}
         for (i, cfg) in enumerate(steps)
             cfg = _prepare_step(cfg, camera)
 
+            # END-mode translation: only the final SMLD-producing step gets ALL,
+            # everything else gets NONE. Other levels pass through unchanged.
+            cp = if cp_level == Checkpoint.END
+                i == final_smld_idx ? Checkpoint.ALL : Checkpoint.NONE
+            else
+                cp_level
+            end
+
             (state, step_info) = analyze(state, cfg;
-                outdir=outdir, step_number=i, verbose=v)
+                outdir=outdir, step_number=i, verbose=v, checkpoint=cp)
 
             push!(step_infos, step_info)
 

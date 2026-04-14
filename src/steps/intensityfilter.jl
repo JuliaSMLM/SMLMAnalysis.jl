@@ -133,9 +133,16 @@ end
 Filter localizations by intensity-based multi-emitter rejection.
 """
 function analyze(smld::BasicSMLD, cfg::IntensityFilterConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
+                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
     t = @elapsed (filtered, if_info) = intensityfilter_step(smld, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose)
+
+    if checkpoint >= Checkpoint.ALL
+        dir = step_outdir(outdir, step_number, cfg)
+        _save_step_smld(dir, filtered; filename="smld_intensity.jld2")
+    end
+
     (filtered, StepInfo(step_number, cfg, t, _step_summary(if_info); info=if_info))
 end
 
