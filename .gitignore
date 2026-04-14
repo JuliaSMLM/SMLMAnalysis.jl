@@ -14,3 +14,5 @@ data/
 dev/output/
 dev/paths.jl
 *.log
+.claude/
+.slackclaw_state.json
