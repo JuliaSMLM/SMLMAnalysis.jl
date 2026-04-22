@@ -30,6 +30,14 @@ localizations via GaussMLE in a single step, with per-dataset processing.
 - `paths`: Vector of H5 file paths (one per dataset)
 - `dataset_frames`: Explicit frame ranges per dataset
 - `h5_format`: `:auto`, `:smart`, or `:mic`
+
+# Dataset Selection
+- `datasets`: Optional `AbstractVector{Int}` (e.g. `1:19` or `[1,2,3,5]`) selecting a
+  subset of the resolved source slots. Applies uniformly across all source modes:
+  MIC auto-blocks, multi-path `paths`, explicit `dataset_frames`, and in-memory
+  `Vector{Array}` input. Selected slots are reindexed to contiguous `1:length(datasets)`
+  in the output SMLD (original source indices preserved in `DetectFitInfo.selected_source_indices`).
+  Default `nothing` uses all resolved slots.
 """
 @kwdef struct DetectFitConfig <: SMLMData.AbstractSMLMConfig
     # Embedded upstream configs
@@ -43,6 +51,9 @@ localizations via GaussMLE in a single step, with per-dataset processing.
     path::Union{String, Nothing} = nothing
     paths::Union{Vector{String}, Nothing} = nothing
     dataset_frames::Union{Vector{UnitRange{Int}}, Nothing} = nothing
+
+    # Dataset selection: subset of resolved source slots to include
+    datasets::Union{AbstractVector{Int}, Nothing} = nothing
 
     # H5 format: :auto (detect), :smart (SMART microscope), :mic (MATLAB Instrument Control)
     h5_format::Symbol = :auto
@@ -78,6 +89,10 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
                    checkpoint::Int=Checkpoint.EXPENSIVE)
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
+
+    # Apply dataset selection (Option C: uniform across all source modes)
+    selected_indices = cfg.datasets === nothing ? nothing : collect(cfg.datasets)
+    data = _select_sources(data, cfg.datasets)
     n_datasets_val = length(data)
 
     v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_datasets=n_datasets_val psf_model=typeof(cfg.fitter.psf_model)
@@ -177,7 +192,7 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
     smld = BasicSMLD(all_emitters, camera, n_frames_per_dataset, n_datasets_val, Dict{String,Any}())
 
     detect_info = DetectFitInfo(all_boxes_info, all_fit_info,
-        n_datasets_val, total_rois, total_fits, n_frames_per_dataset, t)
+        n_datasets_val, total_rois, total_fits, n_frames_per_dataset, t, selected_indices)
 
     if dir !== nothing
         _save_detectfit_outputs!(dir, outdir, smld, camera, cfg, v, t, total_rois, total_fits,
@@ -217,6 +232,10 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
                    checkpoint::Int=Checkpoint.EXPENSIVE)
     (cfg.path !== nothing || cfg.paths !== nothing) || error("File-based detectfit requires path or paths in config")
     sources = _resolve_file_sources(cfg)
+
+    # Apply dataset selection (Option C: uniform across all source modes)
+    selected_indices = cfg.datasets === nothing ? nothing : collect(cfg.datasets)
+    sources = _select_sources(sources, cfg.datasets)
 
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
@@ -317,7 +336,7 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
     smld = BasicSMLD(all_emitters, camera, n_frames_per_dataset, n_datasets_val, Dict{String,Any}())
 
     detect_info = DetectFitInfo(all_boxes_info, all_fit_info,
-        n_datasets_val, total_rois, total_fits, n_frames_per_dataset, t)
+        n_datasets_val, total_rois, total_fits, n_frames_per_dataset, t, selected_indices)
 
     if dir !== nothing
         _save_detectfit_outputs!(dir, outdir, smld, camera, cfg, v, t, total_rois, total_fits,
@@ -464,6 +483,20 @@ function _resolve_file_sources(cfg::DetectFitConfig)
 
     # Single dataset (SMART format or MIC with single block)
     return [(path=cfg.path, frame_range=nothing, format=format)]
+end
+
+"""
+Apply `cfg.datasets` selection to a resolved source list. Bounds-checks and
+returns the selected subset in the order given. Pass-through when `cfg.datasets`
+is `nothing`.
+"""
+function _select_sources(sources::AbstractVector, sel::Union{AbstractVector{Int}, Nothing})
+    sel === nothing && return sources
+    n = length(sources)
+    for i in sel
+        (1 <= i <= n) || error("DetectFitConfig.datasets contains index $i, valid range is 1:$n")
+    end
+    sources[sel]
 end
 
 """Load images from a data source"""
