@@ -32,10 +32,17 @@ using Test
         @test step_info2.info === nothing
 
         # Test native info structs
+        # Back-compat 7-arg constructor (defaults selected_source_indices to nothing)
         di = DetectFitInfo([], [], 2, 1000, 950, 5000, 1.5)
         @test di.n_datasets == 2
         @test di.n_rois == 1000
         @test di.n_fits == 950
+        @test di.selected_source_indices === nothing
+
+        # Full 8-arg constructor with provenance
+        di_sel = DetectFitInfo([], [], 3, 500, 450, 1000, 0.5, [1, 3, 5])
+        @test di_sel.selected_source_indices == [1, 3, 5]
+        @test di_sel.n_datasets == 3
 
         dfi = DensityFilterInfo(1000, 800, 5, 0.3)
         @test dfi.n_before == 1000
@@ -69,6 +76,23 @@ using Test
         @test cfg2.camera === cam
         @test cfg2.boxer.boxsize == 7
         @test cfg2.fitter.psf_model isa GaussianXYNBS
+
+        # DetectFitConfig.datasets selection field
+        @test cfg.datasets === nothing                          # default is no selection
+        cfg_range = DetectFitConfig(datasets=1:19)
+        @test cfg_range.datasets == 1:19
+        @test cfg_range.datasets isa UnitRange{Int}
+        cfg_sparse = DetectFitConfig(datasets=[1, 2, 3, 5, 7])
+        @test cfg_sparse.datasets == [1, 2, 3, 5, 7]
+        @test cfg_sparse.datasets isa Vector{Int}
+
+        # _select_sources: pass-through when nothing, bounds-checked otherwise
+        src = [(i=j,) for j in 1:5]
+        @test SMLMAnalysis._select_sources(src, nothing) === src
+        @test SMLMAnalysis._select_sources(src, [1, 3, 5]) == [src[1], src[3], src[5]]
+        @test SMLMAnalysis._select_sources(src, 2:4) == src[2:4]
+        @test_throws ErrorException SMLMAnalysis._select_sources(src, [1, 6])
+        @test_throws ErrorException SMLMAnalysis._select_sources(src, [0, 1])
     end
 
     @testset "CalibrationConfig re-export" begin

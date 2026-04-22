@@ -256,6 +256,11 @@ end
     DetectFitInfo <: AbstractSMLMInfo
 
 Info from combined detection and fitting step.
+
+`selected_source_indices` records the original source slot indices when
+`DetectFitConfig.datasets` selected a subset (e.g. `[1,2,3,5,7]` when a
+corrupted block was skipped). `nothing` means no selection was applied and the
+output datasets correspond 1:1 to the resolved source slots.
 """
 struct DetectFitInfo <: SMLMData.AbstractSMLMInfo
     boxes_info::Vector{Any}
@@ -265,7 +270,12 @@ struct DetectFitInfo <: SMLMData.AbstractSMLMInfo
     n_fits::Int
     n_frames_per_dataset::Int
     elapsed_s::Float64
+    selected_source_indices::Union{Vector{Int}, Nothing}
 end
+
+# Back-compat constructor (old 7-arg form defaults selected_source_indices to nothing)
+DetectFitInfo(boxes_info, fit_info, n_datasets, n_rois, n_fits, n_frames_per_dataset, elapsed_s) =
+    DetectFitInfo(boxes_info, fit_info, n_datasets, n_rois, n_fits, n_frames_per_dataset, elapsed_s, nothing)
 
 """
     FilterInfo <: AbstractSMLMInfo
