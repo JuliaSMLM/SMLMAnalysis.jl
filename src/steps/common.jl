@@ -169,11 +169,14 @@ function _estimate_bleaching_rate(frame_counts::Vector{Int})
     b0 = exp(intercept)
     k0 <= 0 && return nothing
 
-    # Nelder-Mead refinement
+    # Nelder-Mead refinement with physical non-negativity constraints on (a, b, k).
+    # The model a + b*exp(-k*t) has a flat-data degeneracy where (a ≪ 0, b ≫ 0, k ≈ 0)
+    # fits the mean equally well as any physical solution — R² stays high while the fit
+    # is meaningless. Inf penalties on negative a or b block that basin.
     t = Float64.(valid_frames)
     function cost(p)
         a, b, k = p
-        k <= 0 && return Inf
+        (k <= 0 || a < 0 || b < 0) && return Inf
         pred = a .+ b .* exp.(-k .* t)
         sum((smoothed .- pred) .^ 2)
     end
@@ -182,9 +185,16 @@ function _estimate_bleaching_rate(frame_counts::Vector{Int})
                             Optim.Options(iterations=5000, g_tol=1e-8))
 
     a_fit, b_fit, k_fit = Optim.minimizer(result)
-    k_fit <= 0 && return nothing
+    (k_fit <= 0 || a_fit < 0 || b_fit < 0) && return nothing
 
     half_life = log(2) / k_fit
+
+    # Degeneracy guards: reject fits that are effectively constant (no decay over window)
+    # or where the decaying component is negligible compared to baseline.
+    max_val = maximum(smoothed)
+    n_window = length(smoothed)
+    half_life > 5 * n_window && return nothing
+    b_fit < 0.01 * max_val && return nothing
 
     y_pred = a_fit .+ b_fit .* exp.(-k_fit .* t)
     ss_res = sum((smoothed .- y_pred) .^ 2)
