@@ -289,6 +289,7 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
 
     # Row 2: Precision and P-value
     prec_data = vcat(σ_x, σ_y)
+    prec_data = prec_data[prec_data .<= 1000.0]  # truncate at 1 μm before percentile stretch
     prec98 = quantile(prec_data, 0.98)
     prec_xlim = prec98
 
