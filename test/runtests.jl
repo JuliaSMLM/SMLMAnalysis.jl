@@ -4,7 +4,7 @@ using SMLMDriftCorrection
 using Test
 using Random
 
-const SMLM_TEST_FULL = get(ENV, "SMLM_TEST_FULL", "false") == "true"
+const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true", "1", "yes")
 
 @testset "fast" begin
     @testset "Types" begin
@@ -222,5 +222,5 @@ if SMLM_TEST_FULL
         # edge cases, large-n stress, slow paths
     end
 else
-    @info "Skipping thorough tests; set SMLM_TEST_FULL=true to enable"
+    @info "Skipping thorough tests; set SMLM_TEST_FULL=1 to enable"
 end
