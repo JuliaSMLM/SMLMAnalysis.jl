@@ -4,7 +4,9 @@ using SMLMDriftCorrection
 using Test
 using Random
 
-@testset "SMLMAnalysis.jl" begin
+const SMLM_TEST_FULL = get(ENV, "SMLM_TEST_FULL", "false") == "true"
+
+@testset "fast" begin
     @testset "Types" begin
         # Test AnalysisInfo constructor
         info = AnalysisInfo()
@@ -213,4 +215,12 @@ using Random
         @test res_bf.N_0 >= 0        # physical bound held
         @test res_bf.k_bleach > 0
     end
+end
+
+if SMLM_TEST_FULL
+    @testset "thorough" begin
+        # edge cases, large-n stress, slow paths
+    end
+else
+    @info "Skipping thorough tests; set SMLM_TEST_FULL=true to enable"
 end
