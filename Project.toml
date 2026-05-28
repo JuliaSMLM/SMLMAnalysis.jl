@@ -1,6 +1,6 @@
 name = "SMLMAnalysis"
 uuid = "5ba66956-a7ba-489c-b260-90fb8f3af39c"
-version = "1.2.0"
+version = "1.2.1"
 authors = ["klidke@unm.edu"]
 
 [deps]
@@ -53,10 +53,10 @@ NearestNeighbors = "0.4.26"
 Optim = "1.13.3"
 SMLMBaGoL = "0.1, 0.2"
 SMLMBoxer = "0.3"
-SMLMClustering = "1"
+SMLMClustering = "0.3"
 SMLMData = "0.7"
 SMLMDriftCorrection = "0.2.4"
-SMLMFrameConnection = "0.2, 0.3"
+SMLMFrameConnection = "0.3.1"
 SMLMRender = "0.3, 0.4"
 SMLMSim = "0.7"
 Statistics = "1"
