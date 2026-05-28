@@ -41,6 +41,7 @@ SMLMAnalysis (integrates all)
 | SMLMSim | `../SMLMSim` | @sim | SMLM data simulation, fluorophore kinetics |
 | MicroscopePSFs | `../MicroscopePSFs` | @psf | PSF models (Gaussian, Airy, etc.) |
 | SMLMBaGoL | `../SMLMBaGoL` | @bagol | Bayesian grouping of localizations (RJMCMC) |
+| SMLMClustering | `../SMLMClustering` | @cluster | Clustering backends (DBSCAN/Hierarchical/Voronoi) + spatial-tendency stats (Hopkins, Voronoi-density) |
 
 ### Agent Communication
 
@@ -365,6 +366,7 @@ From ecosystem packages (available after `using SMLMAnalysis`):
 - **SMLMRender**: render, save_image, HistogramRender, GaussianRender, CircleRender, EllipseRender, RenderConfig (aliased as `const RenderConfig = SMLMRender.RenderConfig`)
 - **SMLMSim**: StaticSMLMConfig, DiffusionSMLMConfig, simulate, gen_images, gen_image, Nmer2D, Nmer3D, Line2D, GenericFluor
 - **SMLMBaGoL**: run_bagol, BaGoLDiagnostics
+- **SMLMClustering**: cluster, cluster_statistics, AbstractClusterConfig, AbstractStatisticsConfig, ClusterInfo, ClusterStatisticsInfo, DBSCANConfig, HierarchicalConfig, VoronoiConfig, HopkinsConfig, VoronoiDensityConfig (all aliased via `const`)
 
 ## Uncertainty Calibration
 

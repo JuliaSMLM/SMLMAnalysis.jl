@@ -51,7 +51,10 @@ function frameconnect_step(smld::BasicSMLD, cfg::SMLMFrameConnection.FrameConnec
         @info "  Calibration: k=$(round(cal.k_scale, digits=2)), sigma_motion=$(round(cal.sigma_motion_nm, digits=1))nm, chi2=$(round(cal.mean_chi2, digits=2))"
     end
 
-    v >= Verbosity.PROGRESS && @info "  -> $n_after tracks ($(round(compression, digits=1))x) ($(round(t, digits=2))s)"
+    if v >= Verbosity.PROGRESS
+        dropped = connect_info.n_filtered > 0 ? ", $(connect_info.n_filtered) dropped by track_length" : ""
+        @info "  -> $n_after tracks ($(round(compression, digits=1))x)$dropped ($(round(t, digits=2))s)"
+    end
     (combined, connect_info)
 end
 
@@ -59,6 +62,7 @@ function _step_summary(info::SMLMFrameConnection.FrameConnectInfo)
     d = Dict{Symbol,Any}(
         :n_before => info.n_input,
         :n_after => info.n_combined,
+        :n_filtered => info.n_filtered,
         :compression => round(info.n_input / max(1, info.n_combined), digits=1),
     )
     cal = info.calibration
@@ -96,14 +100,14 @@ function _save_frameconnect_outputs!(dir::String, cfg::SMLMFrameConnection.Frame
 
     if v >= Verbosity.STANDARD
         koff_stats = _save_frameconnect_figures(dir, smld_connected)
-        _write_frameconnect_stats(dir, cfg, n_before, n_after, t, koff_stats, connect_info.calibration)
+        _write_frameconnect_stats(dir, cfg, n_before, n_after, connect_info.n_filtered, t, koff_stats, connect_info.calibration)
         if connect_info.calibration !== nothing
             _save_calibration_figures(dir, connect_info.calibration, smld_connected)
         end
     end
 end
 
-function _write_frameconnect_stats(dir, cfg, n_before, n_after, t, koff_stats=nothing, cal=nothing)
+function _write_frameconnect_stats(dir, cfg, n_before, n_after, n_filtered, t, koff_stats=nothing, cal=nothing)
     compression = n_before / n_after
 
     filepath = joinpath(dir, "stats.md")
@@ -112,6 +116,9 @@ function _write_frameconnect_stats(dir, cfg, n_before, n_after, t, koff_stats=no
         println(io, "## Summary")
         println(io, "- **Input localizations**: $n_before")
         println(io, "- **Output tracks**: $n_after")
+        if n_filtered > 0
+            println(io, "- **Tracks dropped (track_length)**: $n_filtered")
+        end
         println(io, "- **Compression**: $(round(compression, digits=1))x")
         println(io, "- **Time**: $(round(t, digits=2))s")
 
@@ -145,6 +152,11 @@ function _write_frameconnect_stats(dir, cfg, n_before, n_after, t, koff_stats=no
         println(io, "## Parameters")
         println(io, "- max_frame_gap: $(cfg.max_frame_gap)")
         println(io, "- max_sigma_dist: $(cfg.max_sigma_dist)")
+        if cfg.track_length !== nothing
+            lo, hi = cfg.track_length
+            hi_str = hi == Inf ? "∞" : string(hi)
+            println(io, "- track_length: $(lo) - $(hi_str) locs/track")
+        end
         if cfg.calibration !== nothing
             println(io, "- calibration.clamp_k_to_one: $(cfg.calibration.clamp_k_to_one)")
             if cfg.calibration.filter_high_chi2

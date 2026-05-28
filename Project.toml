@@ -1,6 +1,6 @@
 name = "SMLMAnalysis"
 uuid = "5ba66956-a7ba-489c-b260-90fb8f3af39c"
-version = "1.1.0"
+version = "1.2.1"
 authors = ["klidke@unm.edu"]
 
 [deps]
@@ -24,6 +24,7 @@ Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 SMLMBaGoL = "70c4bcd9-ed9a-43d6-baf8-7d0db1eb70ee"
 SMLMBoxer = "a7d3b33b-b840-4f8e-b556-99be03134090"
+SMLMClustering = "5e733723-370a-41a4-ac41-ff3a91b0b806"
 SMLMData = "5488f106-40b8-4660-84c5-84a168990d1b"
 SMLMDriftCorrection = "34bda2d1-2fff-475a-a8c4-7f53d4251312"
 SMLMFrameConnection = "1517b1a9-81e8-461f-b994-92eb29599690"
@@ -52,9 +53,10 @@ NearestNeighbors = "0.4.26"
 Optim = "1.13.3"
 SMLMBaGoL = "0.1, 0.2"
 SMLMBoxer = "0.3"
+SMLMClustering = "0.3"
 SMLMData = "0.7"
 SMLMDriftCorrection = "0.2.4"
-SMLMFrameConnection = "0.2, 0.3"
+SMLMFrameConnection = "0.3.1"
 SMLMRender = "0.3, 0.4"
 SMLMSim = "0.7"
 Statistics = "1"
@@ -64,6 +66,7 @@ julia = "1.12"
 
 [sources]
 SMLMBaGoL = {url = "https://github.com/JuliaSMLM/SMLMBaGoL.jl", rev = "main"}
+SMLMClustering = {path = "../SMLMClustering"}
 
 [extras]
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"

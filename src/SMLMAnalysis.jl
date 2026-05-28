@@ -59,6 +59,7 @@ using SMLMFrameConnection
 using SMLMRender
 using SMLMDriftCorrection
 using SMLMBaGoL
+using SMLMClustering
 using MicroscopePSFs
 using HDF5
 using JLD2
@@ -115,6 +116,22 @@ export HistogramRender, GaussianRender, CircleRender, EllipseRender
 # Re-export RenderConfig from SMLMRender (used directly as step config)
 const RenderConfig = SMLMRender.RenderConfig
 export RenderConfig
+
+# Re-export from SMLMClustering
+export cluster, cluster_statistics
+const AbstractClusterConfig = SMLMClustering.AbstractClusterConfig
+const AbstractStatisticsConfig = SMLMClustering.AbstractStatisticsConfig
+const ClusterInfo = SMLMClustering.ClusterInfo
+const ClusterStatisticsInfo = SMLMClustering.ClusterStatisticsInfo
+const DBSCANConfig = SMLMClustering.DBSCANConfig
+const HierarchicalConfig = SMLMClustering.HierarchicalConfig
+const VoronoiConfig = SMLMClustering.VoronoiConfig
+const HopkinsConfig = SMLMClustering.HopkinsConfig
+const VoronoiDensityConfig = SMLMClustering.VoronoiDensityConfig
+export AbstractClusterConfig, AbstractStatisticsConfig
+export ClusterInfo, ClusterStatisticsInfo
+export DBSCANConfig, HierarchicalConfig, VoronoiConfig
+export HopkinsConfig, VoronoiDensityConfig
 
 # ============================================================
 # Core types
