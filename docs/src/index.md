@@ -32,11 +32,10 @@ config = AnalysisConfig(
 ```julia
 (smld, df_info) = analyze(image_stacks, DetectFitConfig(
     camera=camera, boxer=BoxerConfig(boxsize=9, psf_sigma=0.130)))
-smld_raw = df_info.smld_raw
 
-(smld, _) = analyze(smld, FilterConfig(photons=(500.0, Inf)); smld_raw=smld_raw)
-(smld, _) = analyze(smld, FrameConnectConfig(max_frame_gap=5))
-(smld, _) = analyze(smld, CalibrationConfig())
+(smld, _) = analyze(smld, FilterConfig(photons=(500.0, Inf)))
+(smld, _) = analyze(smld, FrameConnectConfig(max_frame_gap=5,
+    calibration=CalibrationConfig(clamp_k_to_one=true)))
 (smld, _) = analyze(smld, DriftConfig(degree=2))
 (img, _)  = analyze(smld, RenderConfig(zoom=20, colormap=:inferno))
 
@@ -64,12 +63,13 @@ SMLMData (core types)
     |
     +-- SMLMBoxer (ROI detection)
     +-- GaussMLE (GPU-accelerated MLE fitting)
-    +-- SMLMFrameConnection (linking across frames)
+    +-- SMLMFrameConnection (linking + uncertainty calibration)
     +-- SMLMDriftCorrection (entropy-based drift correction)
     +-- SMLMRender (super-resolution rendering)
     +-- SMLMSim (simulation + image generation)
     +-- MicroscopePSFs (PSF models)
     +-- SMLMBaGoL (Bayesian grouping)
+    +-- SMLMClustering (DBSCAN / Hierarchical / Voronoi)
     |
     +-- SMLMAnalysis (integrates all)
 ```

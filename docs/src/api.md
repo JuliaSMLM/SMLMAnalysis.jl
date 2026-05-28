@@ -22,6 +22,7 @@ AnalysisResult
 AnalysisInfo
 StepInfo
 DataSource
+Checkpoint
 ```
 
 ### Verbosity Levels
@@ -41,15 +42,30 @@ DataSource
 ```@docs
 DetectFitConfig
 FilterConfig
-FrameConnectConfig
-CalibrationConfig
-DriftConfig
+IntensityFilterConfig
 DensityFilterConfig
 ```
 
-!!! note "RenderConfig"
-    `RenderConfig` is re-exported from SMLMRender.jl and used directly as a step config.
-    See [SMLMRender documentation](https://github.com/JuliaSMLM/SMLMRender.jl) for details.
+!!! note "Re-exported configs"
+    `FrameConnectConfig` (and its `CalibrationConfig`/`CalibrationResult`), `DriftConfig`,
+    `RenderConfig`, and `BaGoLConfig` are re-exported as `const` aliases from their
+    upstream packages (SMLMFrameConnection, SMLMDriftCorrection, SMLMRender, SMLMBaGoL).
+    See the upstream package documentation for full details. `CalibrationConfig` is a
+    sub-config of `FrameConnectConfig` (set via the `calibration=` field) — it is **not**
+    a separate pipeline step.
+
+## Step Info Types
+
+```@docs
+DetectFitInfo
+FilterInfo
+IntensityFilterInfo
+DensityFilterInfo
+BaGoLInfo
+CompositeRenderInfo
+CrossAlignInfo
+CrossCorrInfo
+```
 
 ## Multi-Target
 
@@ -57,6 +73,10 @@ DensityFilterConfig
 MultiTargetConfig
 MultiTargetResult
 MultiTargetInfo
+AbstractMultiTargetStep
+CompositeRenderConfig
+CrossAlignConfig
+CrossCorrConfig
 ```
 
 ## I/O
@@ -76,14 +96,7 @@ load_mic_h5_info
 load_mic_h5_block
 load_mic_h5_calibration
 load_mic_h5_calibration_for_scmos
-```
-
-## Calibration
-
-```@docs
-analyze_frameconnect_drift
-apply_uncertainty_calibration
-recombine_tracks
+build_camera_from_mic_h5
 ```
 
 ## Utilities

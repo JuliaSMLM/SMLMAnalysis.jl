@@ -33,8 +33,7 @@ config = AnalysisConfig(
             boxer=BoxerConfig(boxsize=7, psf_sigma=0.13),
             fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20)),
         FilterConfig(photons=(500.0, Inf), precision=(0.0, 0.007), pvalue=(1e-3, 1.0)),
-        FrameConnectConfig(max_frame_gap=5),
-        CalibrationConfig(),
+        FrameConnectConfig(max_frame_gap=5, calibration=CalibrationConfig(clamp_k_to_one=true)),
         DriftConfig(degree=2),
         DensityFilterConfig(n_sigma=2.0),
         RenderConfig(zoom=20, colormap=:inferno),
@@ -89,15 +88,30 @@ FilterConfig(
 
 The acceptance rate (typically 60-90% for well-optimized detection) is reported in the step summary.
 
-## Step 3: Frame Connection
+## Step 3: Frame Connection (with uncertainty calibration)
 
-`FrameConnectConfig` links localizations of the same emitter across consecutive frames. Uncertainty calibration is handled separately by `CalibrationConfig` (see Step 4 below).
+`FrameConnectConfig` links localizations of the same emitter across consecutive frames. Uncertainty calibration is integrated as a sub-config via the `calibration` field — when set, the linked tracks are used to fit the CRLB-vs-observed-variance model before the per-track combine step (link → calibrate → combine).
 
 ```julia
 FrameConnectConfig(
-    max_frame_gap = 5,      # Allow gaps of up to 5 dark frames
-    max_sigma_dist = 5.0,   # Spatial matching threshold
+    max_frame_gap = 5,                                  # Allow gaps of up to 5 dark frames
+    max_sigma_dist = 5.0,                               # Spatial matching threshold
+    calibration = CalibrationConfig(clamp_k_to_one=true),  # k >= 1 (CRLB is theoretical lower bound)
 )
+```
+
+The calibration fits `observed_variance = A + B * CRLB_variance`, giving `sigma_motion = sqrt(A)` (extra motion/jitter variance) and `k = sqrt(B)` (CRLB scale factor). After calibration, each emitter's uncertainty is corrected to `sqrt(sigma_motion^2 + k^2 * sigma_CRLB^2)` and tracks are recombined with weighted averaging using corrected uncertainties.
+
+Calibration results are available on the returned info:
+
+```julia
+(smld, fc_info) = analyze(smld, FrameConnectConfig(max_frame_gap=5,
+    calibration=CalibrationConfig(clamp_k_to_one=true)))
+
+cal = fc_info.info.calibration   # FrameConnectInfo.calibration::CalibrationResult
+cal.k_scale                       # k
+cal.sigma_motion_nm               # sqrt(A) in nm
+cal.mean_chi2                     # ~2.0 means well-calibrated
 ```
 
 ### Track size distribution
@@ -112,23 +126,13 @@ Frame-to-frame position shifts estimated from linked emitters. Shows both instan
 
 ![Drift jitter](assets/drift_jitter.png)
 
-## Step 4: Calibration
-
-`CalibrationConfig` performs uncertainty calibration, comparing reported CRLB uncertainties against observed frame-to-frame scatter from frame connection. This must follow frame connection.
-
-```julia
-CalibrationConfig(
-    clamp_k_to_one = true,    # k >= 1 (CRLB is theoretical lower bound)
-)
-```
-
 ### Uncertainty calibration
 
 Compares reported variance (CRLB) against observed variance from frame-to-frame scatter. The fit gives `A` (motion variance in nm^2) and `B` (CRLB scale factor):
 
 ![Uncertainty calibration](assets/uncertainty_calibration.png)
 
-## Step 5: Drift Correction
+## Step 4: Drift Correction
 
 `DriftConfig` corrects sample drift using entropy-based optimization from SMLMDriftCorrection.
 
@@ -148,7 +152,7 @@ Shows the estimated X and Y drift over time and the XY path. For multi-dataset d
 
 For details on continuous vs registered modes and chunking strategies, see the [Guide](@ref).
 
-## Step 6: Density Filter
+## Step 5: Density Filter
 
 `DensityFilterConfig` removes isolated localizations that lack neighbors, which are likely false detections.
 
@@ -165,7 +169,7 @@ The valley between the isolated peak (low neighbors) and the clustered peak (hig
 
 ![Neighbor histogram](assets/neighbor_histogram.png)
 
-## Step 7: Render
+## Step 6: Render
 
 `RenderConfig` generates super-resolution images using SMLMRender. Multiple renders can be added as separate pipeline steps.
 
@@ -201,23 +205,22 @@ The `analyze()` dispatch enables iterative parameter tuning:
 (smld, df_info) = analyze(image_stacks, DetectFitConfig(
     camera=camera, boxer=BoxerConfig(boxsize=7, psf_sigma=0.13));
     outdir="output/", step_number=1, verbose=Verbosity.STANDARD)
-smld_raw = df_info.smld_raw
 
 # Save for later resume
 save_smld("output/after_detectfit.h5", smld)
 
 # Try filter parameters
 (smld_filtered, _) = analyze(smld, FilterConfig(photons=(500.0, Inf));
-    smld_raw=smld_raw, outdir="output/", step_number=2, verbose=Verbosity.STANDARD)
+    outdir="output/", step_number=2, verbose=Verbosity.STANDARD)
 
 # Not happy? Try looser filter on same smld (no re-detection needed)
-(smld_filtered, _) = analyze(smld, FilterConfig(photons=(300.0, Inf));
-    smld_raw=smld_raw)
+(smld_filtered, _) = analyze(smld, FilterConfig(photons=(300.0, Inf)))
 
-# Continue pipeline
-(smld_fc, fc_info) = analyze(smld_filtered, FrameConnectConfig(max_frame_gap=5))
-(smld_cal, cal_info) = analyze(smld_fc, CalibrationConfig())
-(smld_dc, dc_info) = analyze(smld_cal, DriftConfig(degree=2))
+# Continue pipeline (calibration is a sub-config of FrameConnectConfig)
+(smld_fc, fc_info) = analyze(smld_filtered, FrameConnectConfig(max_frame_gap=5,
+    calibration=CalibrationConfig(clamp_k_to_one=true)))
+cal = fc_info.info.calibration   # CalibrationResult
+(smld_dc, dc_info) = analyze(smld_fc, DriftConfig(degree=2))
 (img, _) = analyze(smld_dc, RenderConfig(zoom=20, colormap=:inferno))
 
 # Resume from saved checkpoint in new session
@@ -239,28 +242,27 @@ output/
 ├── 02_filter/
 │   ├── config.toml
 │   ├── stats.md
-│   └── fit_quality.png
+│   ├── fit_quality.png
+│   └── fit_overlay.png
 ├── 03_frameconnect/
 │   ├── config.toml
 │   ├── info.toml
 │   ├── stats.md
 │   ├── track_histogram.png
-│   └── drift_jitter.png
-├── 04_calibration/
-│   ├── config.toml
-│   ├── info.toml
-│   ├── stats.md
-│   └── uncertainty_calibration.png
-├── 05_driftcorrect/
+│   ├── drift_jitter.png
+│   ├── shift_histogram.png
+│   └── uncertainty_calibration.png   # when calibration=CalibrationConfig()
+├── 04_driftcorrect/
 │   ├── config.toml
 │   ├── info.toml
 │   ├── stats.md
 │   └── drift_trajectory.png
-├── 06_densityfilter/
+├── 05_densityfilter/
 │   ├── config.toml
+│   ├── info.toml
 │   ├── stats.md
 │   └── neighbor_histogram.png
-├── 07_render/
+├── 06_render/
 │   ├── config.toml
 │   ├── info.toml
 │   └── gaussianrender_inferno_20x.png

@@ -22,15 +22,18 @@ Every `analyze()` call returns a `(result, info)` tuple following the JuliaSMLM 
 DetectFitConfig (required first)
         │ produces smld
         ▼
-  ┌─────────────────────────────┐
-  │ FilterConfig       (0+ times)│
-  │ FrameConnectConfig (0-1)     │  ← Any order,
-  │ CalibrationConfig  (0-1)     │    any combination
-  │ DriftConfig        (0-1)     │
-  │ DensityFilterConfig(0+ times)│
-  │ RenderConfig       (0+ times)│
-  └─────────────────────────────┘
+  ┌─────────────────────────────────┐
+  │ FilterConfig         (0+ times) │
+  │ IntensityFilterConfig(0+ times) │
+  │ FrameConnectConfig   (0-1)      │  ← Any order,
+  │ DriftConfig          (0-1)      │    any combination
+  │ DensityFilterConfig  (0+ times) │
+  │ BaGoLConfig          (0-1)      │
+  │ RenderConfig         (0+ times) │
+  └─────────────────────────────────┘
 ```
+
+`CalibrationConfig` is **not** a top-level pipeline step — it is a sub-config of `FrameConnectConfig` (set via the `calibration=` field). When provided, the calibration runs inside frame connection (link → calibrate → combine) and its results are exposed on `FrameConnectInfo.calibration`.
 
 The only ordering constraint: `DetectFitConfig` must be first because it is the only step that produces a `BasicSMLD` from raw image data. All other steps receive and return an existing `smld`.
 
@@ -80,8 +83,8 @@ The orchestrator maintains `smld` as the working state. Each step receives the c
 
 - **`FilterConfig`**: Can appear multiple times (coarse filter early, tighter filter after connection)
 - **`RenderConfig`**: Can appear multiple times (different zooms, colormaps, or strategies)
-- **`DensityFilterConfig`**: Can appear multiple times
-- **`FrameConnectConfig`**, **`CalibrationConfig`**, and **`DriftConfig`**: Typically used once, but not enforced
+- **`DensityFilterConfig`**, **`IntensityFilterConfig`**: Can appear multiple times
+- **`FrameConnectConfig`** and **`DriftConfig`**: Typically used once, but not enforced. Uncertainty calibration is configured inside `FrameConnectConfig` via the `calibration=` field; it is not a separate pipeline step.
 
 ### Config provenance
 
@@ -89,13 +92,15 @@ The orchestrator maintains `smld` as the working state. Each step receives the c
 |--------|-----------|-------|
 | `DetectFitConfig` | SMLMAnalysis | Wraps SMLMBoxer + GaussMLE internally |
 | `FilterConfig` | SMLMAnalysis | Pure SMLMAnalysis logic |
+| `IntensityFilterConfig` | SMLMAnalysis | Poisson upper-tail test against excitation field |
 | `FrameConnectConfig` | SMLMFrameConnection | Re-exported via const alias |
-| `CalibrationConfig` | SMLMAnalysis | Pure SMLMAnalysis logic |
+| `CalibrationConfig` | SMLMFrameConnection | Sub-config of `FrameConnectConfig.calibration` (not a pipeline step) |
 | `DriftConfig` | SMLMDriftCorrection | Re-exported via const alias |
 | `DensityFilterConfig` | SMLMAnalysis | Pure SMLMAnalysis logic |
+| `BaGoLConfig` | SMLMAnalysis | Wraps `SMLMBaGoL.run_bagol` |
 | `RenderConfig` | SMLMRender | Re-exported via const alias |
 
-SMLMAnalysis defines some step configs locally (`DetectFitConfig`, `FilterConfig`, `CalibrationConfig`, `DensityFilterConfig`) and re-exports others from upstream packages (`FrameConnectConfig`, `DriftConfig`, `RenderConfig`). Extending the pipeline with a new upstream package follows the same re-export pattern.
+SMLMAnalysis defines some step configs locally (`DetectFitConfig`, `FilterConfig`, `IntensityFilterConfig`, `DensityFilterConfig`, `BaGoLConfig`) and re-exports others from upstream packages (`FrameConnectConfig`, `CalibrationConfig`, `DriftConfig`, `RenderConfig`). Extending the pipeline with a new upstream package follows the same re-export pattern.
 
 ## Extending the Pipeline
 
@@ -414,7 +419,18 @@ config = AnalysisConfig(camera=cam, steps=[...], verbose=Verbosity.DETAILED)
 
 ## Uncertainty Calibration
 
-Uncertainty calibration is a separate pipeline step (`CalibrationConfig`) that compares reported CRLB uncertainties against observed frame-to-frame scatter from frame connection. It must follow `FrameConnectConfig` in the pipeline.
+Uncertainty calibration compares reported CRLB uncertainties against observed frame-to-frame scatter from linked emitters. It is **not** a separate pipeline step; it is enabled by setting the `calibration=` field on `FrameConnectConfig`. When set, frame connection runs as **link → calibrate → combine**, so the per-track combine uses the corrected weights in a single pass:
+
+```julia
+FrameConnectConfig(
+    max_frame_gap = 5,
+    calibration = CalibrationConfig(clamp_k_to_one=true),
+)
+```
+
+Both `FrameConnectConfig` and `CalibrationConfig` are re-exported from SMLMFrameConnection via const aliases. `CalibrationConfig` and `CalibrationResult` are not standalone steps — they participate only via the `FrameConnectConfig.calibration` field, and results are surfaced on `FrameConnectInfo.calibration`.
+
+`FrameConnectConfig` also accepts a `track_length=(min, max)` filter (localizations per track) that drops tracks whose linked-localization count falls outside the range — e.g. `(2.0, Inf)` removes single-frame blinks, while a finite upper bound drops sticky/fiducial tracks. The number of tracks removed is reported as `FrameConnectInfo.n_filtered`.
 
 ### Model
 
@@ -437,11 +453,27 @@ Track recombination then uses weighted averaging with corrected uncertainties, g
 ### Configuration
 
 ```julia
-CalibrationConfig(
-    clamp_k_to_one = true,        # k >= 1 (CRLB is theoretical lower bound)
-    filter_high_chi2 = false,     # Optional: remove tracks with high chi-squared pairs
-    chi2_filter_threshold = 6.0
+FrameConnectConfig(
+    max_frame_gap = 5,
+    calibration = CalibrationConfig(
+        clamp_k_to_one = true,        # k >= 1 (CRLB is theoretical lower bound)
+        filter_high_chi2 = false,     # Optional: remove tracks with high chi-squared pairs
+        chi2_filter_threshold = 6.0,
+    ),
 )
+```
+
+### Accessing calibration results
+
+```julia
+(smld, fc_info) = analyze(smld, FrameConnectConfig(
+    max_frame_gap=5, calibration=CalibrationConfig()))
+
+cal = fc_info.info.calibration   # CalibrationResult, or nothing if disabled
+cal.k_scale                       # k = sqrt(B)
+cal.sigma_motion_nm               # sqrt(A) in nm
+cal.mean_chi2                     # ~2.0 means well-calibrated
+cal.r_squared                     # WLS fit R²
 ```
 
 ### Interpreting results
@@ -511,15 +543,18 @@ config = AnalysisConfig(
 
 ### Configuration
 
-Each channel gets its own `AnalysisConfig` and image data. The `MultiTargetConfig` ties them together with labels, colors, and composite rendering settings:
+Each channel gets its own `AnalysisConfig` and image data. The `MultiTargetConfig` ties them together with labels, default colors, and an ordered list of multi-target steps that operate on the resulting `Vector{BasicSMLD}`:
 
 ```julia
 mt = MultiTargetConfig(
     labels = [:IgG, :C1q],
-    colors = [:red, :green],
-    render_zoom = 20,
-    render_strategies = [GaussianRender(), CircleRender()],
-    clip_percentile = 0.99,
+    colors = [:cyan, :magenta],   # default: cyan/magenta for 2, CMY for 3
+    steps = [
+        CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
+        CrossAlignConfig(method=:entropy),
+        CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),  # post-alignment render
+        CrossCorrConfig(r_max=0.5, dr=0.005),
+    ],
     outdir = "output/cell1/",
 )
 
@@ -529,14 +564,21 @@ mt = MultiTargetConfig(
 ], mt)
 ```
 
+Multi-target steps are dispatched on `analyze(smlds::Vector{BasicSMLD}, cfg::AbstractMultiTargetStep)`:
+
+- **`CompositeRenderConfig`** — render multi-channel composite image (pass-through; SMLDs not modified).
+- **`CrossAlignConfig`** — align channels via entropy or FFT cross-correlation (state-modifying; returns aligned SMLDs).
+- **`CrossCorrConfig`** — pair cross-correlation g(r).
+
 ### Accessing results
 
 ```julia
-result.smlds              # Vector{BasicSMLD}, one per channel
+result.smlds              # Vector{BasicSMLD}, one per channel (may be aligned)
 result[:IgG]              # Per-channel AnalysisResult
 result[:IgG].smld         # Channel SMLD
 info.channels[:IgG]       # Per-channel AnalysisInfo
-info.composite_renders    # Vector{RenderInfo} from composite renders
+info.step_infos           # Vector{StepInfo} for the multi-target steps
+info.steps                # Dict{Symbol, AbstractSMLMInfo} keyed by step name
 ```
 
 ### Output structure
@@ -551,9 +593,12 @@ output/cell1/
 │   └── ...
 ├── C1q/
 │   └── ...
-├── composite/            # Multi-channel overlay renders
-│   ├── gaussianrender_20x.png
-│   └── circlerender_20x.png
+├── composite/            # Multi-channel overlay renders + alignment / crosscorr outputs
+│   ├── 01_compositerender/
+│   ├── 02_crossalign/
+│   ├── 03_compositerender/
+│   ├── 04_crosscorr/
+│   └── README.md
 ├── smld_IgG.h5           # Per-channel SMLD files
 ├── smld_C1q.h5
 └── multi_target_config.toml
@@ -561,4 +606,4 @@ output/cell1/
 
 ### Composite rendering
 
-For non-histogram strategies, `clip_percentile` (default 0.99) clips outlier intensities before normalization to improve contrast. Histogram overlays use saturate mode instead (count=1 = full brightness).
+`CompositeRenderConfig` accepts the same render strategies as `RenderConfig` (`GaussianRender`, `HistogramRender`, `CircleRender`, ...). Per-step `colors` override the `MultiTargetConfig.colors` defaults. For non-histogram strategies, intensities are clipped (default 99th percentile) before per-channel normalization to improve contrast. Histogram overlays use saturate mode (count=1 = full brightness).
