@@ -209,7 +209,9 @@ function _save_frameconnect_figures(dir, smld_connected)
         space=:relative,
         fontsize=12)
 
-    axislegend(ax, position=:rt)
+    # Legend goes bottom-right (the right-skewed tail leaves it empty) so it does
+    # not collide with the stats annotation anchored top-right.
+    axislegend(ax, position=:rb)
     save(joinpath(dir, "track_histogram.png"), fig)
 
     return koff_stats
