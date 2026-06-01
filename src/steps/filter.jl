@@ -9,9 +9,13 @@ Quality-based filtering of localizations. All criteria use `(min, max)` tuples.
 
 # Keywords
 - `photons`: Photon count range, e.g. `(500.0, Inf)`
-- `precision`: Localization precision range in microns, e.g. `(0.0, 0.007)`
+- `precision`: Lateral localization precision range in microns, `max(σ_x, σ_y)`, e.g. `(0.0, 0.007)`
 - `pvalue`: Goodness-of-fit p-value range, e.g. `(1e-3, 1.0)`
 - `psf_sigma`: PSF width filter. `:auto` uses mode ± 10%, or explicit `(min, max)` in microns
+- `z`: Axial position range in microns (3D fits only), e.g. `(-0.4, 0.4)`. Useful to
+  drop localizations railed to the z-grid edge. No-op on 2D SMLDs.
+- `sigma_z`: Axial precision range in microns (3D fits only), e.g. `(0.0, 0.030)`. The
+  axial analog of `precision`. No-op on 2D SMLDs.
 
 All filters default to `nothing` (disabled).
 """
@@ -22,6 +26,9 @@ All filters default to `nothing` (disabled).
     pvalue::Union{Tuple{Float64, Float64}, Nothing} = nothing       # (min, max)
     # PSF sigma: :auto (mode ± 10%), or (min, max) tuple in microns
     psf_sigma::Union{Symbol, Tuple{Float64, Float64}, Nothing} = nothing
+    # 3D-only (Emitter3DFit/…PV); no-op when emitters lack z / σ_z.
+    z::Union{Tuple{Float64, Float64}, Nothing} = nothing            # (min, max) axial position, microns
+    sigma_z::Union{Tuple{Float64, Float64}, Nothing} = nothing      # (min, max) axial precision, microns
 end
 
 """
@@ -106,6 +113,17 @@ function _filter_smld(smld::BasicSMLD, cfg::FilterConfig)
     if cfg.pvalue !== nothing
         lo, hi = cfg.pvalue
         mask .&= [lo <= e.pvalue <= hi for e in emitters]
+    end
+
+    # 3D-only axial filters; no-op on 2D SMLDs (emitters without z / σ_z).
+    if cfg.z !== nothing && length(emitters) > 0 && hasproperty(emitters[1], :z)
+        lo, hi = cfg.z
+        mask .&= [lo <= e.z <= hi for e in emitters]
+    end
+
+    if cfg.sigma_z !== nothing && length(emitters) > 0 && hasproperty(emitters[1], :σ_z)
+        lo, hi = cfg.sigma_z
+        mask .&= [lo <= e.σ_z <= hi for e in emitters]
     end
 
     if cfg.psf_sigma !== nothing && length(emitters) > 0
@@ -254,6 +272,8 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
     # Check PSF model type
     has_psf_iso = hasproperty(emitters[1], :σ)
     has_psf_aniso = hasproperty(emitters[1], :σx)
+    # 3D fits get an extra row of z-position + axial-precision panels.
+    is_3d = hasproperty(emitters[1], :z) && hasproperty(emitters[1], :σ_z)
 
     # Colors for consistent styling
     REJECTED_COLOR = (:gray30, 0.5)
@@ -261,7 +281,7 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
     MEDIAN_COLOR = :red
     THRESHOLD_COLOR = :black
 
-    fig = Figure(size=(1200, 900))
+    fig = Figure(size=(1200, is_3d ? 1200 : 900))
 
     # Row 1: Photons and Background
     p98 = quantile(photons, 0.98)
@@ -432,6 +452,53 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
     text!(ax6, 0.3, 0.2, text="Rejected Region", fontsize=12)
     xlims!(ax6, 0, 1)
     ylims!(ax6, 0, 1)
+
+    # Row 4 (3D only): axial position z and axial precision σ_z. The z panel makes
+    # z-grid-edge-railed degenerate localizations obvious as a spike at the boundary.
+    if is_3d
+        z_nm = [e.z for e in emitters] .* 1000      # axial position in nm
+        σz_nm = [e.σ_z for e in emitters] .* 1000   # axial precision in nm
+
+        # --- z position panel ---
+        # Keep the full grid extent visible (quantiles, not tight) so a boundary
+        # spike is not clipped; extend to include any filter bounds.
+        z_lo_view = quantile(z_nm, 0.002)
+        z_hi_view = quantile(z_nm, 0.998)
+        ax7 = Axis(fig[4, 1], xlabel="Axial position z (nm)", ylabel="Count", title="z Distribution")
+        if cfg.z !== nothing
+            z_lo, z_hi = cfg.z[1] * 1000, cfg.z[2] * 1000
+            z_lo_view = min(z_lo_view, z_lo * 1.1)
+            z_hi_view = max(z_hi_view, z_hi * 1.1)
+            vspan!(ax7, z_lo_view, z_lo, color=REJECTED_COLOR)
+            vspan!(ax7, z_hi, z_hi_view, color=REJECTED_COLOR)
+            vlines!(ax7, [z_lo, z_hi], color=THRESHOLD_COLOR, linestyle=:dot, linewidth=2)
+        end
+        z_view = z_nm[(z_nm .>= z_lo_view) .& (z_nm .<= z_hi_view)]
+        !isempty(z_view) && hist!(ax7, z_view, bins=50, color=(:purple, 0.6))
+        vlines!(ax7, [mean(z_nm)], color=MEAN_COLOR, linestyle=:solid, linewidth=2)
+        vlines!(ax7, [median(z_nm)], color=MEDIAN_COLOR, linestyle=:dash, linewidth=2)
+        z_lo_view < z_hi_view && xlims!(ax7, z_lo_view, z_hi_view)
+        text!(ax7, 0.97, 0.95, text="median: $(round(median(z_nm), digits=1)) nm\nrange: [$(round(minimum(z_nm), digits=0)), $(round(maximum(z_nm), digits=0))] nm",
+              align=(:right, :top), space=:relative, fontsize=10)
+
+        # --- σ_z (axial precision) panel ---
+        σz98 = quantile(σz_nm, 0.98)
+        σz_xlim = σz98
+        ax8 = Axis(fig[4, 2], xlabel="Axial precision σ_z (nm)", ylabel="Count", title="Axial Precision Distribution")
+        if cfg.sigma_z !== nothing
+            σz_hi = cfg.sigma_z[2] * 1000  # convert μm to nm
+            σz_xlim = max(σz98, σz_hi * 1.2)
+            vspan!(ax8, σz_hi, σz_xlim, color=REJECTED_COLOR)
+            vlines!(ax8, [σz_hi], color=THRESHOLD_COLOR, linestyle=:dot, linewidth=2)
+        end
+        σz_view = σz_nm[σz_nm .<= σz_xlim]
+        !isempty(σz_view) && hist!(ax8, σz_view, bins=50, color=(:green, 0.5))
+        vlines!(ax8, [mean(σz_nm)], color=MEAN_COLOR, linestyle=:solid, linewidth=2)
+        vlines!(ax8, [median(σz_nm)], color=MEDIAN_COLOR, linestyle=:dash, linewidth=2)
+        σz_xlim > 0 && xlims!(ax8, 0, σz_xlim)
+        text!(ax8, 0.97, 0.95, text="median: $(round(median(σz_nm), digits=1)) nm\nmean: $(round(mean(σz_nm), digits=1)) nm",
+              align=(:right, :top), space=:relative, fontsize=10)
+    end
 
     save(joinpath(dir, "fit_quality.png"), fig)
 end
