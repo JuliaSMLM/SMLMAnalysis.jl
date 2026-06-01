@@ -253,8 +253,27 @@ function _save_calibration_plot(dir, cal::SMLMFrameConnection.CalibrationResult)
         title = "Uncertainty Calibration: obs = A + B * CRLB"
     )
 
-    # Data points
-    scatter!(ax, bc_nm2, bo_nm2, markersize=8, label="Binned data")
+    # Data points. Grey out low-statistics bins: on dense data the high-CRLB bins
+    # hold few pairs and their observed-variance estimate is unreliable (the chi²
+    # pair filter also trims their large-displacement tail), which produces a
+    # misleading plateau scattering below the fit/1:1. We de-emphasise bins holding
+    # fewer than LOWN_FRAC of the most-populated bin so the figure does not read as
+    # broken. bin_counts is provided by SMLMFrameConnection (>=5 per bin); guard for
+    # older versions / fallback results that lack it or leave it empty.
+    LOWN_FRAC = 0.05
+    counts = hasproperty(cal, :bin_counts) ? cal.bin_counts : Int[]
+    if length(counts) == length(bc_nm2) && !isempty(counts)
+        reliable = counts .>= LOWN_FRAC * maximum(counts)
+        any(reliable) && scatter!(ax, bc_nm2[reliable], bo_nm2[reliable],
+            markersize=8, color=:steelblue, label="Binned data")
+        if any(.!reliable)
+            scatter!(ax, bc_nm2[.!reliable], bo_nm2[.!reliable], markersize=7,
+                color=(:gray70, 0.5), strokecolor=:gray50, strokewidth=1,
+                label="Low-N bins (<$(round(Int, 100*LOWN_FRAC))% of peak)")
+        end
+    else
+        scatter!(ax, bc_nm2, bo_nm2, markersize=8, color=:steelblue, label="Binned data")
+    end
 
     # 1:1 line
     x_range = range(minimum(bc_nm2), maximum(bc_nm2), length=100)
