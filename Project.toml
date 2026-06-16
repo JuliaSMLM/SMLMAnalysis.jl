@@ -46,8 +46,8 @@ SMLMAnalysisPSFLearningExt = "PSFLearning"
 
 [sources]
 PSFLearning = {path = "../PSFLearning"}
-SMLMBaGoL = {rev = "main", url = "https://github.com/JuliaSMLM/SMLMBaGoL.jl"}
-SMLMClustering = {path = "../SMLMClustering"}
+SMLMBaGoL = {rev = "v0.2.0", url = "https://github.com/JuliaSMLM/SMLMBaGoL.jl"}
+SMLMClustering = {rev = "v0.4.1", url = "https://github.com/JuliaSMLM/SMLMClustering.jl"}
 SMLMDeepFit = {path = "../SMLMDeepFit"}
 
 [compat]
