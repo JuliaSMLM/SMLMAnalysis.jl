@@ -47,6 +47,7 @@ module SMLMAnalysis
 
 using Dates
 using Logging
+using Random
 using Statistics
 using TOML
 
@@ -219,6 +220,56 @@ export analyze
 # Multi-target orchestration
 # ============================================================
 include("multitarget.jl")
+
+# ============================================================
+# Precompilation workload (PrecompileTools)
+# ============================================================
+# Runs a tiny end-to-end pipeline on synthetic CPU-only data at build time,
+# caching the orchestration glue + fit/render specializations into the
+# pkgimage. This is the high-leverage spot: `using SMLMAnalysis` is the lab's
+# entry point, and the first `analyze()` in a fresh session otherwise pays
+# ~1 min of JIT.
+#
+# Invariants that keep the workload safe to run during precompilation:
+#   - backend = :cpu      → no GPU kernels (uncacheable, and no device on CI)
+#   - outdir  = nothing   → no disk writes
+#   - GaussianXYNBS       → Emitter2DFitSigma, the path the examples exercise
+#                           (GaussianXYNB/Emitter2DFitGaussMLE lacks a
+#                           `_with_dataset` method — see steps/common.jl)
+#   - verbose = SILENT    → no build-time log spam
+#   - seeded, dense data  → deterministic and never empty; sparse localization
+#                           sets crash downstream reductions over emitter arrays
+#
+# Disable during active development to skip the workload on every rebuild:
+#   using Preferences; set_preferences!(SMLMAnalysis, "precompile_workload" => false; force=true)
+using PrecompileTools: @setup_workload, @compile_workload
+
+@setup_workload begin
+    # Setup (NOT cached): synthesize a small single-dataset image stack.
+    Random.seed!(1)
+    cam = IdealCamera(32, 32, 0.1)
+    sim = StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 1)
+    (_, si) = simulate(sim;
+        pattern  = Nmer2D(n = 8, d = 0.05),
+        molecule = GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
+        camera   = cam)
+    (imgs, _) = gen_images(si.smld_model, MicroscopePSFs.GaussianPSF(0.13);
+        dataset = 1, bg = 20.0, poisson_noise = true)
+
+    @compile_workload begin
+        # Cached: the detect/fit → filter → frame-connect → render pipeline.
+        cfg = AnalysisConfig(
+            DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13),
+                            fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)),
+            FilterConfig(photons = (100.0, Inf)),
+            FrameConnectConfig(max_frame_gap = 2),
+            RenderConfig(zoom = 10);
+            camera  = cam,
+            verbose = Verbosity.SILENT,
+        )
+        analyze([imgs], cfg)
+    end
+end
 
 
 end # module

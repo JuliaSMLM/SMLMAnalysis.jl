@@ -12,6 +12,7 @@ output/
 gatta_ruler/
 data/
 dev/output/
+dev/deepfit_sim_out/
 dev/paths.jl
 *.log
 .claude/
