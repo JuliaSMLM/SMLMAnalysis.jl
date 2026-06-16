@@ -43,11 +43,14 @@ function bagol_step(smld::BasicSMLD, cfg::BaGoLConfig;
         mkpath(dir)
         _save_config!(dir, cfg)
         _save_info!(dir, diagnostics)
-        # Zero out track_id before compute_report — FC link IDs are not GT emitter assignments
-        for e in smld.emitters
+        # compute_report wants locs WITHOUT FC link IDs (track_id is not a GT emitter
+        # assignment). Operate on a copy so the shared pipeline smld is never mutated in place
+        # (downstream steps / the caller may still read the original track_id).
+        locs_for_report = deepcopy(smld)
+        for e in locs_for_report.emitters
             e.track_id = 0
         end
-        report = SMLMBaGoL.compute_report(bagol_smld, diagnostics; locs_smld=smld)
+        report = SMLMBaGoL.compute_report(bagol_smld, diagnostics; locs_smld=locs_for_report)
         SMLMBaGoL.write_report(report; output_dir=dir)
         SMLMBaGoL.plot_report(report; output_dir=dir)
 
@@ -103,13 +106,15 @@ function _render_bagol_diagnostics(smld::BasicSMLD, bagol_smld::BasicSMLD,
         @warn "BaGoL circles render failed" exception=e
     end
 
-    # Partition-colored localizations
+    # Partition-colored localizations (copy emitters so the shared input smld is never mutated;
+    # we repurpose the dataset field as a partition label only for this render).
     if length(partition_ids) == length(smld.emitters)
         try
-            for (i, e) in enumerate(smld.emitters)
+            part_emitters = deepcopy(smld.emitters)
+            for (i, e) in enumerate(part_emitters)
                 e.dataset = partition_ids[i]
             end
-            part_smld = BasicSMLD(smld.emitters, smld.camera, smld.n_frames, 1)
+            part_smld = BasicSMLD(part_emitters, smld.camera, smld.n_frames, 1)
             SMLMRender.render(part_smld; strategy=EllipseRender(),
                 color_by=:dataset, categorical=true, zoom=zoom,
                 filename=joinpath(dir, "partitions.png"))

@@ -467,6 +467,7 @@ function _save_step_smld(dir::Union{String,Nothing}, smld::BasicSMLD;
                           filename::String="smld.jld2",
                           kwargs...)
     dir === nothing && return nothing
+    mkpath(dir)   # ensure the step dir exists (some steps gate their own mkpath behind verbosity)
     path = joinpath(dir, filename)
     JLD2.jldsave(path; smld=smld, kwargs...)
     return path
