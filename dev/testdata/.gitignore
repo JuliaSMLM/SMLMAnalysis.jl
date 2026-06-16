@@ -1,0 +1,4 @@
+# Per-dataset NAS symlinks (data/raw -> acquisition, data/results -> results) are
+# local setup -- recreate per each dataset's README; never track NAS content.
+*/data/
+*/output/
