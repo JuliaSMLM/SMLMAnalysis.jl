@@ -134,7 +134,7 @@ function analyze(data, config::AnalysisConfig)
         camera = crop_camera(camera, config.roi.x, config.roi.y)
     end
 
-    _run_pipeline(_normalize_data(data), config.steps, camera, config.outdir, config.verbose, config.checkpoint)
+    _run_pipeline(_normalize_data(data), config.steps, camera, config.outdir, config.verbose, config.checkpoint; roi=config.roi)
 end
 
 """
@@ -183,7 +183,7 @@ config = AnalysisConfig(
 ```
 """
 function analyze(config::AnalysisConfig)
-    _run_pipeline(nothing, config.steps, config.camera, config.outdir, config.verbose, config.checkpoint)
+    _run_pipeline(nothing, config.steps, config.camera, config.outdir, config.verbose, config.checkpoint; roi=config.roi)
 end
 
 # Allow analyze(nothing, config) so multi-target can pass nothing for file-based channels
@@ -230,9 +230,14 @@ DetectFitConfig gives `no method matching analyze(::Vector{...}, ::FilterConfig)
 function _run_pipeline(initial_state, steps::Vector{SMLMData.AbstractSMLMConfig},
                        camera::SMLMData.AbstractCamera,
                        outdir::Union{String,Nothing}, v::Int,
-                       cp_level::Int=Checkpoint.EXPENSIVE)
+                       cp_level::Int=Checkpoint.EXPENSIVE;
+                       roi=nothing)
     t_start = time_ns()
-    outdir !== nothing && mkpath(outdir)
+    if outdir !== nothing
+        mkpath(outdir)
+        # Write orchestration-level config up-front, so provenance survives a mid-pipeline failure.
+        _save_pipeline_config!(outdir, steps, camera, roi, v, cp_level)
+    end
 
     # For Checkpoint.END: locate the index of the last SMLD-producing step.
     # We approximate "produces SMLD" by walking step types in reverse and
@@ -298,6 +303,75 @@ function _run_pipeline(initial_state, steps::Vector{SMLMData.AbstractSMLMConfig}
     v >= Verbosity.PROGRESS && @info "Pipeline complete: $(length(last_smld.emitters)) localizations ($(round(elapsed_s, digits=2))s)"
 
     (result, info)
+end
+
+# ============================================================
+# Pipeline config provenance
+# ============================================================
+
+"""
+    _save_pipeline_config!(dir, steps, camera, roi, verbose, checkpoint)
+
+Write the orchestration-level `AnalysisConfig` to `dir/config.toml`.
+
+Mirrors the per-step `_save_config!` (which writes each step's config into its
+own subdir) but captures what those don't: the camera, the global ROI crop,
+verbosity, checkpoint level, and a manifest of the step sequence.
+"""
+function _save_pipeline_config!(dir::String, steps, camera::SMLMData.AbstractCamera,
+                                roi, verbose::Int, checkpoint::Int)
+    filepath = joinpath(dir, "config.toml")
+    open(filepath, "w") do io
+        println(io, "# AnalysisConfig")
+        println(io, "type = \"AnalysisConfig\"")
+        println(io, "verbose = $verbose")
+        println(io, "checkpoint = $checkpoint")
+
+        _write_camera!(io, camera)
+
+        if roi !== nothing
+            println(io, "\n[roi]")
+            println(io, "x = [$(first(roi.x)), $(last(roi.x))]")
+            println(io, "y = [$(first(roi.y)), $(last(roi.y))]")
+        end
+
+        # Step manifest: number, type, and the subdir holding the full config.
+        for (i, cfg) in enumerate(steps)
+            println(io, "\n[[steps]]")
+            println(io, "number = $i")
+            println(io, "type = \"$(nameof(typeof(cfg)))\"")
+            println(io, "dir = \"$(lpad(i, 2, '0'))_$(step_name(cfg))\"")
+        end
+    end
+end
+
+"""
+    _write_camera!(io, cam)
+
+Write a compact `[camera]` provenance block: type, pixel grid dimensions, and
+pixel size derived from the edge vectors (rather than dumping the full edges).
+sCMOS calibration fields are written as scalars, or summarized by shape if maps.
+"""
+function _write_camera!(io::IO, cam::SMLMData.AbstractCamera)
+    println(io, "\n[camera]")
+    println(io, "type = \"$(nameof(typeof(cam)))\"")
+    if hasproperty(cam, :pixel_edges_x) && hasproperty(cam, :pixel_edges_y)
+        ex, ey = cam.pixel_edges_x, cam.pixel_edges_y
+        println(io, "n_pixels_x = $(length(ex) - 1)")
+        println(io, "n_pixels_y = $(length(ey) - 1)")
+        length(ex) >= 2 && println(io, "pixel_size_x = $(ex[2] - ex[1])")
+        length(ey) >= 2 && println(io, "pixel_size_y = $(ey[2] - ey[1])")
+    end
+    # sCMOS calibration: scalar -> value, matrix -> shape summary
+    for f in (:offset, :gain, :readnoise, :qe)
+        hasproperty(cam, f) || continue
+        v = getproperty(cam, f)
+        if v isa Number
+            println(io, "$f = $v")
+        elseif v isa AbstractMatrix
+            println(io, "$f = \"matrix($(size(v, 1))x$(size(v, 2)))\"")
+        end
+    end
 end
 
 # ============================================================
