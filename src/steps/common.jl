@@ -58,53 +58,44 @@ function _grid_figure_size(data; n_cols=4, n_rows=3, panel_height=200)
 end
 
 """
-    _save_box_overlay(dir, filename, images, roi_batch, box_colors; title_prefix="Frame")
+    _save_box_overlay(dir, filename, images, x_corners, y_corners, frame_indices, box_size, box_colors; ...)
 
-Save frame overlay with colored boxes around ROIs.
+Core box-overlay renderer: a grid of sample frames (contrast-stretched grayscale) with a
+colored `box_size` rectangle drawn at each `(x_corner, y_corner)` on its frame. This is the
+shared "boxes on the raw data" diagnostic style — detectfit (`detection_overlay.png`), filter
+(`fit_overlay.png`), psflearning ("ROIs used"), and deepfit_inference all render through it so
+the whole pipeline's overlays are one visual family.
 
-# Arguments
-- `dir`: Output directory
-- `filename`: Output filename (e.g., "detection_overlay.png")
-- `images`: 3D array of frame images
-- `roi_batch`: ROIBatch with x_corners, y_corners, frame_indices
-- `box_colors`: Vector of colors, one per ROI (same order as roi_batch)
-- `title_prefix`: Prefix for frame titles (default "Frame")
+The box-geometry is passed as plain arrays so non-ROIBatch callers (inference emitters,
+psflearning beads) use the identical renderer; see the `roi_batch` convenience method below.
 """
-function _save_box_overlay(dir, filename, images, roi_batch, box_colors; title_prefix="Frame", frame_labels=nothing, suptitle=nothing)
+function _save_box_overlay(dir, filename, images, x_corners, y_corners, frame_indices, box_size,
+                           box_colors; title_prefix="Frame", frame_labels=nothing, suptitle=nothing)
     n_frames = size(images, 3)
-    frame_indices = [round(Int, x) for x in range(1, n_frames, length=min(12, n_frames))]
-    # Use provided frame_labels for display, or fall back to frame_indices
-    display_labels = frame_labels !== nothing ? frame_labels : frame_indices
+    sample = [round(Int, x) for x in range(1, n_frames, length=min(12, n_frames))]
+    display_labels = frame_labels !== nothing ? frame_labels : sample
 
     # Contrast stretch: dark background, spot cores retain structure
-    sample_frames = frame_indices[1:min(4, length(frame_indices))]
+    sample_frames = sample[1:min(4, length(sample))]
     sample_data = vec(images[:, :, sample_frames])
-    pmin = Float64(quantile(sample_data, 0.25))   # Below background -> solid black
+    pmin = Float64(quantile(sample_data, 0.25))    # Below background -> solid black
     pmax = Float64(quantile(sample_data, 0.9995))  # Above most spot peaks -> preserve core detail
 
     fig = Figure(size=_grid_figure_size(images))
-    box_size = roi_batch.roi_size
-
-    # Optional supertitle
     if suptitle !== nothing
         Label(fig[0, 1:4], suptitle, fontsize=11)
     end
 
-    for (idx, frame_num) in enumerate(frame_indices)
+    for (idx, frame_num) in enumerate(sample)
         row = div(idx - 1, 4) + 1
         col = mod(idx - 1, 4) + 1
-        display_frame = display_labels[idx]
 
-        ax = Axis(fig[row, col], title="$title_prefix $display_frame", aspect=DataAspect(), yreversed=true)
-        frame_data = images[:, :, frame_num]'
-        heatmap!(ax, frame_data, colormap=:grays, colorrange=(pmin, pmax))
+        ax = Axis(fig[row, col], title="$title_prefix $(display_labels[idx])", aspect=DataAspect(), yreversed=true)
+        heatmap!(ax, images[:, :, frame_num]', colormap=:grays, colorrange=(pmin, pmax))
 
-        frame_mask = roi_batch.frame_indices .== frame_num
+        frame_mask = frame_indices .== frame_num
         if any(frame_mask)
-            det_x = roi_batch.x_corners[frame_mask]
-            det_y = roi_batch.y_corners[frame_mask]
-            colors = box_colors[frame_mask]
-            for (x, y, c) in zip(det_x, det_y, colors)
+            for (x, y, c) in zip(x_corners[frame_mask], y_corners[frame_mask], box_colors[frame_mask])
                 lines!(ax, [x, x+box_size, x+box_size, x, x],
                           [y, y, y+box_size, y+box_size, y],
                     color=c, linewidth=0.5)
@@ -114,6 +105,17 @@ function _save_box_overlay(dir, filename, images, roi_batch, box_colors; title_p
     end
 
     save(joinpath(dir, filename), fig)
+end
+
+"""
+    _save_box_overlay(dir, filename, images, roi_batch, box_colors; ...)
+
+ROIBatch convenience (detectfit/filter): unpack `x_corners`/`y_corners`/`frame_indices`/`roi_size`
+and delegate to the core renderer above. Behavior unchanged for existing callers.
+"""
+function _save_box_overlay(dir, filename, images, roi_batch, box_colors; kwargs...)
+    _save_box_overlay(dir, filename, images, roi_batch.x_corners, roi_batch.y_corners,
+                      roi_batch.frame_indices, roi_batch.roi_size, box_colors; kwargs...)
 end
 
 """

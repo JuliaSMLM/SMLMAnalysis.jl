@@ -26,7 +26,7 @@ import SMLMRender         # host dep: SR render of inferred localizations
 import CairoMakie         # host dep: overlay / training-curve figures (qualified — dodges save/attributes clashes)
 import SMLMAnalysis: analyze, step_name, _produces_smld, _prepare_step,
     step_outdir, _save_config!, _save_step_smld, _save_loc_per_frame, _save_info!,
-    StepInfo, Verbosity, Checkpoint
+    _save_box_overlay, StepInfo, Verbosity, Checkpoint
 
 # ------------------------------------------------------------
 # helpers
@@ -82,27 +82,20 @@ function _deepfit_training_curves(dir, info)
     CairoMakie.save(joinpath(dir, "loss_accuracy.png"), fig)
 end
 
-"""detectfit-style overlay: inferred localizations (red ×) on sample movie frames (µm→px via camera)."""
-function _deepfit_inference_overlay(dir, movie, smld, cam; n_show = 6)
-    isempty(smld.emitters) && return
+"""detectfit-style overlay: inferred localizations BOXED on sample movie frames, via the shared
+`_save_box_overlay` core — so deepfit_inference reads as the same figure family as detectfit/filter
+(boxes on the raw data), not bare × marks. Box is centered on each localization (µm→px via camera)."""
+function _deepfit_inference_overlay(dir, movie, smld, cam; box_size = 9)
+    em = [e for e in smld.emitters if 1 <= e.frame <= size(movie, 3)]
+    isempty(em) && return
     ps = _deepfit_pixelsize(cam)
-    _, _, T = size(movie)
-    fr_with = sort(unique(Int[e.frame for e in smld.emitters if 1 <= e.frame <= T]))
-    isempty(fr_with) && return
-    sel = fr_with[round.(Int, range(1, length(fr_with), length = min(n_show, length(fr_with))))]
-    nc = 3; nr = cld(length(sel), nc)
-    fig = CairoMakie.Figure(size = (nc * 250, nr * 250 + 30))
-    CairoMakie.Label(fig[0, 1:nc], "deepfit_inference: localizations (red ×) on movie frames", fontsize = 12)
-    for (i, fr) in enumerate(sel)
-        r = div(i - 1, nc) + 1; c = mod(i - 1, nc) + 1
-        ax = CairoMakie.Axis(fig[r, c], title = "frame $fr", aspect = CairoMakie.DataAspect(), yreversed = true)
-        CairoMakie.heatmap!(ax, movie[:, :, fr]', colormap = :grays)
-        ex = Float64[e.x / ps for e in smld.emitters if e.frame == fr]
-        ey = Float64[e.y / ps for e in smld.emitters if e.frame == fr]
-        CairoMakie.scatter!(ax, ex, ey, color = :red, markersize = 9, marker = :xcross)
-        CairoMakie.hidedecorations!(ax)
-    end
-    CairoMakie.save(joinpath(dir, "inference_overlay.png"), fig)
+    xc = Float64[e.x / ps - box_size / 2 for e in em]   # box corner (px), centered on the localization
+    yc = Float64[e.y / ps - box_size / 2 for e in em]
+    fr = Int[e.frame for e in em]
+    colors = fill(:red, length(em))
+    _save_box_overlay(dir, "inference_overlay.png", movie, xc, yc, fr, Float64(box_size), colors;
+                      title_prefix = "frame",
+                      suptitle = "deepfit_inference: localizations (boxed) on movie frames")
 end
 
 """Super-resolution Gaussian render of the inferred localizations (sparse on sparse data — clip is standard)."""

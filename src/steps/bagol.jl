@@ -74,7 +74,22 @@ _step_summary(info::BaGoLInfo) = Dict{Symbol,Any}(
     :final_μ => round(info.final_μ, digits=2),
     :final_shape => round(info.final_shape, digits=2),
     :n_partitions => info.n_partitions,
+    :se_adjust => (hasproperty(info.diagnostics, :se_adjust) ? info.diagnostics.se_adjust : nothing),  # applied (τx,τy) provenance (SMLMBaGoL v0.3.1-DEV)
 )
+
+"""Copy of `smld` with per-loc σ inflated in quadrature by `se_adjust` (scalar τ or (τx,τy), µm)
+so rendered ellipses show the σ BaGoL used for grouping (matches render_report). `nothing`→unchanged."""
+function _se_inflated_smld(smld::BasicSMLD, se_adjust)
+    se_adjust === nothing && return smld
+    τx, τy = se_adjust isa Number ? (se_adjust, se_adjust) : (se_adjust[1], se_adjust[2])
+    (τx <= 0 && τy <= 0) && return smld
+    out = deepcopy(smld)
+    for e in out.emitters
+        hasproperty(e, :σ_x) && (e.σ_x = sqrt(e.σ_x^2 + τx^2))
+        hasproperty(e, :σ_y) && (e.σ_y = sqrt(e.σ_y^2 + τy^2))
+    end
+    out
+end
 
 """
 Render BaGoL-specific diagnostic images: partition ellipses and loc/emitter overlay.
@@ -94,9 +109,10 @@ function _render_bagol_diagnostics(smld::BasicSMLD, bagol_smld::BasicSMLD,
     # Shared target so both renders have identical bounds
     target = SMLMRender.create_target_from_smld(smld; zoom=zoom)
 
-    # Circles overlay: white localizations + red MAP-N emitters
+    # Circles overlay: white localizations (σ inflated by se_adjust = the grouping σ) + red MAP-N emitters
     try
-        (bg_img, _) = SMLMRender.render(smld; strategy=EllipseRender(),
+        bg_smld = _se_inflated_smld(smld, hasproperty(cfg, :se_adjust) ? cfg.se_adjust : nothing)
+        (bg_img, _) = SMLMRender.render(bg_smld; strategy=EllipseRender(),
             color=:white, target=target, clip_percentile=nothing)
         (fg_img, _) = SMLMRender.render(bagol_smld; strategy=EllipseRender(),
             color=:red, target=target, clip_percentile=nothing)

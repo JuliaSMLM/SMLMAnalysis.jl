@@ -29,7 +29,7 @@ mkpath(OUTDIR)
 # Stage 2 — deepfit_training
 # ============================================================
 function make_decode(psf_path)
-    p = SMLMDeepFit.Decode(; sz = 40, ρ = 1.0f0, photons = 500.0f0, bg = 5.0f0,
+    p = SMLMDeepFit.Decode(; sz = 40, ρ = 1.0f0, photons = 5000.0f0, bg = 10.0f0,   # MATCHED to test movie (5000ph/bg10; were 1000/5 = a 5x train/test mismatch). Run with DEEPFIT_PHOTON_SCALE=5000 to keep loss_photon balanced (N/scale~1). Parseval PSFs, native flux.
                            n_train = 500, n_test = 100, psffile = psf_path,
                            pixelsize = Float32(PIXEL_SIZE))   # explicit camera pixel size (no silent 0.1 guess)
     p.netconfig = SMLMDeepFit.UNetConfig(n_features = 16, depth = 2)   # depth=2 ⇒ FOV÷4
@@ -44,8 +44,47 @@ function train_decode(p)
     (result, sinfo) = analyze(args; outdir = OUTDIR, step_number = 2,
                               verbose = SMLMAnalysis.Verbosity.PROGRESS)
     plot_training_curves(sinfo.info)
+    _training_diagnostics(p, result.model_path)
     @info "stage 2 (deepfit_training) done" model_path = result.model_path epochs = TRAIN_EPOCHS
     result.model_path
+end
+
+# Training diagnostics: the network's detection-probability map p̂ (the raw ch1 output) on sample
+# data frames + GT emitters — DECODE's analog of PSFLearning's fit-on-data view. Shows WHERE the
+# trained net fires on real data (continuous p̂, not just thresholded localizations): a degenerate
+# diffuse map (low max p̂, no contours) vs confident peaks (tight contours on GT) is visible at a
+# glance. Uses the same inference() path deepfit() uses (load_model → forward → ŷ[:,:,1,:] = p̂).
+function _training_diagnostics(p, model_path; n_show = 6)
+    dir = joinpath(OUTDIR, "02_deepfit_training")
+    try
+        model, ps, st = SMLMDeepFit.load_model(model_path, p)
+        _, movie, gt = simulate_structure(PSF_PATH)                 # a representative sample movie + GT
+        movie_f = Float32.(movie); movie_f ./= maximum(movie_f)
+        ŷ = SMLMDeepFit.inference(movie_f, model, ps, st)           # [sx, sy, 10, T-2]; ch1 = p̂
+        maxp = maximum(@view ŷ[:, :, 1, :])
+        T = size(ŷ, 4)
+        sel = unique(round.(Int, range(1, T, length = min(n_show, T))))
+        nc = 3; nr = cld(length(sel), nc)
+        fig = Figure(size = (nc * 250, nr * 250 + 40))
+        Label(fig[0, 1:nc], "deepfit_training: detection p̂ (red contours @0.3/0.6/0.9) on data + GT (green ×)  —  max p̂ = $(round(maxp, digits = 3))", fontsize = 12)
+        for (i, f) in enumerate(sel)
+            r = div(i - 1, nc) + 1; c = mod(i - 1, nc) + 1
+            ax = Axis(fig[r, c], title = "frame $(f + 1)", aspect = DataAspect(), yreversed = true)
+            fr = movie_f[:, :, f + 1]                                                    # raw data (context-center frame)
+            s = sort(vec(fr)); lo = s[max(1, round(Int, 0.20 * length(s)))]; hi = s[round(Int, 0.999 * length(s))]
+            heatmap!(ax, fr', colormap = :grays, colorrange = (lo, max(hi, lo + 1f-6)))  # percentile-stretched so emitters show
+            phat = copy(ŷ[:, :, 1, f]); phat[1:2, :] .= 0; phat[end-1:end, :] .= 0; phat[:, 1:2] .= 0; phat[:, end-1:end] .= 0   # kill inference edge/pad artifacts
+            contour!(ax, phat', levels = [0.3f0, 0.6f0, 0.9f0], color = :red, linewidth = 1.2)   # p̂ on it
+            gx = Float64[e.x / PIXEL_SIZE for e in gt.emitters if e.frame == f + 1]
+            gy = Float64[e.y / PIXEL_SIZE for e in gt.emitters if e.frame == f + 1]
+            scatter!(ax, gx, gy, color = :limegreen, markersize = 10, marker = :xcross)  # where GT emitters are
+            hidedecorations!(ax)
+        end
+        CairoMakie.save(joinpath(dir, "training_pmaps.png"), fig)
+        @info "training p̂ diagnostics written" max_phat = maxp frames = length(sel) dir
+    catch e
+        @warn "training p̂ diagnostics failed (training still valid)" exception = (e, catch_backtrace())
+    end
 end
 
 # Loss/accuracy curves from TrainInfo (SMLMDeepFit's own LossPlot/AccuracyPlot come out empty).
@@ -79,9 +118,9 @@ function simulate_structure(psf_path; n_frames = 200)
     psf = MicroscopePSFs.load_psf(psf_path)
     cam = IdealCamera(FOV, FOV, PIXEL_SIZE)
     sim = StaticSMLMConfig(density = 1.0, σ_psf = 0.13, nframes = n_frames, ndatasets = 1,
-                           ndims = 3, zrange = [-0.5, 0.5])
+                           ndims = 3, zrange = [-0.5, 0.5])   # 3D: rings spread across the full ±0.5µm PSF z-range
     (_, si) = simulate(sim;
-        pattern  = Nmer3D(n = 8, d = 0.05),
+        pattern  = Nmer3D(n = 8, d = 0.2),   # 200nm 8-mer rings (resolvable) distributed in depth = a 3D structure (Pattern3D × z-distribution)
         molecule = GenericFluor(photons = 5.0e3, k_off = 20.0, k_on = 0.04),
         camera   = cam)
     (movie, _) = gen_images(si.smld_model, psf; dataset = 1, bg = 10.0, poisson_noise = true)

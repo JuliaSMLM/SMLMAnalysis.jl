@@ -26,17 +26,17 @@ Random.seed!(1)
 
 function main()
     cfg = PSFLearning.PSFLearningConfig(
-        n_max = 4, pupilsize = 32, roi_size = ROI,
-        NA = 1.4f0, λ = 0.68f0, n_imm = 1.516f0,
+        n_max = 4, pupilsize = 64, roi_size = ROI,   # pupilsize 32->64: finer pupil grid (reduces the spoke; 128 = ~20x slower for the iterative in-situ fit). n_med below is the critical fix.
+        NA = 1.4f0, λ = 0.68f0, n_imm = 1.516f0, n_med = 1.52f0, n_cov = 1.516f0,   # n_med 1.335(water default)->1.52 INDEX-MATCHED: NA<=n_med => NO supercritical-angle (SAF) ring (the bug that broke the vector PSF: NA=1.4 over water blew up below focus)
         pixelsize_x = Float32(PIXEL_SIZE), pixelsize_y = Float32(PIXEL_SIZE),
-        model = :scalar, iterations = 40, mu_init = 0.0f0, backend = :reactant_gpu,
+        model = Symbol(get(ENV, "PSF_MODEL", "vector")), iterations = 40, mu_init = 0.0f0, backend = :reactant_gpu,   # PSF_MODEL=scalar|vector (vector = new default)
     )
     m  = PSFLearning.build_insitu_model(cfg)
     nc = PSFLearning.n_coeffs(m)
     true_coeffs = zeros(Float32, nc); true_coeffs[5] = 0.4f0; true_coeffs[7] = -0.2f0   # defocus j5, coma j7
 
     # --- synthetic single-molecule candidate set: ~1000 good in-focus emitters + outliers ---
-    N_good, N_bad = 1100, 120
+    N_good, N_bad = 500, 60   # trimmed for vector's ~6x forward cost; still over-constrains the shared pupil
     good_z  = clamp.(randn(Float32, N_good) .* 0.25f0, -0.5f0, 0.5f0)
     good_bg = fill(15f0, N_good); good_I = fill(4000f0, N_good)
     good = PSFLearning.forward_images_insitu(true_coeffs, zeros(Float32, N_good), zeros(Float32, N_good),
@@ -105,13 +105,37 @@ function main()
 
         open(joinpath(dir, "stats.md"), "w") do io
             println(io, "# PSF Learning (in-situ)\n")
-            println(io, "- model=scalar  NA=$(cfg.NA)  λ=$(cfg.λ)µm  pixelsize=$(cfg.pixelsize_x)µm  roi_size=$(cfg.roi_size)")
+            println(io, "- model=$(cfg.model)  NA=$(cfg.NA)  λ=$(cfg.λ)µm  pixelsize=$(cfg.pixelsize_x)µm  roi_size=$(cfg.roi_size)")
             println(io, "- candidate emitters=$N  kept=$(length(kept))  rejected=$(length(rejected))")
             println(io, "- relearn iterations=$(info.iterations)  converged=$(info.converged)\n")
             println(io, "## Zernike phase recovery (learned vs true)\n\n| j | learned | true |\n|---|---------|------|")
             for j in 1:min(pp.n_zernike, 12)
                 println(io, "| $j | $(round(info.coeffs[j], digits = 3)) | $(round(truec[j], digits = 3)) |")
             end
+        end
+
+        # "raw data with block plots": the actual bead ROI patches used for the fit, as a tile grid —
+        # each bordered kept (green = used for the PSF) vs rejected (red = outlier). This is the
+        # detectfit/filter-style "show the raw data" view for the in-situ step (PSFLearning's own
+        # data-on-blocks display). data[idx,:,:] is the raw MxM patch for emitter idx.
+        let
+            nk = min(12, length(kept)); nr = min(6, length(rejected))
+            samp = vcat(kept[1:nk], rejected[1:nr]); keepf = vcat(fill(true, nk), fill(false, nr))
+            ncol = 6; nrow = cld(length(samp), ncol)
+            figb = Figure(size = (ncol * 135, nrow * 152 + 40))
+            Label(figb[0, 1:ncol], "in-situ PSF learning: raw bead ROIs — kept ($(length(kept)), green) vs rejected ($(length(rejected)), red)", fontsize = 12)
+            for (i, idx) in enumerate(samp)
+                r = div(i - 1, ncol) + 1; c = mod(i - 1, ncol) + 1
+                patch = data[idx, :, :]; Mp = size(patch, 1)
+                ax = Axis(figb[r, c], aspect = DataAspect(), yreversed = true,
+                          title = keepf[i] ? "kept" : "rejected", titlesize = 10,
+                          titlecolor = keepf[i] ? :green : :red)
+                heatmap!(ax, patch', colormap = :inferno)
+                lines!(ax, [0.5, Mp + 0.5, Mp + 0.5, 0.5, 0.5], [0.5, 0.5, Mp + 0.5, Mp + 0.5, 0.5],
+                       color = keepf[i] ? :limegreen : :red, linewidth = 4)
+                hidedecorations!(ax)
+            end
+            CairoMakie.save(joinpath(dir, "insitu_rois.png"), figb)
         end
         @info "psflearning (in-situ) figures written" dir kept = length(kept) rejected = length(rejected)
     catch e

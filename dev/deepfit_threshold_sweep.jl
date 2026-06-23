@@ -17,7 +17,7 @@ function sweep()
     movie_f = Float32.(movie); movie_f ./= maximum(movie_f)
     @info "sweep setup" model_path n_gt = length(gt.emitters) movie = size(movie)
 
-    thresholds = Float32[0.6, 0.7, 0.8, 0.9, 1.0, 1.1]
+    thresholds = Float32[0.8, 1.5, 2.5, 4.0, 6.0, 10.0]   # calibrated-BCE model floods at 0.8 (15k); sweep UP to test if noise is separable from true centers
     rows = NamedTuple[]
     for mt in thresholds
         cfg = SMLMDeepFit.DeepFitConfig(; model_path = model_path, traintype = p, camera = cam,
