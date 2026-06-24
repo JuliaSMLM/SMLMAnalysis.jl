@@ -46,7 +46,7 @@ SMLMAnalysisPSFLearningExt = "PSFLearning"
 
 [sources]
 PSFLearning = {path = "../PSFLearning"}
-SMLMBaGoL = {rev = "v0.3.5-DEV", url = "https://github.com/JuliaSMLM/SMLMBaGoL.jl"}
+SMLMBaGoL = {rev = "v0.3.6-DEV", url = "https://github.com/JuliaSMLM/SMLMBaGoL.jl"}
 SMLMClustering = {rev = "v0.4.1", url = "https://github.com/JuliaSMLM/SMLMClustering.jl"}
 SMLMDeepFit = {path = "../SMLMDeepFit"}
 
@@ -70,7 +70,7 @@ Optim = "1.13.3"
 PSFLearning = "0.1"
 PrecompileTools = "1"
 Random = "1"
-# SMLMBaGoL: no [compat] entry — pinned to the v0.3.5-DEV tag via [sources]; Julia [compat] cannot express -DEV prereleases (all forms fail to parse), and the tag already fixes the version.
+# SMLMBaGoL: no [compat] entry — pinned to the v0.3.6-DEV tag via [sources]; Julia [compat] cannot express -DEV prereleases (all forms fail to parse), and the tag already fixes the version.
 SMLMBoxer = "0.3"
 SMLMClustering = "0.4"
 SMLMData = "0.7"
