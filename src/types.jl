@@ -408,6 +408,7 @@ struct BaGoLInfo <: SMLMData.AbstractSMLMInfo
     final_μ::Float64
     final_shape::Float64
     n_partitions::Int
+    tau_um::Float64                       # applied se_adjust τ̂ (μm); finder-by-default surfacing (SMLMBaGoL v0.3.5 se_adjust=:auto)
     diagnostics::SMLMBaGoL.BaGoLDiagnostics
 end
 

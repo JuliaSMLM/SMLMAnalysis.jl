@@ -34,9 +34,11 @@ function bagol_step(smld::BasicSMLD, cfg::BaGoLConfig;
     n_emitters = diagnostics.n_emitters
     compression = n_locs_in > 0 ? round(n_locs_in / max(1, n_emitters), digits=1) : 0.0
 
+    # τ̂ the finder actually applied: diagnostics.se_adjust is the applied (τx,τy) μm (or nothing under :auto skip)
+    tau_um = diagnostics.se_adjust === nothing ? 0.0 : Float64(diagnostics.se_adjust[1])
     info = BaGoLInfo(n_locs_in, n_emitters, compression,
                      diagnostics.final_μ, diagnostics.final_shape,
-                     diagnostics.n_partitions, diagnostics)
+                     diagnostics.n_partitions, tau_um, diagnostics)
 
     # Diagnostic outputs via SMLMBaGoL report system
     if dir !== nothing && v >= Verbosity.STANDARD
@@ -74,6 +76,7 @@ _step_summary(info::BaGoLInfo) = Dict{Symbol,Any}(
     :final_μ => round(info.final_μ, digits=2),
     :final_shape => round(info.final_shape, digits=2),
     :n_partitions => info.n_partitions,
+    :tau_um => round(info.tau_um, digits=4),  # applied se_adjust τ̂ (μm) — finder-by-default (SMLMBaGoL v0.3.5)
     :se_adjust => (hasproperty(info.diagnostics, :se_adjust) ? info.diagnostics.se_adjust : nothing),  # applied (τx,τy) provenance (SMLMBaGoL v0.3.1-DEV)
 )
 
@@ -81,6 +84,7 @@ _step_summary(info::BaGoLInfo) = Dict{Symbol,Any}(
 so rendered ellipses show the σ BaGoL used for grouping (matches render_report). `nothing`→unchanged."""
 function _se_inflated_smld(smld::BasicSMLD, se_adjust)
     se_adjust === nothing && return smld
+    se_adjust isa Symbol && return smld   # :auto/unresolved sentinel (SMLMBaGoL v0.3.5) — nothing numeric to inflate
     τx, τy = se_adjust isa Number ? (se_adjust, se_adjust) : (se_adjust[1], se_adjust[2])
     (τx <= 0 && τy <= 0) && return smld
     out = deepcopy(smld)
@@ -109,9 +113,11 @@ function _render_bagol_diagnostics(smld::BasicSMLD, bagol_smld::BasicSMLD,
     # Shared target so both renders have identical bounds
     target = SMLMRender.create_target_from_smld(smld; zoom=zoom)
 
-    # Circles overlay: white localizations (σ inflated by se_adjust = the grouping σ) + red MAP-N emitters
+    # Circles overlay: white localizations (σ inflated by the APPLIED se_adjust = the grouping σ) + red MAP-N emitters.
+    # Use diagnostics.se_adjust (the resolved (τx,τy) BaGoL actually applied), NOT cfg.se_adjust — under
+    # finder-by-default (SMLMBaGoL v0.3.5, se_adjust=:auto) cfg.se_adjust is the :auto Symbol, not a number.
     try
-        bg_smld = _se_inflated_smld(smld, hasproperty(cfg, :se_adjust) ? cfg.se_adjust : nothing)
+        bg_smld = _se_inflated_smld(smld, hasproperty(diagnostics, :se_adjust) ? diagnostics.se_adjust : nothing)
         (bg_img, _) = SMLMRender.render(bg_smld; strategy=EllipseRender(),
             color=:white, target=target, clip_percentile=nothing)
         (fg_img, _) = SMLMRender.render(bagol_smld; strategy=EllipseRender(),
