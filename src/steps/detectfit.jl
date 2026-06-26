@@ -62,6 +62,10 @@ localizations via GaussMLE in a single step, with per-dataset processing.
     # SCMOSCamera is built from H5 calibration at detectfit time
     pixel_size::Union{Float64, Nothing} = nothing
     qe::Float64 = 1.0
+
+    # DEBUG-verbosity detection frame movies: realtime playback fps (= 1/exposure_s) for the
+    # per-gallery-frame MP4s written under <step>/frame_movies/. nothing -> 20 fps fallback.
+    movie_fps::Union{Float64, Nothing} = nothing
 end
 
 """
@@ -116,6 +120,8 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
     sample_roi_frames = Int[]       # remapped to 1:n_total_samples for indexing sample_images
     sample_abs_frames = Int[]       # absolute frame labels for display
     samples_collected = 0
+    sample_movie_stacks = Vector{Any}()   # DEBUG: ~100-frame raw window per gallery frame
+    sample_movie_starts = Int[]           # absolute frame # of each window's first frame
     frame_offset = 0
 
     t = @elapsed begin
@@ -149,6 +155,13 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
                 for idx in idxs
                     push!(sample_image_slices, collect(images[:, :, idx]))
                     push!(sample_abs_frames, frame_offset + idx)
+                    if v >= Verbosity.DEBUG
+                        # 100-frame window kept in-block (shifted if idx near the block end);
+                        # the gallery frame idx is always within it. Order matches sample_abs_frames.
+                        i1 = clamp(idx, 1, max(1, n_frames_ds - 99))
+                        push!(sample_movie_stacks, collect(images[:, :, i1:min(i1 + 99, n_frames_ds)]))
+                        push!(sample_movie_starts, frame_offset + i1)
+                    end
                 end
 
                 frame_to_sample = Dict(f => samples_collected + i for (i, f) in enumerate(idxs))
@@ -199,6 +212,11 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
                                  n_datasets_val, n_frames_per_dataset,
                                  sample_images, sample_roi_batch, sample_original_frames,
                                  all_boxes_info, all_fit_info)
+
+        if v >= Verbosity.DEBUG && !isempty(sample_movie_stacks)
+            _write_detection_frame_movies(dir, sample_movie_stacks, sample_abs_frames, sample_movie_starts,
+                                          something(cfg.movie_fps, 20.0), v)
+        end
 
         if checkpoint >= Checkpoint.EXPENSIVE
             _save_step_smld(dir, smld; filename="smld_raw.jld2")
@@ -261,6 +279,8 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
     sample_roi_frames = Int[]
     sample_abs_frames = Int[]
     samples_collected = 0
+    sample_movie_stacks = Vector{Any}()   # DEBUG: ~100-frame raw window per gallery frame
+    sample_movie_starts = Int[]           # absolute frame # of each window's first frame
     frame_offset = 0
 
     t = @elapsed begin
@@ -293,6 +313,13 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
                 for idx in idxs
                     push!(sample_image_slices, collect(images[:, :, idx]))
                     push!(sample_abs_frames, frame_offset + idx)
+                    if v >= Verbosity.DEBUG
+                        # 100-frame window kept in-block (shifted if idx near the block end);
+                        # the gallery frame idx is always within it. Order matches sample_abs_frames.
+                        i1 = clamp(idx, 1, max(1, n_frames_ds - 99))
+                        push!(sample_movie_stacks, collect(images[:, :, i1:min(i1 + 99, n_frames_ds)]))
+                        push!(sample_movie_starts, frame_offset + i1)
+                    end
                 end
 
                 frame_to_sample = Dict(f => samples_collected + i for (i, f) in enumerate(idxs))
@@ -343,6 +370,11 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
                                  n_datasets_val, n_frames_per_dataset,
                                  sample_images, sample_roi_batch, sample_original_frames,
                                  all_boxes_info, all_fit_info)
+
+        if v >= Verbosity.DEBUG && !isempty(sample_movie_stacks)
+            _write_detection_frame_movies(dir, sample_movie_stacks, sample_abs_frames, sample_movie_starts,
+                                          something(cfg.movie_fps, 20.0), v)
+        end
 
         if checkpoint >= Checkpoint.EXPENSIVE
             _save_step_smld(dir, smld; filename="smld_raw.jld2")
@@ -534,6 +566,63 @@ end
 # ============================================================
 # Output functions
 # ============================================================
+
+"""
+    _write_detection_frame_movies(dir, stacks, abs_frames, fps, v)
+
+DEBUG-verbosity output. For each detection-overlay gallery frame, write a short realtime
+MP4 of the raw camera frames. `stacks[k]` is a (H, W, ~100)-frame window containing gallery
+frame `abs_frames[k]` (same order as the overlay panel). Contrast is ONE global linear
+stretch over the whole 100-frame window: black point = 0.1st percentile (0.001), white point =
+99.9th percentile (0.999) of all pixels in the window. Played at `fps` (realtime = 1/exposure).
+A label (frame / fps / stretch percentiles / black-white values) is burned into each frame.
+Files: `dir/frame_movies/detection_frame_<gallery_frame>.mp4`. Requires `ffmpeg` on PATH.
+"""
+function _write_detection_frame_movies(dir, stacks, abs_frames, start_frames, fps, v)
+    ffmpeg = Sys.which("ffmpeg")
+    if ffmpeg === nothing
+        v >= Verbosity.PROGRESS && @warn "ffmpeg not found on PATH; skipping detection frame movies"
+        return
+    end
+    mdir = joinpath(dir, "frame_movies"); mkpath(mdir)
+    lo_pct, hi_pct = 0.001, 0.999             # global black / white percentile points
+    font = ""                                  # monospace font for the burned-in label (optional)
+    for fc in ("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+               "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+        isfile(fc) && (font = fc; break)
+    end
+    for (k, stack) in enumerate(stacks)
+        absf = abs_frames[k]
+        h, w, nf = size(stack)
+        flat = vec(Float32.(stack))
+        vmin = Float32(quantile(flat, lo_pct))   # black point
+        vmax = Float32(quantile(flat, hi_pct))   # white point
+        vmax <= vmin && (vmax = vmin + 1f0)
+        fn = joinpath(mdir, "detection_frame_$(absf).mp4")
+        # burned-in label: per-frame ABSOLUTE frame # (eif: start + output-frame n) / realtime fps /
+        # stretch percentiles / black-white values
+        wstart = start_frames[k]
+        label = "frame %{eif\\:$(wstart)+n\\:d}  $(round(Int,fps))fps  stretch $(lo_pct)-$(hi_pct)  black $(round(Int,vmin)) white $(round(Int,vmax))"
+        vf = isempty(font) ? "format=yuv420p" :
+             "format=yuv420p,drawtext=fontfile=$font:text='$label':x=10:y=10:fontsize=14:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=5"
+        # raw gray frames piped to ffmpeg; -framerate sets realtime playback; even dims (500x500) ok for yuv420p
+        cmd = `$ffmpeg -y -loglevel error -f rawvideo -pixel_format gray -video_size $(w)x$(h) -framerate $(fps) -i pipe:0 -an -vf $vf -c:v libx264 -crf 18 -movflags +faststart $fn`
+        try
+            open(cmd, "w") do io
+                for fr in 1:nf
+                    sl = @view stack[:, :, fr]
+                    scaled = clamp.((Float32.(sl) .- vmin) ./ (vmax - vmin), 0f0, 1f0)
+                    bytes = round.(UInt8, scaled .* 255f0)        # H×W
+                    write(io, vec(permutedims(bytes)))            # row-major (W per row) for ffmpeg rawvideo
+                end
+            end
+            v >= Verbosity.DETAILED && @info "    movie: $(basename(fn)) ($nf frames @ $(round(fps, digits=1)) fps)"
+        catch err
+            v >= Verbosity.PROGRESS && @warn "    failed to write $(basename(fn))" exception=err
+        end
+    end
+    v >= Verbosity.PROGRESS && @info "  wrote $(length(stacks)) detection frame movie(s) -> $mdir"
+end
 
 function _save_detectfit_outputs!(dir, outdir, smld, camera, cfg, v, t, n_rois, n_fits,
                                   n_datasets, n_frames_per_dataset,
