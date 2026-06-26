@@ -29,7 +29,9 @@ function bagol_step(smld::BasicSMLD, cfg::BaGoLConfig;
     # Override verbose from pipeline verbosity level
     cfg_run = BaGoLConfig(; (f => getfield(cfg, f) for f in fieldnames(BaGoLConfig))...,
                             verbose = v >= Verbosity.PROGRESS)
-    bagol_smld, diagnostics = SMLMBaGoL.run_bagol(smld, cfg_run)
+    # keep_se_finder (runtime kwarg, SMLMBaGoL v0.3.7-DEV): stash the full estimate_se_adjust
+    # result on diagnostics.se_finder at render verbosity so the finder plot uses one finder run.
+    bagol_smld, diagnostics = SMLMBaGoL.run_bagol(smld, cfg_run; keep_se_finder = v >= Verbosity.STANDARD)
 
     n_emitters = diagnostics.n_emitters
     compression = n_locs_in > 0 ? round(n_locs_in / max(1, n_emitters), digits=1) : 0.0
@@ -56,8 +58,14 @@ function bagol_step(smld::BasicSMLD, cfg::BaGoLConfig;
         SMLMBaGoL.write_report(report; output_dir=dir)
         SMLMBaGoL.plot_report(report; output_dir=dir)
 
-        # BaGoL-specific renders: partition circles + overlay
-        _render_bagol_diagnostics(smld, bagol_smld, diagnostics, dir, cfg)
+        # BaGoL renders via upstream render_report (SMLMBaGoL v0.3.7-DEV): writes the render_<noun>
+        # set (render_mapn / render_sr / render_circles / render_partitions) on ONE shared target;
+        # se_adjust inflation handled inside render_report.
+        se = diagnostics.se_adjust === nothing ? 0.0 : diagnostics.se_adjust
+        SMLMBaGoL.render_report(smld, bagol_smld; output_dir=dir,
+            partition_ids=diagnostics.partition_ids, se_adjust=se, zoom=50, prefix="render")
+        # finder plot at the same (STANDARD) verbosity as the renders (one finder run via keep_se_finder)
+        diagnostics.se_finder !== nothing && SMLMBaGoL.plot_se_adjust(diagnostics.se_finder; output_dir=dir)
     end
 
     if dir !== nothing && checkpoint >= Checkpoint.EXPENSIVE
@@ -80,71 +88,8 @@ _step_summary(info::BaGoLInfo) = Dict{Symbol,Any}(
     :se_adjust => (hasproperty(info.diagnostics, :se_adjust) ? info.diagnostics.se_adjust : nothing),  # applied (τx,τy) provenance (SMLMBaGoL v0.3.1-DEV)
 )
 
-"""Copy of `smld` with per-loc σ inflated in quadrature by `se_adjust` (scalar τ or (τx,τy), µm)
-so rendered ellipses show the σ BaGoL used for grouping (matches render_report). `nothing`→unchanged."""
-function _se_inflated_smld(smld::BasicSMLD, se_adjust)
-    se_adjust === nothing && return smld
-    se_adjust isa Symbol && return smld   # :auto/unresolved sentinel (SMLMBaGoL v0.3.5) — nothing numeric to inflate
-    τx, τy = se_adjust isa Number ? (se_adjust, se_adjust) : (se_adjust[1], se_adjust[2])
-    (τx <= 0 && τy <= 0) && return smld
-    out = deepcopy(smld)
-    for e in out.emitters
-        hasproperty(e, :σ_x) && (e.σ_x = sqrt(e.σ_x^2 + τx^2))
-        hasproperty(e, :σ_y) && (e.σ_y = sqrt(e.σ_y^2 + τy^2))
-    end
-    out
-end
-
-"""
-Render BaGoL-specific diagnostic images: partition ellipses and loc/emitter overlay.
-
-Matches SMLMBaGoL.render_report naming: `circles.png` (locs + MAP-N overlay)
-and `partitions.png` (partition-colored localizations).
-
-These renders need the pre-BaGoL localizations, so they are produced inside the BaGoL
-step rather than as separate pipeline steps.
-"""
-function _render_bagol_diagnostics(smld::BasicSMLD, bagol_smld::BasicSMLD,
-                                   diagnostics::SMLMBaGoL.BaGoLDiagnostics,
-                                   dir::String, cfg::BaGoLConfig)
-    zoom = 50.0
-    partition_ids = diagnostics.partition_ids
-
-    # Shared target so both renders have identical bounds
-    target = SMLMRender.create_target_from_smld(smld; zoom=zoom)
-
-    # Circles overlay: white localizations (σ inflated by the APPLIED se_adjust = the grouping σ) + red MAP-N emitters.
-    # Use diagnostics.se_adjust (the resolved (τx,τy) BaGoL actually applied), NOT cfg.se_adjust — under
-    # finder-by-default (SMLMBaGoL v0.3.5, se_adjust=:auto) cfg.se_adjust is the :auto Symbol, not a number.
-    try
-        bg_smld = _se_inflated_smld(smld, hasproperty(diagnostics, :se_adjust) ? diagnostics.se_adjust : nothing)
-        (bg_img, _) = SMLMRender.render(bg_smld; strategy=EllipseRender(),
-            color=:white, target=target, clip_percentile=nothing)
-        (fg_img, _) = SMLMRender.render(bagol_smld; strategy=EllipseRender(),
-            color=:red, target=target, clip_percentile=nothing)
-        combined = SMLMRender.compose(bg_img, fg_img; blend=:replace)
-        SMLMRender.save_image(joinpath(dir, "circles.png"), combined)
-    catch e
-        @warn "BaGoL circles render failed" exception=e
-    end
-
-    # Partition-colored localizations (copy emitters so the shared input smld is never mutated;
-    # we repurpose the dataset field as a partition label only for this render).
-    if length(partition_ids) == length(smld.emitters)
-        try
-            part_emitters = deepcopy(smld.emitters)
-            for (i, e) in enumerate(part_emitters)
-                e.dataset = partition_ids[i]
-            end
-            part_smld = BasicSMLD(part_emitters, smld.camera, smld.n_frames, 1)
-            SMLMRender.render(part_smld; strategy=EllipseRender(),
-                color_by=:dataset, categorical=true, zoom=zoom,
-                filename=joinpath(dir, "partitions.png"))
-        catch e
-            @warn "BaGoL partitions render failed" exception=e
-        end
-    end
-end
+# (BaGoL diagnostic renders + se_adjust inflation are produced by SMLMBaGoL.render_report,
+#  called from bagol_step above — no local duplicate needed since SMLMBaGoL v0.3.7-DEV.)
 
 """
     analyze(smld, cfg::BaGoLConfig; kwargs...) -> (bagol_smld, StepInfo)
