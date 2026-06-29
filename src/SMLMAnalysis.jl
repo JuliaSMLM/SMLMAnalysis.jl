@@ -193,6 +193,10 @@ export CrossCorrConfig
 include("steps/bagol.jl")
 export BaGoLConfig
 
+include("steps/clustering.jl")
+# Clustering config types (DBSCANConfig/HopkinsConfig/…) are re-exported above
+# from SMLMClustering; this file only adds analyze() dispatch — no new exports.
+
 # ============================================================
 # I/O
 # ============================================================
