@@ -125,13 +125,14 @@ const AbstractStatisticsConfig = SMLMClustering.AbstractStatisticsConfig
 const ClusterInfo = SMLMClustering.ClusterInfo
 const ClusterStatisticsInfo = SMLMClustering.ClusterStatisticsInfo
 const DBSCANConfig = SMLMClustering.DBSCANConfig
+const HDBSCANConfig = SMLMClustering.HDBSCANConfig
 const HierarchicalConfig = SMLMClustering.HierarchicalConfig
 const VoronoiConfig = SMLMClustering.VoronoiConfig
 const HopkinsConfig = SMLMClustering.HopkinsConfig
 const VoronoiDensityConfig = SMLMClustering.VoronoiDensityConfig
 export AbstractClusterConfig, AbstractStatisticsConfig
 export ClusterInfo, ClusterStatisticsInfo
-export DBSCANConfig, HierarchicalConfig, VoronoiConfig
+export DBSCANConfig, HDBSCANConfig, HierarchicalConfig, VoronoiConfig
 export HopkinsConfig, VoronoiDensityConfig
 
 # ============================================================
