@@ -150,7 +150,7 @@ Shows the estimated X and Y drift over time and the XY path. For multi-dataset d
 
 ![Drift trajectory](assets/drift_trajectory.png)
 
-For details on continuous vs registered modes and chunking strategies, see the [Guide](@ref).
+For details on continuous vs registered modes and chunking strategies, see the [Guide](@ref "Guide").
 
 ## Step 5: Density Filter
 

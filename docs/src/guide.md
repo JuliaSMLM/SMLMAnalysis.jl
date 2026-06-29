@@ -102,7 +102,7 @@ The orchestrator maintains `smld` as the working state. Each step receives the c
 
 SMLMAnalysis defines some step configs locally (`DetectFitConfig`, `FilterConfig`, `IntensityFilterConfig`, `DensityFilterConfig`, `BaGoLConfig`) and re-exports others from upstream packages (`FrameConnectConfig`, `CalibrationConfig`, `DriftConfig`, `RenderConfig`). Extending the pipeline with a new upstream package follows the same re-export pattern.
 
-## Extending the Pipeline
+## Adding a Custom Step
 
 ### Overview
 
@@ -501,8 +501,9 @@ The HDF5 file stores emitter positions, uncertainties, camera calibration, drift
 Import data from SMART microscope acquisitions:
 
 ```julia
-images, info = load_smart_h5("acquisition.h5")
-info = load_smart_h5_info("acquisition.h5")  # Metadata only
+images = load_smart_h5("acquisition.h5")          # returns the image array
+info = load_smart_h5_info("acquisition.h5")        # metadata only
+images, info = smart_h5_to_array("acquisition.h5") # array (rows, cols, frames) + metadata
 ```
 
 ### MIC format
@@ -510,9 +511,9 @@ info = load_smart_h5_info("acquisition.h5")  # Metadata only
 Import data from MIC (MATLAB Instrument Control):
 
 ```julia
-images, metadata = load_mic_h5("experiment.h5")
-info = load_mic_h5_info("experiment.h5")  # Metadata only
-block = load_mic_h5_block("experiment.h5", 1)  # Single block (memory efficient)
+images, dataset_indices = load_mic_h5("experiment.h5")  # array + per-frame block index
+info = load_mic_h5_info("experiment.h5")                # metadata only
+block = load_mic_h5_block("experiment.h5", 1)           # single block (memory efficient)
 ```
 
 Block-based loading is automatic when using `DetectFitConfig(path=..., h5_format=:mic)`.
