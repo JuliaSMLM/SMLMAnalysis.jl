@@ -5,8 +5,15 @@ SMLMBaGoL = "70c4bcd9-ed9a-43d6-baf8-7d0db1eb70ee"
 SMLMClustering = "5e733723-370a-41a4-ac41-ff3a91b0b806"
 SMLMDriftCorrection = "34bda2d1-2fff-475a-a8c4-7f53d4251312"
 
+# Source overrides for the doc build (run from the MAIN checkout — the relative
+# paths below resolve from julia_shared_dev/SMLMAnalysis/docs, NOT from a worktree).
+# SMLMBaGoL/SMLMClustering are unregistered, so the docs env must source them
+# directly (a path-dev'd SMLMAnalysis does NOT propagate its own [sources]).
+# SMLMDriftCorrection IS registered — let it resolve from the General registry so
+# the docs env gets the same version the package pins ([compat] 0.2.8); the old
+# github-main override pulled a stale build that capped SMLMFrameConnection at
+# 0.3.0 and made the env unsatisfiable.
 [sources]
 SMLMAnalysis = {path = ".."}
 SMLMBaGoL = {path = "../../SMLMBaGoL"}
 SMLMClustering = {path = "../../SMLMClustering"}
-SMLMDriftCorrection = {url = "https://github.com/JuliaSMLM/SMLMDriftCorrection.jl"}
