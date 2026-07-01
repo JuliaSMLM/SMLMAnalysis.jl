@@ -142,7 +142,7 @@ const KdeValleyConfig = SMLMClustering.KdeValleyConfig
 const EdgeClassifyInfo = SMLMClustering.EdgeClassifyInfo
 const CellPolygon = SMLMClustering.CellPolygon
 const MultiCellMask = SMLMClustering.MultiCellMask
-export classify_emitters, in_cell, interior_fraction
+export classify_emitters, in_cell, interior_mask, interior_fraction
 export AbstractEdgeClassifyConfig, OuterPolygonConfig, KdeValleyConfig
 export EdgeClassifyInfo, CellPolygon, MultiCellMask
 

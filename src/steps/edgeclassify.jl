@@ -25,9 +25,12 @@ selected entirely by the concrete config type. See the SMLMClustering
 documentation for the algorithm details and per-config parameters.
 """
 
-# Folder/log name from the method trait (`kde_valley` / `outer_polygon`) rather
-# than the generic type-name fallback (`kdevalley` / `outerpolygon`).
-step_name(cfg::SMLMClustering.AbstractEdgeClassifyConfig) = SMLMClustering.method_name(cfg)
+# Output folder/log label = the STEP's role (`edge_classify`), NOT the upstream
+# gate-method name (`kde_valley` / `outer_polygon`), which is internal-mechanism
+# jargon at the pipeline level — it doesn't read as "edge classification" at a
+# glance. The gate method still rides in `config.toml` + the StepInfo summary
+# (`:method`) for provenance, so nothing is lost.
+step_name(cfg::SMLMClustering.AbstractEdgeClassifyConfig) = "edge_classify"
 
 _step_summary(info::SMLMClustering.EdgeClassifyInfo) = Dict{Symbol,Any}(
     :method     => SMLMClustering.method_name(info.config),
