@@ -135,6 +135,17 @@ export ClusterInfo, ClusterStatisticsInfo
 export DBSCANConfig, HDBSCANConfig, HierarchicalConfig, VoronoiConfig
 export HopkinsConfig, VoronoiDensityConfig
 
+# Re-export from SMLMClustering — edge classification
+const AbstractEdgeClassifyConfig = SMLMClustering.AbstractEdgeClassifyConfig
+const OuterPolygonConfig = SMLMClustering.OuterPolygonConfig
+const KdeValleyConfig = SMLMClustering.KdeValleyConfig
+const EdgeClassifyInfo = SMLMClustering.EdgeClassifyInfo
+const CellPolygon = SMLMClustering.CellPolygon
+const MultiCellMask = SMLMClustering.MultiCellMask
+export classify_emitters, in_cell, interior_fraction
+export AbstractEdgeClassifyConfig, OuterPolygonConfig, KdeValleyConfig
+export EdgeClassifyInfo, CellPolygon, MultiCellMask
+
 # ============================================================
 # Core types
 # ============================================================
@@ -197,6 +208,11 @@ export BaGoLConfig
 include("steps/clustering.jl")
 # Clustering config types (DBSCANConfig/HopkinsConfig/…) are re-exported above
 # from SMLMClustering; this file only adds analyze() dispatch — no new exports.
+
+include("steps/edgeclassify.jl")
+# Edge-classify config types (OuterPolygonConfig/KdeValleyConfig) are re-exported
+# above from SMLMClustering; this file only adds analyze() dispatch + a step_name
+# override — no new exports here.
 
 # ============================================================
 # I/O
