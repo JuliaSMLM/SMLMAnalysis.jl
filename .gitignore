@@ -1,0 +1,26 @@
+*.jl.*.cov
+*.jl.cov
+*.jl.mem
+/Manifest.toml
+/docs/Manifest.toml
+/examples/Manifest.toml
+/docs/build/
+.vscode/
+examples/output/
+output/
+gatta_ruler/
+data/
+/dev/
+*.log
+.claude/
+.slackclaw_state.json
+
+# OS / editor temp files
+.DS_Store
+*.swp
+*.swo
+*~
+*.tmp
+*.bak
+.nfs*
+*.orig
