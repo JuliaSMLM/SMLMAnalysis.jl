@@ -40,15 +40,23 @@ TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 PSFLearning = "d2b3f1d3-fa58-4719-8204-38bc00c1528e"
 SMLMDeepFit = "cd1e22bb-7bb2-459d-a82d-93d34b459d6b"
 
+[sources.PSFLearning]
+path = "../PSFLearning"
+
+[sources.SMLMBaGoL]
+rev = "v0.3.8-DEV"
+url = "https://github.com/JuliaSMLM/SMLMBaGoL.jl"
+
+[sources.SMLMClustering]
+rev = "main"
+url = "https://github.com/JuliaSMLM/SMLMClustering.jl"
+
+[sources.SMLMDeepFit]
+path = "../SMLMDeepFit"
+
 [extensions]
 SMLMAnalysisDeepFitExt = "SMLMDeepFit"
 SMLMAnalysisPSFLearningExt = "PSFLearning"
-
-[sources]
-PSFLearning = {path = "../PSFLearning"}
-SMLMBaGoL = {rev = "v0.3.8-DEV", url = "https://github.com/JuliaSMLM/SMLMBaGoL.jl"}
-SMLMClustering = {url = "https://github.com/JuliaSMLM/SMLMClustering.jl", rev = "main"}  # public v0.4.2 @187ee17; drop this [sources] line once SMLMClustering registers in General (~3d)
-SMLMDeepFit = {path = "../SMLMDeepFit"}
 
 [compat]
 CUDA = "5.9"
@@ -63,14 +71,13 @@ HDF5 = "0.17.2"
 Images = "0.26.2"
 JLD2 = "0.5, 0.6"
 LinearAlgebra = "1"
-MAT = "0.10.7, 0.11"
+MAT = "0.10.7, 0.11, 0.12"
 MicroscopePSFs = "0.5"
 NearestNeighbors = "0.4.26"
 Optim = "1.13.3"
 PSFLearning = "0.1"
 PrecompileTools = "1"
 Random = "1"
-# SMLMBaGoL: no [compat] entry — pinned to the v0.3.7-DEV tag via [sources]; Julia [compat] cannot express -DEV prereleases (all forms fail to parse), and the tag already fixes the version.
 SMLMBoxer = "0.3"
 SMLMClustering = "0.4"
 SMLMData = "0.7"
