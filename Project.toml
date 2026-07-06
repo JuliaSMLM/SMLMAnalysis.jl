@@ -38,7 +38,6 @@ TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
 [sources]
 SMLMBaGoL = {rev = "v0.3.8-DEV", url = "https://github.com/JuliaSMLM/SMLMBaGoL.jl"}
-SMLMClustering = {url = "https://github.com/JuliaSMLM/SMLMClustering.jl", rev = "main"}  # public v0.4.2 @187ee17; drop this [sources] line once SMLMClustering registers in General (~3d)
 
 [compat]
 CUDA = "5.9, 6"
@@ -61,7 +60,7 @@ PrecompileTools = "1"
 Random = "1"
 # SMLMBaGoL: no [compat] entry — pinned to the v0.3.8-DEV tag via [sources]; Julia [compat] cannot express -DEV prereleases (all forms fail to parse), and the tag already fixes the version.
 SMLMBoxer = "0.3"
-SMLMClustering = "0.4"
+SMLMClustering = "0.4.3"
 SMLMData = "0.7"
 SMLMDriftCorrection = "0.2.8"
 SMLMFrameConnection = "0.3.2"
