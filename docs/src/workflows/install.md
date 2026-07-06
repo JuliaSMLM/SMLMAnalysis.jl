@@ -52,19 +52,6 @@ using SMLMAnalysis
 emitter types, the step configs, `cluster`, `render`, `run_bagol`,
 `frameconnect`, …), so for most work no further imports are needed.
 
-## Optional extensions
-
-Two capabilities load only when their packages are present, as Julia package
-**extensions** (weak dependencies) — you do not pay their load cost otherwise:
-
-| Extension | Activated by | Adds |
-|-----------|--------------|------|
-| `SMLMAnalysisPSFLearningExt` | `PSFLearning` | PSF-learning step |
-| `SMLMAnalysisDeepFitExt` | `SMLMDeepFit` | deep-learning detection/fitting steps |
-
-Install the corresponding package alongside SMLMAnalysis to enable the extension;
-the relevant step configs become available automatically.
-
 ## Verifying the install
 
 A quick end-to-end check on simulated data:

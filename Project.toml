@@ -36,19 +36,9 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
-[weakdeps]
-PSFLearning = "d2b3f1d3-fa58-4719-8204-38bc00c1528e"
-SMLMDeepFit = "cd1e22bb-7bb2-459d-a82d-93d34b459d6b"
-
-[extensions]
-SMLMAnalysisDeepFitExt = "SMLMDeepFit"
-SMLMAnalysisPSFLearningExt = "PSFLearning"
-
 [sources]
-PSFLearning = {path = "../PSFLearning"}
 SMLMBaGoL = {rev = "v0.3.8-DEV", url = "https://github.com/JuliaSMLM/SMLMBaGoL.jl"}
 SMLMClustering = {url = "https://github.com/JuliaSMLM/SMLMClustering.jl", rev = "main"}  # public v0.4.2 @187ee17; drop this [sources] line once SMLMClustering registers in General (~3d)
-SMLMDeepFit = {path = "../SMLMDeepFit"}
 
 [compat]
 CUDA = "5.9, 6"
@@ -67,14 +57,12 @@ MAT = "0.10.7, 0.11, 0.12"
 MicroscopePSFs = "0.5"
 NearestNeighbors = "0.4.26"
 Optim = "1.13.3, 2"
-PSFLearning = "0.1"
 PrecompileTools = "1"
 Random = "1"
-# SMLMBaGoL: no [compat] entry — pinned to the v0.3.7-DEV tag via [sources]; Julia [compat] cannot express -DEV prereleases (all forms fail to parse), and the tag already fixes the version.
+# SMLMBaGoL: no [compat] entry — pinned to the v0.3.8-DEV tag via [sources]; Julia [compat] cannot express -DEV prereleases (all forms fail to parse), and the tag already fixes the version.
 SMLMBoxer = "0.3"
 SMLMClustering = "0.4"
 SMLMData = "0.7"
-SMLMDeepFit = "0.1"
 SMLMDriftCorrection = "0.2.8"
 SMLMFrameConnection = "0.3.2"
 SMLMRender = "0.3, 0.4"
@@ -85,8 +73,6 @@ TOML = "1"
 julia = "1.12"
 
 [extras]
-PSFLearning = "d2b3f1d3-fa58-4719-8204-38bc00c1528e"
-SMLMDeepFit = "cd1e22bb-7bb2-459d-a82d-93d34b459d6b"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]

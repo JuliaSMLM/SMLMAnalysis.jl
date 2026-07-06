@@ -62,12 +62,11 @@ end
 
 Core box-overlay renderer: a grid of sample frames (contrast-stretched grayscale) with a
 colored `box_size` rectangle drawn at each `(x_corner, y_corner)` on its frame. This is the
-shared "boxes on the raw data" diagnostic style — detectfit (`detection_overlay.png`), filter
-(`fit_overlay.png`), psflearning ("ROIs used"), and deepfit_inference all render through it so
-the whole pipeline's overlays are one visual family.
+shared "boxes on the raw data" diagnostic style — detectfit (`detection_overlay.png`) and filter
+(`fit_overlay.png`) render through it so the whole pipeline's overlays are one visual family.
 
-The box-geometry is passed as plain arrays so non-ROIBatch callers (inference emitters,
-psflearning beads) use the identical renderer; see the `roi_batch` convenience method below.
+The box-geometry is passed as plain arrays so non-ROIBatch callers use the identical
+renderer; see the `roi_batch` convenience method below.
 """
 function _save_box_overlay(dir, filename, images, x_corners, y_corners, frame_indices, box_size,
                            box_colors; title_prefix="Frame", frame_labels=nothing, suptitle=nothing)
