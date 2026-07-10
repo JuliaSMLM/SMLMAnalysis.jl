@@ -342,6 +342,20 @@ if SMLM_TEST_FULL
                 @test length(reloaded.emitters) == length(result.smld.emitters)
                 @test reloaded.emitters[1].σ_xy ≈ result.smld.emitters[1].σ_xy
             end
+
+            # Multi-dataset detectfit: exercises the per-dataset loop (dataset field,
+            # per-dataset frame numbering, n_datasets tracking) that the in-memory and
+            # file-based paths share. Reuse the same stack as two datasets.
+            (smld2, si2) = analyze([imgs, imgs],
+                DetectFitConfig(camera = cam,
+                                boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13),
+                                fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu));
+                verbose = Verbosity.SILENT)
+            @test si2.info.n_datasets == 2
+            @test smld2.n_datasets == 2
+            @test smld2.n_frames == size(imgs, 3)          # equal-length → per-dataset count
+            @test Set(e.dataset for e in smld2.emitters) == Set([1, 2])
+            @test all(1 <= e.frame <= size(imgs, 3) for e in smld2.emitters)  # frames are per-dataset
         end
     end
 else
