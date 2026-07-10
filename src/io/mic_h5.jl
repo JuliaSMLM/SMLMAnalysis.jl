@@ -73,9 +73,14 @@ function load_mic_h5_info(filepath::String)
             height = h,
             width = w,
             n_frames = n_frames,
-            # Count valid (readable) blocks, not raw keys: skipped blocks above are
-            # excluded from frames_per_block, so n_blocks must match.
-            n_blocks = length(frames_per_block),
+            # n_blocks must be the RAW key count, not the readable count: downstream
+            # (_resolve_file_sources → load_mic_h5_block) addresses blocks by their
+            # ordinal in this same sorted `data_keys` list, so `1:n_blocks` has to line
+            # up with it. `frames_per_block` (readable only) may therefore be shorter;
+            # an unreadable block is surfaced by the @warn above rather than by shrinking
+            # the count (which would misalign block ordinals and silently load the wrong
+            # dataset).
+            n_blocks = length(data_keys),
             frames_per_block = frames_per_block,
             has_calibration = _h5_exists(f, "Calibration"),
             file_size_gb = filesize(filepath) / 1e9

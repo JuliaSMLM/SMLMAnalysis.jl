@@ -38,6 +38,62 @@ config = AnalysisConfig(
 
 ![Super-resolution render](docs/src/assets/render_gaussian.png)
 
+## Loading Data
+
+`image_stacks` above is your **raw camera data** — pixel intensities (ADU), not
+localizations. It is one or more 3D arrays of shape `(height, width, frames)`, each
+array being one *dataset* (a continuous acquisition). Pass a `Vector` of them for a
+multi-dataset experiment, or a single 3D array for one:
+
+```julia
+image_stacks = [stack1, stack2]   # 2 datasets, each an (height, width, frames) array
+image_stacks = stack              # 1 dataset — a single 3D array is also accepted
+```
+
+There are three ways to get it.
+
+**1. Load an H5 file into memory.** The package ships loaders for two microscope
+formats (both return `(height, width, frames)`):
+
+```julia
+# SMART — one continuous acquisition → one array, wrapped as a 1-element Vector:
+stack, _ = smart_h5_to_array("data/experiment.h5")
+(result, info) = analyze([stack], config)
+
+# MIC (LidkeLab) — the file holds multiple blocks, each a separate dataset. Load them
+# as separate stacks so the block boundaries are preserved (analyzing [stack] from
+# load_mic_h5 would merge every block into one dataset):
+n = load_mic_h5_info("data/experiment.h5").n_blocks
+image_stacks = [load_mic_h5_block("data/experiment.h5", i) for i in 1:n]
+(result, info) = analyze(image_stacks, config)
+```
+
+**2. Stream from files — no in-memory array.** Point `DetectFitConfig` at the
+file(s) and call `analyze(config)` with no data argument. MIC blocks are
+auto-detected as separate datasets. This is the memory-efficient path for large
+acquisitions:
+
+```julia
+# For MIC files you can build the camera from the file's own calibration:
+cam = build_camera_from_mic_h5("data/experiment.h5"; pixel_size=0.1)
+
+config = AnalysisConfig(camera = cam, steps = [
+    DetectFitConfig(path="data/experiment.h5", h5_format=:mic,
+                    boxer=BoxerConfig(boxsize=9, psf_sigma=0.130)),
+    FilterConfig(photons=(500.0, Inf)),
+    RenderConfig(zoom=20),
+])
+(result, info) = analyze(config)      # each dataset is loaded from disk in turn
+```
+
+Multiple files, one dataset each: `DetectFitConfig(paths=["d1.h5", "d2.h5"], ...)`.
+
+**3. Any other source.** Any `Array{<:Real,3}` of `(height, width, frames)` works —
+a TIFF stack read with [TiffImages.jl](https://github.com/tlnagy/TiffImages.jl), or
+simulated data from `SMLMSim` (`gen_images`). See
+[`examples/loading_data.jl`](examples/loading_data.jl) for a runnable walkthrough of
+all three, and the other [examples](examples/) for full simulated pipelines.
+
 ## Pipeline Architecture
 
 The pipeline folds `analyze()` over a steps vector, with Julia's method dispatch routing each call by `(state_type, config_type)`:
@@ -64,7 +120,7 @@ cam = IdealCamera(512, 512, 0.1)
 (smld, _) = analyze(smld, FilterConfig(photons=(500.0, Inf)))
 (smld, _) = analyze(smld, FrameConnectConfig(max_frame_gap=5))
 (smld, _) = analyze(smld, DriftConfig(degree=2))
-(img, _)  = analyze(smld, RenderConfig(zoom=20, colormap=:inferno))
+(smld, _) = analyze(smld, RenderConfig(zoom=20, colormap=:inferno))  # writes an image when an outdir is set; use SMLMRender.render(smld, cfg) for the image in memory
 
 # Save/load intermediate results
 save_smld("checkpoint.h5", smld)
