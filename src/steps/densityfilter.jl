@@ -156,21 +156,10 @@ function _valley_threshold(counts::Vector{Int})
         smoothed[i] = (hist[i-1] + hist[i] + hist[i+1]) / 3
     end
 
-    # Find the rightmost significant peak (clustered population)
-    # "Significant" = at least 5% of max histogram value
+    # Find the rightmost significant peak (clustered population):
+    # a local maximum whose value is >= 5% of the max histogram value.
     peak_threshold = 0.05 * maximum(smoothed)
-
-    # Search from right to find rightmost significant peak
-    rightmost_peak_idx = 1
-    for i in length(smoothed):-1:3
-        # Check if this is a local maximum
-        if smoothed[i] >= smoothed[i-1] && smoothed[i] >= min(get(smoothed, i+1, 0), smoothed[i])
-            if smoothed[i] >= peak_threshold
-                rightmost_peak_idx = i
-                break
-            end
-        end
-    end
+    rightmost_peak_idx = _rightmost_significant_peak(smoothed, peak_threshold)
 
     # If peak is at very low neighbor counts (< 5), distribution is mostly isolated
     # Use conservative threshold or warn
@@ -213,6 +202,23 @@ function _valley_threshold(counts::Vector{Int})
             return 1  # Keep almost everything
         end
     end
+end
+
+"""
+    _rightmost_significant_peak(smoothed, peak_threshold) -> Int
+
+Index of the rightmost local maximum of `smoothed` (a value ≥ both neighbours,
+with a missing right edge treated as 0) whose height is at least `peak_threshold`.
+Returns 1 if none qualifies. Shared by the valley-threshold search and the
+diagnostic figure so both mark the same peak.
+"""
+function _rightmost_significant_peak(smoothed::AbstractVector{<:Real}, peak_threshold::Real)
+    for i in length(smoothed):-1:3
+        smoothed[i] >= smoothed[i-1] || continue
+        smoothed[i] >= get(smoothed, i+1, 0.0) || continue
+        smoothed[i] >= peak_threshold && return i
+    end
+    return 1
 end
 
 function _save_densityfilter_outputs!(dir::String, cfg::DensityFilterConfig, v::Int, t::Float64,
@@ -262,15 +268,10 @@ function _save_densityfilter_figures(dir, neighbor_counts, threshold, cfg)
         smoothed[i] = (hist_bins[max(1,i-1)] + hist_bins[i] + hist_bins[min(end,i+1)]) / 3
     end
 
-    # Find rightmost significant peak
+    # Find rightmost significant peak (same routine the threshold uses, so the
+    # marked peak matches the threshold decision).
     peak_threshold = 0.05 * maximum(smoothed)
-    peak_idx = 1
-    for i in length(smoothed):-1:3
-        if smoothed[i] >= peak_threshold && smoothed[i] >= smoothed[max(1,i-1)]
-            peak_idx = i
-            break
-        end
-    end
+    peak_idx = _rightmost_significant_peak(smoothed, peak_threshold)
     peak_val = hist_bins[peak_idx]
 
     method_str = cfg.min_neighbors == :auto ? "auto: valley method" : "manual"
