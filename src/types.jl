@@ -7,6 +7,18 @@ using Dates
 # ============================================================
 # Verbosity Levels
 # ============================================================
+"""
+    Verbosity
+
+Output-detail levels for `analyze()` steps, used as integer constants (higher =
+more output/artifacts). Compare with `verbose >= Verbosity.STANDARD`.
+
+- `SILENT` (0): errors only
+- `PROGRESS` (1): step names + counts
+- `STANDARD` (2): + `stats.md` and basic figures
+- `DETAILED` (3): + diagnostic plots
+- `DEBUG` (4): + MP4s, frame-by-frame, heavy visualizations
+"""
 module Verbosity
     const SILENT = 0    # Errors only
     const PROGRESS = 1  # Step names + counts
@@ -79,6 +91,13 @@ DataSource(path::String; frame_range=nothing) = DataSource(nothing, nothing, pat
 # Empty data source (for file-based DetectFitConfig workflows)
 DataSource() = DataSource(nothing, nothing, nothing, nothing)
 
+"""
+    get_images(ds::DataSource) -> AbstractArray{<:Real,3}
+
+Return the single image stack held by `ds`, loading it from `ds.path` if the source
+is file-backed. Errors if the source holds multiple datasets (use `ds.images_vec`)
+or specifies no data.
+"""
 function get_images(ds::DataSource)
     ds.images !== nothing && return ds.images
     ds.images_vec !== nothing && error("DataSource holds multiple datasets. Access via ds.images_vec.")

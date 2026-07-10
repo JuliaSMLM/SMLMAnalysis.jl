@@ -104,8 +104,9 @@ function _filter_by_density(smld::BasicSMLD, cfg::DensityFilterConfig)
 
     neighbor_counts = zeros(Int, n)
     for i in 1:n
-        point = [emitters[i].x, emitters[i].y]
-        candidates = inrange(tree, point, max_radius)
+        # Query with a column view of the coords the tree was built from — avoids
+        # allocating a fresh [x, y] vector for every emitter in the hot loop.
+        candidates = inrange(tree, view(coords, :, i), max_radius)
 
         for j in candidates
             j == i && continue

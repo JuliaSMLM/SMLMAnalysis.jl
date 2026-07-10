@@ -417,9 +417,7 @@ end
 
 """Write a single field to info.toml, skipping complex types."""
 function _write_info_field!(io::IO, name::Symbol, v::Number)
-    println(io, "$name = $v")
-end
-function _write_info_field!(io::IO, name::Symbol, v::Bool)
+    # Bool <: Number, so this method also handles true/false (TOML-valid as-is).
     println(io, "$name = $v")
 end
 function _write_info_field!(io::IO, name::Symbol, v::String)

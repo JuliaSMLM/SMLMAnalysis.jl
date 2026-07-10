@@ -52,7 +52,7 @@ function driftcorrect_step(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig
     max_intershift = n_datasets_val > 1 ? maximum(inter_shifts[2:end]) : 0.0
 
     # Calculate max intra-dataset drift
-    max_drift = _calc_max_drift(drift_model, n_frames; n_chunks=cfg.n_chunks)
+    max_drift = _calc_max_drift(drift_model, n_frames)
 
     # Diagnostic warnings (always check, warn at PROGRESS level)
     intershift_threshold_nm = 500.0
@@ -98,7 +98,7 @@ function analyze(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig;
     n_datasets_val = drift_model.ndatasets
     inter_shifts = _calc_inter_shifts(drift_model)
     max_intershift = n_datasets_val > 1 ? maximum(inter_shifts[2:end]) : 0.0
-    max_drift = _calc_max_drift(drift_model, n_frames; n_chunks=cfg.n_chunks)
+    max_drift = _calc_max_drift(drift_model, n_frames)
     converged = hasproperty(drift_info, :converged) ? drift_info.converged : nothing
     iterations = hasproperty(drift_info, :iterations) ? drift_info.iterations : nothing
 
@@ -134,7 +134,7 @@ function _calc_inter_shifts(drift_model)
 end
 
 """Calculate max intra-dataset drift using drift_trajectory"""
-function _calc_max_drift(drift_model, n_frames; n_chunks::Int=0)
+function _calc_max_drift(drift_model, n_frames)
     DC = SMLMDriftCorrection
     n_datasets = drift_model.ndatasets
 

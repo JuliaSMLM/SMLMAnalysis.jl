@@ -154,9 +154,10 @@ function _compute_crosscorr(smld_a::SMLMData.BasicSMLD, smld_b::SMLMData.BasicSM
     counts = zeros(Float64, n_bins)
     density_b = n_b / area
 
+    point = zeros(2)   # reused query buffer — avoids a per-emitter [xa, ya] allocation
     for i in 1:n_a
         xa, ya = em_a[i].x, em_a[i].y
-        point = [xa, ya]
+        point[1] = xa; point[2] = ya
         idxs = inrange(tree_b, point, cfg.r_max)
 
         for j in idxs
