@@ -235,6 +235,7 @@ end
 
 function _write_densityfilter_stats(dir, cfg, n_before, n_after, threshold, t)
     n_rejected = n_before - n_after
+    pct_rejected = n_before == 0 ? 0.0 : round(100 * n_rejected / n_before, digits=1)
 
     filepath = joinpath(dir, "stats.md")
     open(filepath, "w") do io
@@ -242,7 +243,7 @@ function _write_densityfilter_stats(dir, cfg, n_before, n_after, threshold, t)
         println(io, "## Summary")
         println(io, "- **Input**: $n_before")
         println(io, "- **Output**: $n_after")
-        println(io, "- **Rejected**: $n_rejected ($(round(100*n_rejected/n_before, digits=1))%)")
+        println(io, "- **Rejected**: $n_rejected ($pct_rejected%)")
         println(io, "- **Threshold**: $threshold neighbors")
         println(io, "- **Time**: $(round(t, digits=2))s")
         println(io, "")

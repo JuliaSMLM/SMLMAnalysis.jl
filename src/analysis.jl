@@ -183,6 +183,16 @@ config = AnalysisConfig(
 ```
 """
 function analyze(config::AnalysisConfig)
+    # The data path (analyze(data, config)) crops both images and camera to the ROI
+    # before fitting. The file path loads images inside detectfit and never sees the
+    # ROI, so silently returning full-frame coordinates would contradict the config.
+    # Reject the combination rather than mislead. (To crop file-based data, load it
+    # and call analyze(images, config), or restrict via DetectFitConfig.)
+    config.roi === nothing || error(
+        "AnalysisConfig.roi is not supported for file-based analyze(config): the ROI " *
+        "crop is not applied when images are loaded from disk, so coordinates would be " *
+        "full-frame despite the ROI. Load the images and use analyze(images, config) to " *
+        "apply the crop, or remove the roi.")
     _run_pipeline(nothing, config.steps, config.camera, config.outdir, config.verbose, config.checkpoint; roi=config.roi)
 end
 

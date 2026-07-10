@@ -68,6 +68,23 @@ localizations via GaussMLE in a single step, with per-dataset processing.
     movie_fps::Union{Float64, Nothing} = nothing
 end
 
+# BasicSMLD stores a single scalar `n_frames` (= max over datasets), but downstream
+# absolute-frame indexing `(dataset-1)*n_frames + frame` and LegendrePoly drift
+# normalization to [-1, 1] both assume every dataset has that same length. Unequal
+# per-dataset frame counts (reachable with MIC multi-block acquisitions) therefore
+# silently misplace frames. We can't fix the scalar without an upstream type change,
+# so warn loudly when the assumption is violated.
+function _warn_unequal_frame_counts(frames_per_dataset::Vector{Int}, verbose::Int)
+    length(frames_per_dataset) > 1 || return
+    all(==(frames_per_dataset[1]), frames_per_dataset) && return
+    verbose >= Verbosity.PROGRESS && @warn string(
+        "detectfit: datasets have unequal frame counts $(frames_per_dataset); ",
+        "BasicSMLD stores a single n_frames=$(maximum(frames_per_dataset)). Downstream ",
+        "per-dataset frame math (drift normalization, localizations-per-frame plot) ",
+        "assumes equal-length datasets and may misplace frames.")
+    return
+end
+
 """
     detectfit(data, camera, cfg; kwargs...) -> (smld, DetectFitInfo)
 
@@ -104,6 +121,7 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
     # Process each dataset
     all_emitters = AbstractEmitter[]
     n_frames_per_dataset = 0
+    frames_per_dataset = Int[]   # actual per-dataset frame counts (equal-length check)
     total_rois = 0
     total_fits = 0
 
@@ -128,6 +146,7 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
         for (ds, images) in enumerate(data)
             n_frames_ds = size(images, 3)
             n_frames_per_dataset = max(n_frames_per_dataset, n_frames_ds)
+            push!(frames_per_dataset, n_frames_ds)
 
             v >= Verbosity.PROGRESS && @info "  Dataset $ds: $(size(images)) images"
 
@@ -197,10 +216,17 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
         end
     end
 
-    # Create combined SMLD
+    # Create combined SMLD. Zero fits across every dataset is treated as a hard
+    # error (rather than an empty SMLD) because it almost always signals a
+    # misconfiguration that would silently poison every downstream step.
     if isempty(all_emitters)
-        error("No localizations found across all datasets")
+        error("detectfit: no localizations found across all $n_datasets_val dataset(s) " *
+              "($total_rois ROIs detected, 0 fits). Common causes: detection threshold too " *
+              "high, boxsize too small, or a camera gain/offset mismatch. Check " *
+              "BoxerConfig (psf_sigma, minval) and the camera calibration.")
     end
+
+    _warn_unequal_frame_counts(frames_per_dataset, v)
 
     smld = BasicSMLD(all_emitters, camera, n_frames_per_dataset, n_datasets_val, Dict{String,Any}())
 
@@ -264,6 +290,7 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
     # Process each dataset
     all_emitters = AbstractEmitter[]
     n_frames_per_dataset = 0
+    frames_per_dataset = Int[]   # actual per-dataset frame counts (equal-length check)
     total_rois = 0
     total_fits = 0
 
@@ -288,6 +315,7 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
             images = _load_source(source, v)
             n_frames_ds = size(images, 3)
             n_frames_per_dataset = max(n_frames_per_dataset, n_frames_ds)
+            push!(frames_per_dataset, n_frames_ds)
 
             v >= Verbosity.PROGRESS && @info "  Dataset $ds: $(size(images)) images"
 
@@ -357,8 +385,13 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
     end
 
     if isempty(all_emitters)
-        error("No localizations found across all datasets")
+        error("detectfit: no localizations found across all $n_datasets_val dataset(s) " *
+              "($total_rois ROIs detected, 0 fits). Common causes: detection threshold too " *
+              "high, boxsize too small, or a camera gain/offset mismatch. Check " *
+              "BoxerConfig (psf_sigma, minval) and the camera calibration.")
     end
+
+    _warn_unequal_frame_counts(frames_per_dataset, v)
 
     smld = BasicSMLD(all_emitters, camera, n_frames_per_dataset, n_datasets_val, Dict{String,Any}())
 

@@ -80,7 +80,7 @@ function crosscorr_step(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossCorrConfi
         end
     end
 
-    v >= Verbosity.PROGRESS && @info "  -> g(r) computed: $(length(r)) bins, peak=$(round(maximum(g), digits=2)) ($(round(t, digits=2))s)"
+    v >= Verbosity.PROGRESS && @info "  -> g(r) computed: $(length(r)) bins, peak=$(round(maximum(g; init=0.0), digits=2)) ($(round(t, digits=2))s)"
 
     info = CrossCorrInfo(r, g, n_a, n_b, area, cfg.r_max, cfg.dr, label_a, label_b, t)
     (smlds, info)
