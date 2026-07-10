@@ -129,7 +129,7 @@ output/
 ├── log.txt              # teed @info output
 ├── 01_detectfit/        # config.toml, info.toml, stats.md, figures
 ├── 02_filter/
-├── 04_drift/
+├── 04_driftcorrect/
 └── 08_render/
 ```
 

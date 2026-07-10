@@ -23,6 +23,7 @@ order, and where each method comes from in the literature.
 | [Rendering](@ref "Rendering") | `RenderConfig` | SMLMRender | Render localizations to a super-resolution image |
 | [Bayesian Grouping](@ref "Bayesian Grouping (BaGoL)") | `BaGoLConfig` | SMLMBaGoL | Group localizations into true emitters (RJMCMC) |
 | [Clustering](@ref clustering-step) | `DBSCANConfig`, `VoronoiConfig`, `HopkinsConfig`, … | SMLMClustering | Label clusters / compute spatial statistics |
+| [Edge Classification](@ref edgeclassify-step) | `KdeValleyConfig`, `OuterPolygonConfig` | SMLMClustering | Label localizations interior / membrane / outside a cell mask |
 | [Composite Render](@ref) | `CompositeRenderConfig` | SMLMAnalysis + SMLMRender | Multi-channel RGB overlay |
 | [Cross-Alignment](@ref) | `CrossAlignConfig` | SMLMAnalysis + SMLMDriftCorrection | Register channels to a common frame |
 | [Cross-Correlation](@ref) | `CrossCorrConfig` | SMLMAnalysis + NearestNeighbors | Pair cross-correlation g(r) between channels |

@@ -37,15 +37,21 @@ For file-based workflows (MIC/SMART H5), use `analyze(config)` with `DetectFitCo
 Individual steps use `analyze()` with typed configs:
 
 ```julia
-(smld, info) = analyze(data, cfg::DetectFitConfig; outdir, step_number, verbose)
-(smld, info) = analyze(cfg::DetectFitConfig; ...)  # file-based (requires camera in config)
-(smld, info) = analyze(smld, cfg::FilterConfig; smld_raw, outdir, step_number, verbose)
-(smld, info) = analyze(smld, cfg::FrameConnectConfig; outdir, step_number, verbose)
-(smld, info) = analyze(smld, cfg::CalibrationConfig; smld_connected, outdir, step_number, verbose)
-(smld, info) = analyze(smld, cfg::DriftConfig; outdir, step_number, verbose)
-(smld, info) = analyze(smld, cfg::DensityFilterConfig; outdir, step_number, verbose)
-(image, info) = analyze(smld, cfg::RenderConfig; outdir, step_number, verbose)
+(smld, info)  = analyze(data, cfg::DetectFitConfig; outdir, step_number, verbose)
+(smld, info)  = analyze(cfg::DetectFitConfig; ...)  # file-based (requires camera in config)
+(smld, info)  = analyze(smld, cfg::FilterConfig; outdir, step_number, verbose)
+(smld, info)  = analyze(smld, cfg::FrameConnectConfig; outdir, step_number, verbose)
+(smld, info)  = analyze(smld, cfg::DriftConfig; outdir, step_number, verbose)
+(smld, info)  = analyze(smld, cfg::DensityFilterConfig; outdir, step_number, verbose)
+(smld, info)  = analyze(smld, cfg::IntensityFilterConfig; outdir, step_number, verbose)
+(smld, info)  = analyze(smld, cfg::BaGoLConfig; outdir, step_number, verbose)
+(smld, info)  = analyze(smld, cfg::RenderConfig; outdir, step_number, verbose)  # image written to outdir; smld passes through
 ```
+
+Calibration is not a standalone step: set `FrameConnectConfig(calibration=CalibrationConfig(...))`
+and it runs inside frame connection. Clustering, edge classification, and the
+multi-target steps (`CompositeRenderConfig`, `CrossAlignConfig`, `CrossCorrConfig`)
+dispatch on their own config types — see [Step Configs](#step-configs) below.
 
 Each returns `(result, StepInfo)` where StepInfo wraps:
 - Timing (`elapsed_s`), config, step number, summary dict
@@ -131,9 +137,9 @@ Configuration for multi-channel analysis.
 
 **Fields:**
 - `labels::Vector{Symbol}` - Channel labels (e.g., `[:IgG, :C1q]`)
-- `colors::Vector{Symbol}` - Colors per channel
-- `render_zoom::Float64` - Zoom for composite renders
-- `render_strategies::Vector{RenderingStrategy}` - Rendering strategies
+- `colors::Vector{Symbol}` - Colors per channel (default: cyan/magenta for 2, CMY for 3)
+- `steps::Vector{AbstractMultiTargetStep}` - Multi-target steps run after the
+  per-channel pipelines (`CompositeRenderConfig`, `CrossAlignConfig`, `CrossCorrConfig`)
 - `outdir::String` - Output directory
 
 ### MultiTargetResult
@@ -198,9 +204,12 @@ FrameConnectConfig(;
 )
 ```
 
-### CalibrationConfig
+### CalibrationConfig (nested in FrameConnectConfig)
 
-Calibrate localization uncertainties using frame-to-frame scatter.
+Calibrate localization uncertainties using frame-to-frame scatter. Not a standalone
+step: pass it as `FrameConnectConfig(calibration=CalibrationConfig(...))` and it runs
+inside frame connection (link → calibrate → combine). Results land in
+`FrameConnectInfo.calibration`.
 
 ```julia
 CalibrationConfig(;
@@ -254,6 +263,66 @@ RenderConfig(;
     filename=nothing,           # Auto-generated if outdir set
 )
 ```
+
+### IntensityFilterConfig
+
+Reject multi-emitter events via a Poisson upper-tail test against a spatially-varying
+excitation field.
+
+```julia
+IntensityFilterConfig(;
+    cutoff=0.01,                # p-value cutoff
+    field_mode=:gaussian,       # :uniform or :gaussian (2D beam fit for λ(x,y))
+    rate_percentile=0.95,       # percentile for single-emitter rate estimation
+    estimate_p2=true,           # estimate the double-emitter fraction
+)
+```
+
+### BaGoLConfig (from SMLMBaGoL)
+
+Bayesian grouping of localizations (RJMCMC). Run after FrameConnect, before Render.
+Fields pass directly to `SMLMBaGoL.run_bagol`.
+
+```julia
+BaGoLConfig(;
+    μ=10.0,                     # expected locs per emitter
+    shape=2.0,                  # NegBin shape (1=dSTORM, >1=DNA-PAINT)
+    learn_distribution=true,    # true/false/:mu/:shape
+    n_iterations=10000, burn_in=2000,
+    partition_sigma=3.0,        # DBSCAN threshold in sigma units
+    posterior_pixel_size=0.002, # 2 nm posterior image (0.0 disables)
+)
+```
+
+### Clustering & spatial statistics (from SMLMClustering)
+
+`analyze(smld, cfg)` where `cfg` is a cluster or statistics config. Config types are
+re-exported: `DBSCANConfig`, `HDBSCANConfig`, `HierarchicalConfig`, `VoronoiConfig`
+(clustering); `HopkinsConfig`, `VoronoiDensityConfig` (spatial-tendency statistics).
+
+```julia
+(smld, info) = analyze(smld, DBSCANConfig(eps_nm=50.0, min_points=5))
+```
+
+### Edge classification (from SMLMClustering)
+
+Non-destructive interior/edge labelling of a cell's localizations. Config types
+re-exported: `OuterPolygonConfig`, `KdeValleyConfig`. The class is written to
+`info.class` / `interior_mask`; emitters are not removed.
+
+```julia
+(smld, info) = analyze(smld, OuterPolygonConfig())
+```
+
+### Multi-target steps
+
+Dispatch on `Vector{BasicSMLD}` inside a `MultiTargetConfig` pipeline:
+
+- `CompositeRenderConfig(; strategy, zoom, colors, clip_percentile=:auto, scalebar)` —
+  multi-channel composite render (pass-through).
+- `CrossAlignConfig(; method=:entropy, maxn, histbinsize)` — cross-channel alignment
+  (state-modifying; returns aligned SMLDs).
+- `CrossCorrConfig(; r_max, dr)` — pairwise cross-correlation g(r).
 
 ## Info Types (Re-exported)
 

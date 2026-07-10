@@ -141,11 +141,11 @@ is too large; if everything is noise, it is too small (or `min_points` too high)
   meaningful within it; with `per_dataset = true` the pair `(dataset, id)` uniquely
   identifies a cluster. A later labeling step reusing `emitter.id` overwrites an
   earlier one.
-- **`HDBSCANConfig` is not re-exported by SMLMAnalysis.** The `analyze()` dispatch
-  covers it (it is an `AbstractClusterConfig`), but construct it qualified as
-  `SMLMClustering.HDBSCANConfig(...)` — the unqualified name is only available
-  after `using SMLMClustering`. The same applies to any backend without a `const`
-  alias.
+- **All clustering backends are re-exported.** `DBSCANConfig`, `HDBSCANConfig`,
+  `HierarchicalConfig`, and `VoronoiConfig` each have a `const` alias in
+  SMLMAnalysis, so they are available unqualified after `using SMLMAnalysis`. A
+  backend without an alias would need to be constructed qualified as
+  `SMLMClustering.<Name>(...)`.
 - **Statistics steps change nothing downstream.** They are observational; place
   them anywhere without affecting the threaded SMLD.
 
