@@ -1,6 +1,7 @@
 using SMLMAnalysis
 using SMLMFrameConnection
 using SMLMDriftCorrection
+using GaussMLE
 using Test
 using Random
 
@@ -215,11 +216,102 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test res_bf.N_0 >= 0        # physical bound held
         @test res_bf.k_bleach > 0
     end
+
+    @testset "SMLD HDF5 round-trip" begin
+        # Locks the σ_xy regression: save_smld/load_smld must preserve every
+        # emitter field, including the position covariance σ_xy that the
+        # GaussianXYNBS → Emitter2DFitSigma path carries. This bug survived
+        # because the prior tests only constructed types, never round-tripped.
+        cam = IdealCamera(8, 8, 0.1)
+        T = Float64
+
+        mktempdir() do dir
+            # Emitter2DFitSigma (16 fields) — the primary GaussianXYNBS output.
+            es = [GaussMLE.Emitter2DFitSigma{T}(
+                    0.1i, 0.2i, 1000.0 + i, 5.0, 0.13,     # x, y, photons, bg, σ
+                    0.01, 0.012, 0.003, 20.0, 0.5, 0.002,  # σ_x, σ_y, σ_xy, σ_photons, σ_bg, σ_σ
+                    0.4, i, 1, 0, i)                        # pvalue, frame, dataset, track_id, id
+                  for i in 1:5]
+            smld = BasicSMLD(es, cam, 10, 1, Dict{String,Any}())
+            path = joinpath(dir, "sigma.h5")
+            save_smld(path, smld)
+            loaded = load_smld(path)
+
+            @test length(loaded.emitters) == 5
+            @test eltype(loaded.emitters) <: GaussMLE.Emitter2DFitSigma
+            for (a, b) in zip(smld.emitters, loaded.emitters)
+                for f in fieldnames(GaussMLE.Emitter2DFitSigma)
+                    @test getfield(a, f) ≈ getfield(b, f)
+                end
+            end
+            @test loaded.emitters[3].σ_xy ≈ 0.003   # the field that used to vanish
+
+            # Emitter2DFitSigmaXY (18 fields) — GaussianXYNBSXSY output.
+            exy = [GaussMLE.Emitter2DFitSigmaXY{T}(
+                    0.1i, 0.2i, 1000.0 + i, 5.0, 0.13, 0.14, # x, y, photons, bg, σx, σy
+                    0.01, 0.012, 0.003, 20.0, 0.5,           # σ_x, σ_y, σ_xy, σ_photons, σ_bg
+                    0.002, 0.0021, 0.4, i, 1, 0, i)          # σ_σx, σ_σy, pvalue, frame, dataset, track_id, id
+                  for i in 1:4]
+            smld_xy = BasicSMLD(exy, cam, 10, 1, Dict{String,Any}())
+            pxy = joinpath(dir, "sigmaxy.h5")
+            save_smld(pxy, smld_xy)
+            loaded_xy = load_smld(pxy)
+
+            @test length(loaded_xy.emitters) == 4
+            @test eltype(loaded_xy.emitters) <: GaussMLE.Emitter2DFitSigmaXY
+            for (a, b) in zip(smld_xy.emitters, loaded_xy.emitters)
+                for f in fieldnames(GaussMLE.Emitter2DFitSigmaXY)
+                    @test getfield(a, f) ≈ getfield(b, f)
+                end
+            end
+            @test loaded_xy.emitters[2].σ_xy ≈ 0.003
+        end
+    end
 end
 
 if SMLM_TEST_FULL
     @testset "thorough" begin
-        # edge cases, large-n stress, slow paths
+        @testset "end-to-end analyze() tuple contract" begin
+            # Runs the full detect/fit → filter → render pipeline on synthetic
+            # CPU-only data and checks the (result, info) contract the whole
+            # package rests on. Mirrors the precompile workload (known-good),
+            # but as an assertable test rather than a build-time smoke run.
+            Random.seed!(1)
+            cam = IdealCamera(32, 32, 0.1)
+            sim = StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 1)
+            (_, si) = simulate(sim;
+                pattern  = Nmer2D(n = 8, d = 0.05),
+                molecule = GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
+                camera   = cam)
+            (imgs, _) = gen_images(si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
+                dataset = 1, bg = 20.0, poisson_noise = true)
+
+            cfg = AnalysisConfig(
+                DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13),
+                                fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)),
+                FilterConfig(photons = (100.0, Inf)),
+                RenderConfig(zoom = 10);
+                camera  = cam,
+                verbose = Verbosity.SILENT,
+            )
+            (result, info) = analyze([imgs], cfg)
+
+            @test result isa AnalysisResult
+            @test info isa AnalysisInfo
+            @test result.smld isa BasicSMLD
+            @test length(result.smld.emitters) > 0
+            @test length(info.step_infos) == 3
+            @test info.elapsed_s >= 0
+
+            # The fitted output is Emitter2DFitSigma and round-trips through HDF5.
+            mktempdir() do dir
+                p = joinpath(dir, "pipeline.h5")
+                save_smld(p, result.smld)
+                reloaded = load_smld(p)
+                @test length(reloaded.emitters) == length(result.smld.emitters)
+                @test reloaded.emitters[1].σ_xy ≈ result.smld.emitters[1].σ_xy
+            end
+        end
     end
 else
     @info "Skipping thorough tests; set SMLM_TEST_FULL=1 to enable"

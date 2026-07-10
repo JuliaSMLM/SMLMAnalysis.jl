@@ -11,7 +11,7 @@ using HDF5
 using Dates
 import Pkg
 
-const SMLD_FORMAT_VERSION = "1.1"  # v1.1: Added PSF width fields for GaussMLE emitter types
+const SMLD_FORMAT_VERSION = "1.2"  # v1.2: Added σ_xy position covariance (round-trips Emitter2DFit/Sigma/SigmaXY); v1.1: PSF width fields
 
 # Get package version safely
 function _get_package_version()
@@ -127,6 +127,11 @@ function save_smld(filepath::String, smld::BasicSMLD{T,E};
             em["dataset", compress=compression] = dataset
             em["track_id", compress=compression] = track_id
             em["id", compress=compression] = id
+
+            # Position covariance σ_xy (present on Emitter2DFit / Emitter2DFitSigma / SigmaXY)
+            if hasproperty(smld.emitters[1], :σ_xy)
+                em["sigma_xy", compress=compression] = [e.σ_xy for e in smld.emitters]
+            end
 
             # 3D fields
             if is_3d
@@ -353,11 +358,14 @@ function load_smld(filepath::String)
             # Optional p-value
             pvalue = (has_pvalue || haskey(em, "pvalue")) ? read(em["pvalue"]) : nothing
 
+            # Optional position covariance σ_xy (v1.2+; older files default it to 0)
+            σ_xy = haskey(em, "sigma_xy") ? read(em["sigma_xy"]) : nothing
+
             # Construct emitters based on type
             emitters = _construct_emitters(
                 emitter_type_str, T, n_emitters, is_3d,
                 x, y, z, photons, bg,
-                σ_x, σ_y, σ_z, σ_photons, σ_bg,
+                σ_x, σ_y, σ_z, σ_photons, σ_bg, σ_xy,
                 psf_sigma, σ_sigma,
                 psf_sigma_x, psf_sigma_y, σ_sigma_x, σ_sigma_y,
                 pvalue,
@@ -444,7 +452,7 @@ Internal: Construct emitters of the appropriate type based on emitter_type_str.
 function _construct_emitters(
     emitter_type_str::String, T::Type, n::Int, is_3d::Bool,
     x, y, z, photons, bg,
-    σ_x, σ_y, σ_z, σ_photons, σ_bg,
+    σ_x, σ_y, σ_z, σ_photons, σ_bg, σ_xy,
     psf_sigma, σ_sigma,
     psf_sigma_x, psf_sigma_y, σ_sigma_x, σ_sigma_y,
     pvalue,
@@ -460,7 +468,9 @@ function _construct_emitters(
             T(x[i]), T(y[i]),
             T(photons[i]), T(bg[i]),
             T(psf_sigma_x[i]), T(psf_sigma_y[i]),
-            T(σ_x[i]), T(σ_y[i]), T(σ_photons[i]), T(σ_bg[i]),
+            T(σ_x[i]), T(σ_y[i]),
+            σ_xy !== nothing ? T(σ_xy[i]) : T(0),
+            T(σ_photons[i]), T(σ_bg[i]),
             σ_sigma_x !== nothing ? T(σ_sigma_x[i]) : T(0),
             σ_sigma_y !== nothing ? T(σ_sigma_y[i]) : T(0),
             pvalue !== nothing ? T(pvalue[i]) : T(0),
@@ -474,7 +484,9 @@ function _construct_emitters(
             T(x[i]), T(y[i]),
             T(photons[i]), T(bg[i]),
             T(psf_sigma[i]),
-            T(σ_x[i]), T(σ_y[i]), T(σ_photons[i]), T(σ_bg[i]),
+            T(σ_x[i]), T(σ_y[i]),
+            σ_xy !== nothing ? T(σ_xy[i]) : T(0),
+            T(σ_photons[i]), T(σ_bg[i]),
             σ_sigma !== nothing ? T(σ_sigma[i]) : T(0),
             pvalue !== nothing ? T(pvalue[i]) : T(0),
             Int(frame[i]), Int(dataset[i]), Int(track_id[i]), Int(id[i])
@@ -500,6 +512,7 @@ function _construct_emitters(
             T(photons[i]), T(bg[i]),
             T(σ_x[i]), T(σ_y[i]),
             T(σ_photons[i]), T(σ_bg[i]);
+            σ_xy = σ_xy !== nothing ? T(σ_xy[i]) : T(0),
             frame=Int(frame[i]),
             dataset=Int(dataset[i]),
             track_id=Int(track_id[i]),
