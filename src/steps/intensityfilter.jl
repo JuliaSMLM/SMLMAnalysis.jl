@@ -322,7 +322,9 @@ function _fit_gaussian_field(cx, cy, rates, xs, ys)
     result = try
         optimize(cost, [A0, x0_0, y0_0, w0, bg0], NelderMead(),
                  Optim.Options(iterations=5000, g_tol=1e-8))
-    catch
+    catch err
+        err isa InterruptException && rethrow()
+        @warn "intensityfilter: Gaussian excitation-field fit failed; falling back to uniform field" exception=err
         return nothing, 0.0
     end
 

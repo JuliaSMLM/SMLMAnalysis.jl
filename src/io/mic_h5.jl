@@ -6,8 +6,10 @@
 
 using HDF5
 
-# Helper to check if path exists in HDF5 file (works with nested paths)
-_h5_exists(f, path) = try; f[path]; true; catch; false; end
+# Helper to check if path exists in HDF5 file (works with nested paths).
+# HDF5.haskey only checks direct children, so probe by indexing; a missing path
+# throws (→ false) but a real interrupt must still propagate.
+_h5_exists(f, path) = try; f[path]; true; catch e; e isa InterruptException && rethrow(); false; end
 
 # Helper to resolve actual dataset path (handles both old and new H5 formats)
 function _resolve_data_path(f, dk::String)
@@ -58,8 +60,11 @@ function load_mic_h5_info(filepath::String)
                 end
                 n_frames += sz[3]
                 push!(frames_per_block, sz[3])
-            catch
-                # Skip blocks that don't have valid data
+            catch e
+                e isa InterruptException && rethrow()
+                # Skip blocks without valid data, but surface the loss — a silently
+                # dropped block otherwise shows up only as a frame-count mismatch.
+                @warn "load_mic_h5_info: skipping unreadable data block \"$dk\"" exception=e
                 continue
             end
         end
@@ -68,7 +73,9 @@ function load_mic_h5_info(filepath::String)
             height = h,
             width = w,
             n_frames = n_frames,
-            n_blocks = length(data_keys),
+            # Count valid (readable) blocks, not raw keys: skipped blocks above are
+            # excluded from frames_per_block, so n_blocks must match.
+            n_blocks = length(frames_per_block),
             frames_per_block = frames_per_block,
             has_calibration = _h5_exists(f, "Calibration"),
             file_size_gb = filesize(filepath) / 1e9

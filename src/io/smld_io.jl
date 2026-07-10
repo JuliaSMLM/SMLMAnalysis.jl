@@ -79,7 +79,11 @@ function save_smld(filepath::String, smld::BasicSMLD{T,E};
     has_sigma_xy = n > 0 && hasproperty(smld.emitters[1], :σx)  # Emitter2DFitSigmaXY
     has_pvalue = n > 0 && hasproperty(smld.emitters[1], :pvalue)
 
-    h5open(filepath, "w") do fid
+    # Atomic write: build the file at a sibling temp path, then rename over the
+    # target. A crash mid-write leaves the existing (resumable) file untouched
+    # instead of a half-truncated one. mv is atomic within a filesystem.
+    tmp = filepath * ".tmp"
+    h5open(tmp, "w") do fid
         # === /metadata group ===
         meta = create_group(fid, "metadata")
         meta["format_version"] = SMLD_FORMAT_VERSION
@@ -222,21 +226,24 @@ function save_smld(filepath::String, smld::BasicSMLD{T,E};
         if !isempty(smld.metadata)
             user_meta = create_group(fid, "user_metadata")
             for (key, value) in smld.metadata
-                try
-                    # Only save HDF5-compatible types
-                    if value isa Union{String, Number, AbstractArray{<:Number}}
-                        user_meta[key] = value
-                    elseif value isa AbstractArray{<:String}
-                        user_meta[key] = collect(value)
+                if value isa Union{String, Number, AbstractArray{<:Number}} ||
+                   value isa AbstractArray{<:String}
+                    towrite = value isa AbstractArray{<:String} ? collect(value) : value
+                    try
+                        user_meta[key] = towrite
+                    catch err
+                        err isa InterruptException && rethrow()
+                        @warn "save_smld: dropping user metadata key \"$key\" — HDF5 write failed" exception=err
                     end
-                    # Skip unsupported types silently
-                catch
-                    # Skip values that can't be serialized
+                else
+                    # Unsupported type: warn rather than silently drop, so the loss is visible.
+                    @warn "save_smld: skipping user metadata key \"$key\"::$(typeof(value)) — not an HDF5-serializable type"
                 end
             end
         end
     end
 
+    mv(tmp, filepath; force=true)
     return filepath
 end
 
@@ -287,6 +294,29 @@ function _save_drift_model!(group, dm, compression::Int)
     end
 end
 
+function _parse_version_pair(v::AbstractString)
+    parts = split(v, '.')
+    maj = parse(Int, parts[1])
+    min = length(parts) >= 2 ? parse(Int, parts[2]) : 0
+    return (maj, min)
+end
+
+# Compare a file's format_version against SMLD_FORMAT_VERSION. Same major with file
+# minor <= ours: fully supported. Newer minor: readable (extra fields ignored) but
+# warn. Different major: refuse — the on-disk layout may be incompatible.
+function _check_smld_format_version(file_version::AbstractString, filepath::String)
+    fmaj, fmin = _parse_version_pair(file_version)
+    cmaj, cmin = _parse_version_pair(SMLD_FORMAT_VERSION)
+    if fmaj != cmaj
+        error("load_smld: \"$filepath\" has format_version $file_version, incompatible with " *
+              "this reader's $SMLD_FORMAT_VERSION (major version differs).")
+    elseif fmin > cmin
+        @warn "load_smld: \"$filepath\" format_version $file_version is newer than this " *
+              "reader's $SMLD_FORMAT_VERSION; reading recognized fields and ignoring the rest."
+    end
+    return
+end
+
 """
     load_smld(filepath::String) -> BasicSMLD
 
@@ -305,9 +335,15 @@ smld = load_smld("results.h5")
 """
 function load_smld(filepath::String)
     h5open(filepath, "r") do fid
+        # Validate schema up front: a friendly error beats a raw KeyError deep in the read.
+        haskey(fid, "metadata") || error("load_smld: \"$filepath\" is missing the /metadata group — not an SMLMAnalysis SMLD file?")
+        haskey(fid, "emitters") || error("load_smld: \"$filepath\" is missing the /emitters group — not an SMLMAnalysis SMLD file?")
+
         # Read metadata
         meta = fid["metadata"]
+        haskey(meta, "format_version") || error("load_smld: \"$filepath\" /metadata has no format_version")
         format_version = read(meta["format_version"])
+        _check_smld_format_version(format_version, filepath)
         emitter_type_str = read(meta["emitter_type"])
         element_type_str = read(meta["element_type"])
         is_3d = read(meta["is_3d"])
