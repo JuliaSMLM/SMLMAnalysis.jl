@@ -217,6 +217,29 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test res_bf.k_bleach > 0
     end
 
+    @testset "crop axis conventions" begin
+        # crop_images(imgs, roi_x, roi_y) == imgs[roi_y, roi_x, :]: roi_x indexes
+        # columns (x, dim 2), roi_y indexes rows (y, dim 1). Encode (row, col) into
+        # each pixel so an axis swap is caught. Locks a convention documented but
+        # otherwise untested (SMART transposes on load, MIC does not, overlays
+        # transpose before drawing — all easy to get backwards).
+        nrow, ncol, nfr = 6, 8, 3
+        img = [1000r + 10c + f for r in 1:nrow, c in 1:ncol, f in 1:nfr]
+        roi_x, roi_y = 3:6, 2:4        # columns, rows
+        cropped = crop_images(img, roi_x, roi_y)
+        @test size(cropped) == (length(roi_y), length(roi_x), nfr)
+        @test cropped == img[roi_y, roi_x, :]
+        @test cropped[1, 1, 1] == 1000 * first(roi_y) + 10 * first(roi_x) + 1
+
+        # crop_camera uses the same convention: roi_x → x-edges, roi_y → y-edges.
+        cam = IdealCamera(ncol, nrow, 0.1)   # IdealCamera(nx=cols, ny=rows, px)
+        cc = crop_camera(cam, roi_x, roi_y)
+        @test cc.pixel_edges_x == cam.pixel_edges_x[first(roi_x):last(roi_x)+1]
+        @test cc.pixel_edges_y == cam.pixel_edges_y[first(roi_y):last(roi_y)+1]
+        @test length(cc.pixel_edges_x) - 1 == length(roi_x)   # x pixel count = #cols
+        @test length(cc.pixel_edges_y) - 1 == length(roi_y)   # y pixel count = #rows
+    end
+
     @testset "SMLD HDF5 round-trip" begin
         # Locks the σ_xy regression: save_smld/load_smld must preserve every
         # emitter field, including the position covariance σ_xy that the
