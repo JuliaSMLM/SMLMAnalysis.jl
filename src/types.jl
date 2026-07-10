@@ -521,10 +521,14 @@ end
 # Pretty printing
 # ============================================================
 
-function Base.show(io::IO, cfg::SMLMData.AbstractSMLMConfig)
+# Compact one-line config display. Registered per SMLMAnalysis-owned config type at
+# the bottom of SMLMAnalysis.jl (after the step includes define those types), NOT on
+# SMLMData.AbstractSMLMConfig — dispatching Base.show on the upstream abstract type
+# would be type piracy that restyles every config subtype across the ecosystem
+# (FrameConnectConfig, DriftConfig, RenderConfig, DBSCANConfig, …).
+function _show_config(io::IO, cfg)
     T = typeof(cfg)
-    fields = fieldnames(T)
-    vals = [string(f, "=", getfield(cfg, f)) for f in fields]
+    vals = [string(f, "=", getfield(cfg, f)) for f in fieldnames(T)]
     print(io, "$(nameof(T))($(join(vals, ", ")))")
 end
 

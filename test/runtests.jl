@@ -137,7 +137,7 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test cr.strategy isa GaussianRender
         @test cr.zoom == 20.0
         @test cr.colors === nothing
-        @test cr.clip_percentile == 0.99
+        @test cr.clip_percentile === :auto
         @test cr.normalize_each === nothing
         @test cr.scalebar == true
         @test cr.scalebar_position == :br
@@ -265,6 +265,14 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
                 end
             end
             @test loaded_xy.emitters[2].σ_xy ≈ 0.003
+
+            # Schema validation: a valid HDF5 file that isn't an SMLD fails with a
+            # friendly ErrorException, not a raw KeyError deep in the read.
+            bogus = joinpath(dir, "bogus.h5")
+            SMLMAnalysis.HDF5.h5open(bogus, "w") do f
+                f["junk"] = 1
+            end
+            @test_throws ErrorException load_smld(bogus)
         end
     end
 end
