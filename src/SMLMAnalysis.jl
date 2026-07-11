@@ -32,7 +32,9 @@ config = AnalysisConfig(
 (smld, info) = analyze(smld, FilterConfig(photons=(500.0, Inf)))
 (smld, info) = analyze(smld, FrameConnectConfig(max_frame_gap=5))
 (smld, info) = analyze(smld, DriftConfig(degree=2))
-(img, info)  = analyze(smld, RenderConfig(zoom=20, colormap=:inferno))
+# RenderConfig is a pass-through step: it returns (smld, StepInfo) and writes the
+# image to outdir. For the image in-memory, call SMLMRender.render(smld, cfg) directly.
+(smld, info) = analyze(smld, RenderConfig(zoom=20, colormap=:inferno))
 ```
 
 # Re-exported Types
@@ -241,6 +243,20 @@ export analyze
 # Multi-target orchestration
 # ============================================================
 include("multitarget.jl")
+
+# ============================================================
+# Compact display for SMLMAnalysis-owned config types
+# ============================================================
+# Scoped to owned types only (see _show_config in types.jl). One method covers the
+# owned AbstractMultiTargetStep tree (CompositeRender/CrossAlign/CrossCorr); the rest
+# are the single-target step configs. Upstream const-aliases (FrameConnectConfig,
+# DriftConfig, RenderConfig, BaGoLConfig, clustering configs) are deliberately absent
+# — extending Base.show for them would be type piracy.
+Base.show(io::IO, cfg::AbstractMultiTargetStep) = _show_config(io, cfg)
+for T in (AnalysisConfig, MultiTargetConfig, DetectFitConfig,
+          FilterConfig, DensityFilterConfig, IntensityFilterConfig)
+    @eval Base.show(io::IO, cfg::$T) = _show_config(io, cfg)
+end
 
 # ============================================================
 # Precompilation workload (PrecompileTools)

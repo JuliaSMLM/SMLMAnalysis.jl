@@ -184,7 +184,7 @@ function _save_filter_outputs!(dir::String, outdir::Union{String,Nothing}, cfg::
 end
 
 function _write_filter_stats(dir, cfg, n_before, n_after, t)
-    acceptance = n_after / n_before
+    acceptance = n_before == 0 ? 0.0 : n_after / n_before
 
     filepath = joinpath(dir, "stats.md")
     open(filepath, "w") do io

@@ -14,7 +14,9 @@ Configuration for a composite multi-channel render in the multi-target pipeline.
 - `strategy`: Rendering strategy (default: GaussianRender())
 - `zoom`: Zoom factor (default: 20.0)
 - `colors`: Per-channel colors (nothing = inherit from MultiTargetConfig)
-- `clip_percentile`: Intensity clipping (default: 0.99). `nothing` for saturate mode.
+- `clip_percentile`: Intensity clipping. `:auto` (default) picks per strategy —
+  saturate (no clip) for histogram, 0.99 for others. A `Float64` clips at that
+  percentile; `nothing` forces saturate mode.
 - `normalize_each`: Per-channel normalization (nothing = auto: false for histogram, true for others)
 - `scalebar`: Enable scale bar (default: true)
 - `scalebar_length`: Scale bar length in μm (nothing = auto)
@@ -25,7 +27,7 @@ Configuration for a composite multi-channel render in the multi-target pipeline.
     strategy::SMLMRender.RenderingStrategy = GaussianRender()
     zoom::Float64 = 20.0
     colors::Union{Vector{Symbol}, Nothing} = nothing
-    clip_percentile::Union{Float64, Nothing} = 0.99
+    clip_percentile::Union{Float64, Nothing, Symbol} = :auto
     normalize_each::Union{Bool, Nothing} = nothing
     scalebar::Bool = true
     scalebar_length::Union{Float64, Nothing} = nothing
@@ -55,7 +57,10 @@ function composite_render_step(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::Composi
     # Resolve normalize_each: histogram=false (saturate), others=true (clip+normalize)
     is_histogram = cfg.strategy isa HistogramRender
     ne = cfg.normalize_each !== nothing ? cfg.normalize_each : !is_histogram
-    cp = is_histogram && cfg.clip_percentile == 0.99 ? nothing : cfg.clip_percentile
+    # clip_percentile :auto → per-strategy default (histogram saturates, others clip at
+    # 0.99); an explicit Float64/nothing is honored as-is (a user 0.99 is no longer
+    # silently reinterpreted as saturate).
+    cp = cfg.clip_percentile === :auto ? (is_histogram ? nothing : 0.99) : cfg.clip_percentile
 
     # Build filename
     filename = if dir !== nothing

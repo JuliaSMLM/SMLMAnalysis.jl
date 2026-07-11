@@ -35,7 +35,7 @@ function frameconnect_step(smld::BasicSMLD, cfg::SMLMFrameConnection.FrameConnec
     smld_connected = connect_info.connected
 
     n_after = length(combined.emitters)
-    compression = n_before / n_after
+    compression = n_after == 0 ? 0.0 : n_before / n_after
 
     if dir !== nothing
         _save_frameconnect_outputs!(dir, cfg, v, t, n_before, n_after,

@@ -1,6 +1,7 @@
 using SMLMAnalysis
 using SMLMFrameConnection
 using SMLMDriftCorrection
+using GaussMLE
 using Test
 using Random
 
@@ -136,7 +137,7 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test cr.strategy isa GaussianRender
         @test cr.zoom == 20.0
         @test cr.colors === nothing
-        @test cr.clip_percentile == 0.99
+        @test cr.clip_percentile === :auto
         @test cr.normalize_each === nothing
         @test cr.scalebar == true
         @test cr.scalebar_position == :br
@@ -215,11 +216,147 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test res_bf.N_0 >= 0        # physical bound held
         @test res_bf.k_bleach > 0
     end
+
+    @testset "crop axis conventions" begin
+        # crop_images(imgs, roi_x, roi_y) == imgs[roi_y, roi_x, :]: roi_x indexes
+        # columns (x, dim 2), roi_y indexes rows (y, dim 1). Encode (row, col) into
+        # each pixel so an axis swap is caught. Locks a convention documented but
+        # otherwise untested (SMART transposes on load, MIC does not, overlays
+        # transpose before drawing — all easy to get backwards).
+        nrow, ncol, nfr = 6, 8, 3
+        img = [1000r + 10c + f for r in 1:nrow, c in 1:ncol, f in 1:nfr]
+        roi_x, roi_y = 3:6, 2:4        # columns, rows
+        cropped = crop_images(img, roi_x, roi_y)
+        @test size(cropped) == (length(roi_y), length(roi_x), nfr)
+        @test cropped == img[roi_y, roi_x, :]
+        @test cropped[1, 1, 1] == 1000 * first(roi_y) + 10 * first(roi_x) + 1
+
+        # crop_camera uses the same convention: roi_x → x-edges, roi_y → y-edges.
+        cam = IdealCamera(ncol, nrow, 0.1)   # IdealCamera(nx=cols, ny=rows, px)
+        cc = crop_camera(cam, roi_x, roi_y)
+        @test cc.pixel_edges_x == cam.pixel_edges_x[first(roi_x):last(roi_x)+1]
+        @test cc.pixel_edges_y == cam.pixel_edges_y[first(roi_y):last(roi_y)+1]
+        @test length(cc.pixel_edges_x) - 1 == length(roi_x)   # x pixel count = #cols
+        @test length(cc.pixel_edges_y) - 1 == length(roi_y)   # y pixel count = #rows
+    end
+
+    @testset "SMLD HDF5 round-trip" begin
+        # Locks the σ_xy regression: save_smld/load_smld must preserve every
+        # emitter field, including the position covariance σ_xy that the
+        # GaussianXYNBS → Emitter2DFitSigma path carries. This bug survived
+        # because the prior tests only constructed types, never round-tripped.
+        cam = IdealCamera(8, 8, 0.1)
+        T = Float64
+
+        mktempdir() do dir
+            # Emitter2DFitSigma (16 fields) — the primary GaussianXYNBS output.
+            es = [GaussMLE.Emitter2DFitSigma{T}(
+                    0.1i, 0.2i, 1000.0 + i, 5.0, 0.13,     # x, y, photons, bg, σ
+                    0.01, 0.012, 0.003, 20.0, 0.5, 0.002,  # σ_x, σ_y, σ_xy, σ_photons, σ_bg, σ_σ
+                    0.4, i, 1, 0, i)                        # pvalue, frame, dataset, track_id, id
+                  for i in 1:5]
+            smld = BasicSMLD(es, cam, 10, 1, Dict{String,Any}())
+            path = joinpath(dir, "sigma.h5")
+            save_smld(path, smld)
+            loaded = load_smld(path)
+
+            @test length(loaded.emitters) == 5
+            @test eltype(loaded.emitters) <: GaussMLE.Emitter2DFitSigma
+            for (a, b) in zip(smld.emitters, loaded.emitters)
+                for f in fieldnames(GaussMLE.Emitter2DFitSigma)
+                    @test getfield(a, f) ≈ getfield(b, f)
+                end
+            end
+            @test loaded.emitters[3].σ_xy ≈ 0.003   # the field that used to vanish
+
+            # Emitter2DFitSigmaXY (18 fields) — GaussianXYNBSXSY output.
+            exy = [GaussMLE.Emitter2DFitSigmaXY{T}(
+                    0.1i, 0.2i, 1000.0 + i, 5.0, 0.13, 0.14, # x, y, photons, bg, σx, σy
+                    0.01, 0.012, 0.003, 20.0, 0.5,           # σ_x, σ_y, σ_xy, σ_photons, σ_bg
+                    0.002, 0.0021, 0.4, i, 1, 0, i)          # σ_σx, σ_σy, pvalue, frame, dataset, track_id, id
+                  for i in 1:4]
+            smld_xy = BasicSMLD(exy, cam, 10, 1, Dict{String,Any}())
+            pxy = joinpath(dir, "sigmaxy.h5")
+            save_smld(pxy, smld_xy)
+            loaded_xy = load_smld(pxy)
+
+            @test length(loaded_xy.emitters) == 4
+            @test eltype(loaded_xy.emitters) <: GaussMLE.Emitter2DFitSigmaXY
+            for (a, b) in zip(smld_xy.emitters, loaded_xy.emitters)
+                for f in fieldnames(GaussMLE.Emitter2DFitSigmaXY)
+                    @test getfield(a, f) ≈ getfield(b, f)
+                end
+            end
+            @test loaded_xy.emitters[2].σ_xy ≈ 0.003
+
+            # Schema validation: a valid HDF5 file that isn't an SMLD fails with a
+            # friendly ErrorException, not a raw KeyError deep in the read.
+            bogus = joinpath(dir, "bogus.h5")
+            SMLMAnalysis.HDF5.h5open(bogus, "w") do f
+                f["junk"] = 1
+            end
+            @test_throws ErrorException load_smld(bogus)
+        end
+    end
 end
 
 if SMLM_TEST_FULL
     @testset "thorough" begin
-        # edge cases, large-n stress, slow paths
+        @testset "end-to-end analyze() tuple contract" begin
+            # Runs the full detect/fit → filter → render pipeline on synthetic
+            # CPU-only data and checks the (result, info) contract the whole
+            # package rests on. Mirrors the precompile workload (known-good),
+            # but as an assertable test rather than a build-time smoke run.
+            Random.seed!(1)
+            cam = IdealCamera(32, 32, 0.1)
+            sim = StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 1)
+            (_, si) = simulate(sim;
+                pattern  = Nmer2D(n = 8, d = 0.05),
+                molecule = GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
+                camera   = cam)
+            (imgs, _) = gen_images(si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
+                dataset = 1, bg = 20.0, poisson_noise = true)
+
+            cfg = AnalysisConfig(
+                DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13),
+                                fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)),
+                FilterConfig(photons = (100.0, Inf)),
+                RenderConfig(zoom = 10);
+                camera  = cam,
+                verbose = Verbosity.SILENT,
+            )
+            (result, info) = analyze([imgs], cfg)
+
+            @test result isa AnalysisResult
+            @test info isa AnalysisInfo
+            @test result.smld isa BasicSMLD
+            @test length(result.smld.emitters) > 0
+            @test length(info.step_infos) == 3
+            @test info.elapsed_s >= 0
+
+            # The fitted output is Emitter2DFitSigma and round-trips through HDF5.
+            mktempdir() do dir
+                p = joinpath(dir, "pipeline.h5")
+                save_smld(p, result.smld)
+                reloaded = load_smld(p)
+                @test length(reloaded.emitters) == length(result.smld.emitters)
+                @test reloaded.emitters[1].σ_xy ≈ result.smld.emitters[1].σ_xy
+            end
+
+            # Multi-dataset detectfit: exercises the per-dataset loop (dataset field,
+            # per-dataset frame numbering, n_datasets tracking) that the in-memory and
+            # file-based paths share. Reuse the same stack as two datasets.
+            (smld2, si2) = analyze([imgs, imgs],
+                DetectFitConfig(camera = cam,
+                                boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13),
+                                fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu));
+                verbose = Verbosity.SILENT)
+            @test si2.info.n_datasets == 2
+            @test smld2.n_datasets == 2
+            @test smld2.n_frames == size(imgs, 3)          # equal-length → per-dataset count
+            @test Set(e.dataset for e in smld2.emitters) == Set([1, 2])
+            @test all(1 <= e.frame <= size(imgs, 3) for e in smld2.emitters)  # frames are per-dataset
+        end
     end
 else
     @info "Skipping thorough tests; set SMLM_TEST_FULL=1 to enable"

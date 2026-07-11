@@ -68,6 +68,23 @@ localizations via GaussMLE in a single step, with per-dataset processing.
     movie_fps::Union{Float64, Nothing} = nothing
 end
 
+# BasicSMLD stores a single scalar `n_frames` (= max over datasets), but downstream
+# absolute-frame indexing `(dataset-1)*n_frames + frame` and LegendrePoly drift
+# normalization to [-1, 1] both assume every dataset has that same length. Unequal
+# per-dataset frame counts (reachable with MIC multi-block acquisitions) therefore
+# silently misplace frames. We can't fix the scalar without an upstream type change,
+# so warn loudly when the assumption is violated.
+function _warn_unequal_frame_counts(frames_per_dataset::Vector{Int}, verbose::Int)
+    length(frames_per_dataset) > 1 || return
+    all(==(frames_per_dataset[1]), frames_per_dataset) && return
+    verbose >= Verbosity.PROGRESS && @warn string(
+        "detectfit: datasets have unequal frame counts $(frames_per_dataset); ",
+        "BasicSMLD stores a single n_frames=$(maximum(frames_per_dataset)). Downstream ",
+        "per-dataset frame math (drift normalization, localizations-per-frame plot) ",
+        "assumes equal-length datasets and may misplace frames.")
+    return
+end
+
 """
     detectfit(data, camera, cfg; kwargs...) -> (smld, DetectFitInfo)
 
@@ -101,9 +118,25 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
 
     v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_datasets=n_datasets_val psf_model=typeof(cfg.fitter.psf_model)
 
+    # `data` is already materialized; the core iterates it directly.
+    _detectfit_core(data, camera, cfg; outdir=outdir, dir=dir, v=v, checkpoint=checkpoint,
+                    n_datasets_val=n_datasets_val, selected_indices=selected_indices)
+end
+
+# Shared core for both the in-memory and file-based detectfit paths. `image_stacks`
+# is any iterable yielding one image stack per dataset — a materialized Vector (in
+# memory) or a lazy generator that loads one file at a time (file-based). The two
+# public methods differ only in how they build `image_stacks`; everything from the
+# per-dataset detect/fit loop through overlay assembly, the SMLD build, and output
+# writing lives here.
+function _detectfit_core(image_stacks, camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
+                         outdir::Union{String,Nothing}, dir::Union{String,Nothing},
+                         v::Int, checkpoint::Int, n_datasets_val::Int,
+                         selected_indices::Union{Vector{Int},Nothing})
     # Process each dataset
     all_emitters = AbstractEmitter[]
     n_frames_per_dataset = 0
+    frames_per_dataset = Int[]   # actual per-dataset frame counts (equal-length check)
     total_rois = 0
     total_fits = 0
 
@@ -125,9 +158,10 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
     frame_offset = 0
 
     t = @elapsed begin
-        for (ds, images) in enumerate(data)
+        for (ds, images) in enumerate(image_stacks)
             n_frames_ds = size(images, 3)
             n_frames_per_dataset = max(n_frames_per_dataset, n_frames_ds)
+            push!(frames_per_dataset, n_frames_ds)
 
             v >= Verbosity.PROGRESS && @info "  Dataset $ds: $(size(images)) images"
 
@@ -197,10 +231,17 @@ function detectfit(data::Vector{<:AbstractArray{<:Real,3}}, camera::SMLMData.Abs
         end
     end
 
-    # Create combined SMLD
+    # Create combined SMLD. Zero fits across every dataset is treated as a hard
+    # error (rather than an empty SMLD) because it almost always signals a
+    # misconfiguration that would silently poison every downstream step.
     if isempty(all_emitters)
-        error("No localizations found across all datasets")
+        error("detectfit: no localizations found across all $n_datasets_val dataset(s) " *
+              "($total_rois ROIs detected, 0 fits). Common causes: detection threshold too " *
+              "high, boxsize too small, or a camera gain/offset mismatch. Check " *
+              "BoxerConfig (psf_sigma, minval) and the camera calibration.")
     end
+
+    _warn_unequal_frame_counts(frames_per_dataset, v)
 
     smld = BasicSMLD(all_emitters, camera, n_frames_per_dataset, n_datasets_val, Dict{String,Any}())
 
@@ -261,129 +302,11 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
 
     v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg)) [file-based]" n_datasets=n_datasets_val psf_model=typeof(cfg.fitter.psf_model)
 
-    # Process each dataset
-    all_emitters = AbstractEmitter[]
-    n_frames_per_dataset = 0
-    total_rois = 0
-    total_fits = 0
-
-    all_boxes_info = []
-    all_fit_info = []
-
-    # Sample data for overlay plots (spread across all datasets)
-    n_sample_frames = 12
-    sample_image_slices = []
-    sample_roi_data = []
-    sample_roi_x = Int[]
-    sample_roi_y = Int[]
-    sample_roi_frames = Int[]
-    sample_abs_frames = Int[]
-    samples_collected = 0
-    sample_movie_stacks = Vector{Any}()   # DEBUG: ~100-frame raw window per gallery frame
-    sample_movie_starts = Int[]           # absolute frame # of each window's first frame
-    frame_offset = 0
-
-    t = @elapsed begin
-        for (ds, source) in enumerate(sources)
-            images = _load_source(source, v)
-            n_frames_ds = size(images, 3)
-            n_frames_per_dataset = max(n_frames_per_dataset, n_frames_ds)
-
-            v >= Verbosity.PROGRESS && @info "  Dataset $ds: $(size(images)) images"
-
-            (roi_batch, boxes_info) = SMLMBoxer.getboxes(images, camera, cfg.boxer)
-            push!(all_boxes_info, boxes_info)
-            n_rois = length(roi_batch)
-            total_rois += n_rois
-
-            (smld_ds, fit_info) = GaussMLE.fit(roi_batch, cfg.fitter)
-            push!(all_fit_info, fit_info)
-            n_fits = length(smld_ds.emitters)
-            total_fits += n_fits
-
-            v >= Verbosity.PROGRESS && @info "    $n_rois ROIs -> $n_fits fits (detect: $(round(boxes_info.elapsed_s, digits=2))s/$(boxes_info.backend), fit: $(round(fit_info.elapsed_s, digits=2))s/$(fit_info.backend))"
-
-            # Capture sample data spread across all datasets for overlay plots
-            if dir !== nothing && samples_collected < n_sample_frames
-                remaining = n_sample_frames - samples_collected
-                remaining_ds = n_datasets_val - ds + 1
-                n_this = clamp(remaining ÷ remaining_ds, 1, min(n_frames_ds, remaining))
-                idxs = n_this == 1 ? [cld(n_frames_ds, 2)] : [round(Int, x) for x in range(1, n_frames_ds, length=n_this)]
-
-                for idx in idxs
-                    push!(sample_image_slices, collect(images[:, :, idx]))
-                    push!(sample_abs_frames, frame_offset + idx)
-                    if v >= Verbosity.DEBUG
-                        # 100-frame window kept in-block (shifted if idx near the block end);
-                        # the gallery frame idx is always within it. Order matches sample_abs_frames.
-                        i1 = clamp(idx, 1, max(1, n_frames_ds - 99))
-                        push!(sample_movie_stacks, collect(images[:, :, i1:min(i1 + 99, n_frames_ds)]))
-                        push!(sample_movie_starts, frame_offset + i1)
-                    end
-                end
-
-                frame_to_sample = Dict(f => samples_collected + i for (i, f) in enumerate(idxs))
-                for (ri, f) in enumerate(roi_batch.frame_indices)
-                    if haskey(frame_to_sample, f)
-                        push!(sample_roi_data, roi_batch.data[:, :, ri])
-                        push!(sample_roi_x, roi_batch.x_corners[ri])
-                        push!(sample_roi_y, roi_batch.y_corners[ri])
-                        push!(sample_roi_frames, frame_to_sample[f])
-                    end
-                end
-                samples_collected += n_this
-            end
-            frame_offset += n_frames_ds
-
-            for e in smld_ds.emitters
-                push!(all_emitters, _with_dataset(e, ds))
-            end
-
-            # Images freed when loop iteration ends (GC)
-        end
-
-        # Assemble sample data for overlay plots
-        sample_images = nothing
-        sample_roi_batch = nothing
-        sample_original_frames = nothing
-        if !isempty(sample_image_slices)
-            sample_images = cat(sample_image_slices..., dims=3)
-            sample_original_frames = sample_abs_frames
-            if !isempty(sample_roi_data)
-                sample_roi_batch = ROIBatch(cat(sample_roi_data..., dims=3),
-                    sample_roi_x, sample_roi_y, sample_roi_frames, camera)
-            end
-        end
-    end
-
-    if isempty(all_emitters)
-        error("No localizations found across all datasets")
-    end
-
-    smld = BasicSMLD(all_emitters, camera, n_frames_per_dataset, n_datasets_val, Dict{String,Any}())
-
-    detect_info = DetectFitInfo(all_boxes_info, all_fit_info,
-        n_datasets_val, total_rois, total_fits, n_frames_per_dataset, t, selected_indices)
-
-    if dir !== nothing
-        _save_detectfit_outputs!(dir, outdir, smld, camera, cfg, v, t, total_rois, total_fits,
-                                 n_datasets_val, n_frames_per_dataset,
-                                 sample_images, sample_roi_batch, sample_original_frames,
-                                 all_boxes_info, all_fit_info)
-
-        if v >= Verbosity.DEBUG && !isempty(sample_movie_stacks)
-            _write_detection_frame_movies(dir, sample_movie_stacks, sample_abs_frames, sample_movie_starts,
-                                          something(cfg.movie_fps, 20.0), v)
-        end
-
-        if checkpoint >= Checkpoint.EXPENSIVE
-            _save_step_smld(dir, smld; filename="smld_raw.jld2")
-        end
-    end
-
-    v >= Verbosity.PROGRESS && @info "  -> $total_fits fits from $total_rois ROIs across $n_datasets_val datasets ($(round(t, digits=2))s)"
-
-    return (smld, detect_info)
+    # Lazy per-dataset load: the generator loads one stack at a time as the core
+    # iterates, so only a single dataset is resident in memory at once.
+    image_stacks = (_load_source(source, v) for source in sources)
+    _detectfit_core(image_stacks, camera, cfg; outdir=outdir, dir=dir, v=v, checkpoint=checkpoint,
+                    n_datasets_val=n_datasets_val, selected_indices=selected_indices)
 end
 
 # ============================================================

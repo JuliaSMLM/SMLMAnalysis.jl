@@ -104,8 +104,9 @@ function _filter_by_density(smld::BasicSMLD, cfg::DensityFilterConfig)
 
     neighbor_counts = zeros(Int, n)
     for i in 1:n
-        point = [emitters[i].x, emitters[i].y]
-        candidates = inrange(tree, point, max_radius)
+        # Query with a column view of the coords the tree was built from — avoids
+        # allocating a fresh [x, y] vector for every emitter in the hot loop.
+        candidates = inrange(tree, view(coords, :, i), max_radius)
 
         for j in candidates
             j == i && continue
@@ -156,21 +157,10 @@ function _valley_threshold(counts::Vector{Int})
         smoothed[i] = (hist[i-1] + hist[i] + hist[i+1]) / 3
     end
 
-    # Find the rightmost significant peak (clustered population)
-    # "Significant" = at least 5% of max histogram value
+    # Find the rightmost significant peak (clustered population):
+    # a local maximum whose value is >= 5% of the max histogram value.
     peak_threshold = 0.05 * maximum(smoothed)
-
-    # Search from right to find rightmost significant peak
-    rightmost_peak_idx = 1
-    for i in length(smoothed):-1:3
-        # Check if this is a local maximum
-        if smoothed[i] >= smoothed[i-1] && smoothed[i] >= min(get(smoothed, i+1, 0), smoothed[i])
-            if smoothed[i] >= peak_threshold
-                rightmost_peak_idx = i
-                break
-            end
-        end
-    end
+    rightmost_peak_idx = _rightmost_significant_peak(smoothed, peak_threshold)
 
     # If peak is at very low neighbor counts (< 5), distribution is mostly isolated
     # Use conservative threshold or warn
@@ -215,6 +205,23 @@ function _valley_threshold(counts::Vector{Int})
     end
 end
 
+"""
+    _rightmost_significant_peak(smoothed, peak_threshold) -> Int
+
+Index of the rightmost local maximum of `smoothed` (a value ≥ both neighbours,
+with a missing right edge treated as 0) whose height is at least `peak_threshold`.
+Returns 1 if none qualifies. Shared by the valley-threshold search and the
+diagnostic figure so both mark the same peak.
+"""
+function _rightmost_significant_peak(smoothed::AbstractVector{<:Real}, peak_threshold::Real)
+    for i in length(smoothed):-1:3
+        smoothed[i] >= smoothed[i-1] || continue
+        smoothed[i] >= get(smoothed, i+1, 0.0) || continue
+        smoothed[i] >= peak_threshold && return i
+    end
+    return 1
+end
+
 function _save_densityfilter_outputs!(dir::String, cfg::DensityFilterConfig, v::Int, t::Float64,
                                       neighbor_counts::Vector{Int}, threshold::Int, n_before::Int, n_after::Int)
     mkpath(dir)
@@ -229,6 +236,7 @@ end
 
 function _write_densityfilter_stats(dir, cfg, n_before, n_after, threshold, t)
     n_rejected = n_before - n_after
+    pct_rejected = n_before == 0 ? 0.0 : round(100 * n_rejected / n_before, digits=1)
 
     filepath = joinpath(dir, "stats.md")
     open(filepath, "w") do io
@@ -236,7 +244,7 @@ function _write_densityfilter_stats(dir, cfg, n_before, n_after, threshold, t)
         println(io, "## Summary")
         println(io, "- **Input**: $n_before")
         println(io, "- **Output**: $n_after")
-        println(io, "- **Rejected**: $n_rejected ($(round(100*n_rejected/n_before, digits=1))%)")
+        println(io, "- **Rejected**: $n_rejected ($pct_rejected%)")
         println(io, "- **Threshold**: $threshold neighbors")
         println(io, "- **Time**: $(round(t, digits=2))s")
         println(io, "")
@@ -262,15 +270,10 @@ function _save_densityfilter_figures(dir, neighbor_counts, threshold, cfg)
         smoothed[i] = (hist_bins[max(1,i-1)] + hist_bins[i] + hist_bins[min(end,i+1)]) / 3
     end
 
-    # Find rightmost significant peak
+    # Find rightmost significant peak (same routine the threshold uses, so the
+    # marked peak matches the threshold decision).
     peak_threshold = 0.05 * maximum(smoothed)
-    peak_idx = 1
-    for i in length(smoothed):-1:3
-        if smoothed[i] >= peak_threshold && smoothed[i] >= smoothed[max(1,i-1)]
-            peak_idx = i
-            break
-        end
-    end
+    peak_idx = _rightmost_significant_peak(smoothed, peak_threshold)
     peak_val = hist_bins[peak_idx]
 
     method_str = cfg.min_neighbors == :auto ? "auto: valley method" : "manual"

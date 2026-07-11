@@ -51,6 +51,7 @@ makedocs(;
             "Rendering"           => "steps/render.md",
             "Bayesian Grouping"   => "steps/bagol.md",
             "Clustering"          => "steps/clustering.md",
+            "Edge Classification" => "steps/edgeclassify.md",
             "Multi-Channel Steps" => [
                 "Composite Render"  => "steps/composite_render.md",
                 "Cross-Alignment"   => "steps/cross_align.md",

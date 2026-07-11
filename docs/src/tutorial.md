@@ -12,7 +12,7 @@ using MicroscopePSFs
 camera = IdealCamera(256, 128, 0.1)
 
 # Simulate: 4 datasets x 2000 frames, 8-mer pattern
-sim_params = StaticSMLMConfig(density=2.0, sigma_psf=0.13, nframes=2000, ndatasets=4)
+sim_params = StaticSMLMConfig(density=2.0, σ_psf=0.13, nframes=2000, ndatasets=4)
 pattern = Nmer2D(n=8, d=0.05)
 fluor = GenericFluor(photons=50000.0, k_off=20.0, k_on=0.02)
 

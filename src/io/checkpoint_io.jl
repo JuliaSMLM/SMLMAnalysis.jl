@@ -44,11 +44,17 @@ function _smld_to_columnar(smld::Union{BasicSMLD, Nothing})
     T = typeof(e[1])
     fields = fieldnames(T)
 
-    # Build columnar data dict
-    cols = Dict{Symbol, Any}()
+    # Build columnar data dict. Materialize each column as a concretely-typed
+    # Vector{fieldtype(T,f)} rather than the Vector{Any} that
+    # `[getfield(em, f) for em in e]` would produce (getfield with a runtime Symbol
+    # is type-unstable), so millions of emitters aren't boxed element-by-element.
+    cols = Dict{Symbol, Any}()   # heterogeneous columns → dict value type stays Any
     for f in fields
-        vals = [getfield(em, f) for em in e]
-        cols[f] = vals
+        col = Vector{fieldtype(T, f)}(undef, n)
+        @inbounds for i in 1:n
+            col[i] = getfield(e[i], f)
+        end
+        cols[f] = col
     end
 
     (
@@ -116,7 +122,10 @@ function save_pipeline_state(path::String, result::AnalysisResult;
     smld_raw_cols = _smld_to_columnar(smld_raw)
     smld_connected_cols = _smld_to_columnar(result.smld_connected)
 
-    jldsave(path;
+    # Atomic write: a checkpoint exists precisely to survive a crash, so it must not
+    # be the thing corrupted by one. Write to a temp path, then rename over the target.
+    tmp = path * ".tmp"
+    jldsave(tmp;
         smld_cols = smld_cols,
         smld_raw_cols = smld_raw_cols,
         smld_connected_cols = smld_connected_cols,
@@ -125,6 +134,7 @@ function save_pipeline_state(path::String, result::AnalysisResult;
         camera = camera,
         checkpoint_version = 8
     )
+    mv(tmp, path; force=true)
 
     path
 end

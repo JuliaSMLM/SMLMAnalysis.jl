@@ -80,7 +80,7 @@ function crosscorr_step(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossCorrConfi
         end
     end
 
-    v >= Verbosity.PROGRESS && @info "  -> g(r) computed: $(length(r)) bins, peak=$(round(maximum(g), digits=2)) ($(round(t, digits=2))s)"
+    v >= Verbosity.PROGRESS && @info "  -> g(r) computed: $(length(r)) bins, peak=$(round(maximum(g; init=0.0), digits=2)) ($(round(t, digits=2))s)"
 
     info = CrossCorrInfo(r, g, n_a, n_b, area, cfg.r_max, cfg.dr, label_a, label_b, t)
     (smlds, info)
@@ -154,9 +154,10 @@ function _compute_crosscorr(smld_a::SMLMData.BasicSMLD, smld_b::SMLMData.BasicSM
     counts = zeros(Float64, n_bins)
     density_b = n_b / area
 
+    point = zeros(2)   # reused query buffer — avoids a per-emitter [xa, ya] allocation
     for i in 1:n_a
         xa, ya = em_a[i].x, em_a[i].y
-        point = [xa, ya]
+        point[1] = xa; point[2] = ya
         idxs = inrange(tree_b, point, cfg.r_max)
 
         for j in idxs

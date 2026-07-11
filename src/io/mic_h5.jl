@@ -6,8 +6,10 @@
 
 using HDF5
 
-# Helper to check if path exists in HDF5 file (works with nested paths)
-_h5_exists(f, path) = try; f[path]; true; catch; false; end
+# Helper to check if path exists in HDF5 file (works with nested paths).
+# HDF5.haskey only checks direct children, so probe by indexing; a missing path
+# throws (→ false) but a real interrupt must still propagate.
+_h5_exists(f, path) = try; f[path]; true; catch e; e isa InterruptException && rethrow(); false; end
 
 # Helper to resolve actual dataset path (handles both old and new H5 formats)
 function _resolve_data_path(f, dk::String)
@@ -58,8 +60,11 @@ function load_mic_h5_info(filepath::String)
                 end
                 n_frames += sz[3]
                 push!(frames_per_block, sz[3])
-            catch
-                # Skip blocks that don't have valid data
+            catch e
+                e isa InterruptException && rethrow()
+                # Skip blocks without valid data, but surface the loss — a silently
+                # dropped block otherwise shows up only as a frame-count mismatch.
+                @warn "load_mic_h5_info: skipping unreadable data block \"$dk\"" exception=e
                 continue
             end
         end
@@ -68,6 +73,13 @@ function load_mic_h5_info(filepath::String)
             height = h,
             width = w,
             n_frames = n_frames,
+            # n_blocks must be the RAW key count, not the readable count: downstream
+            # (_resolve_file_sources → load_mic_h5_block) addresses blocks by their
+            # ordinal in this same sorted `data_keys` list, so `1:n_blocks` has to line
+            # up with it. `frames_per_block` (readable only) may therefore be shorter;
+            # an unreadable block is surfaced by the @warn above rather than by shrinking
+            # the count (which would misalign block ordinals and silently load the wrong
+            # dataset).
             n_blocks = length(data_keys),
             frames_per_block = frames_per_block,
             has_calibration = _h5_exists(f, "Calibration"),

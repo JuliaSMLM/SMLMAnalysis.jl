@@ -7,6 +7,18 @@ using Dates
 # ============================================================
 # Verbosity Levels
 # ============================================================
+"""
+    Verbosity
+
+Output-detail levels for `analyze()` steps, used as integer constants (higher =
+more output/artifacts). Compare with `verbose >= Verbosity.STANDARD`.
+
+- `SILENT` (0): errors only
+- `PROGRESS` (1): step names + counts
+- `STANDARD` (2): + `stats.md` and basic figures
+- `DETAILED` (3): + diagnostic plots
+- `DEBUG` (4): + MP4s, frame-by-frame, heavy visualizations
+"""
 module Verbosity
     const SILENT = 0    # Errors only
     const PROGRESS = 1  # Step names + counts
@@ -79,6 +91,13 @@ DataSource(path::String; frame_range=nothing) = DataSource(nothing, nothing, pat
 # Empty data source (for file-based DetectFitConfig workflows)
 DataSource() = DataSource(nothing, nothing, nothing, nothing)
 
+"""
+    get_images(ds::DataSource) -> AbstractArray{<:Real,3}
+
+Return the single image stack held by `ds`, loading it from `ds.path` if the source
+is file-backed. Errors if the source holds multiple datasets (use `ds.images_vec`)
+or specifies no data.
+"""
 function get_images(ds::DataSource)
     ds.images !== nothing && return ds.images
     ds.images_vec !== nothing && error("DataSource holds multiple datasets. Access via ds.images_vec.")
@@ -521,10 +540,14 @@ end
 # Pretty printing
 # ============================================================
 
-function Base.show(io::IO, cfg::SMLMData.AbstractSMLMConfig)
+# Compact one-line config display. Registered per SMLMAnalysis-owned config type at
+# the bottom of SMLMAnalysis.jl (after the step includes define those types), NOT on
+# SMLMData.AbstractSMLMConfig — dispatching Base.show on the upstream abstract type
+# would be type piracy that restyles every config subtype across the ecosystem
+# (FrameConnectConfig, DriftConfig, RenderConfig, DBSCANConfig, …).
+function _show_config(io::IO, cfg)
     T = typeof(cfg)
-    fields = fieldnames(T)
-    vals = [string(f, "=", getfield(cfg, f)) for f in fields]
+    vals = [string(f, "=", getfield(cfg, f)) for f in fieldnames(T)]
     print(io, "$(nameof(T))($(join(vals, ", ")))")
 end
 
