@@ -224,6 +224,24 @@ SMLMData (core types: Emitter, Camera, BasicSMLD)
 
 All packages share [SMLMData.jl](https://github.com/JuliaSMLM/SMLMData.jl) types. Coordinates are in microns throughout.
 
+## AI Assistant Guide
+
+If you use an AI coding assistant, `install_agent_guide()` writes a hierarchical,
+version-stamped guide to the whole ecosystem — the `analyze()` pipeline plus the API
+of every sub-package — assembled from the versions resolved in your environment:
+
+```julia
+using SMLMAnalysis
+install_agent_guide()                      # Claude Code skill in ./.claude (gitignored by default)
+install_agent_guide(track=true)            # …and committed, to share with the repo
+install_agent_guide(tool=:codex)           # Codex AGENTS.md + reference bundle in this repo
+install_agent_guide(scope=:user)           # install once for all your projects (~/.claude)
+```
+
+`tool` is `:claude` or `:codex`; `scope` is `:project` (this repo) or `:user` (your
+home). At project scope the guide is added to `.gitignore` unless `track=true`. Re-run
+with `overwrite=true` to refresh it against your current package versions.
+
 ## Documentation
 
 - [Stable docs](https://JuliaSMLM.github.io/SMLMAnalysis.jl/stable/) - Full guide, configuration reference, and API

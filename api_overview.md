@@ -471,3 +471,21 @@ images, metadata = load_mic_h5(path)
 info = load_mic_h5_info(path)
 block = load_mic_h5_block(path, block_index)
 ```
+
+## AI Assistant Guide
+
+### install_agent_guide
+
+```julia
+install_agent_guide(; tool=:claude, scope=:project, track=false,
+                      overwrite=false, dir=pwd()) -> String
+```
+
+Writes a hierarchical, version-stamped ecosystem guide (the `analyze()` pipeline plus
+every sub-package's `api_overview.md`, read from each `pkgdir`) for an AI coding
+assistant. Returns the installed skill/bundle directory.
+
+- `tool`: `:claude` → Claude Code skill (`.claude/skills/smlmanalysis/SKILL.md` + `reference/*.md`); `:codex` → `smlm-agent-guide/` bundle + a managed block in `AGENTS.md`.
+- `scope`: `:project` (into `dir`) or `:user` (into `~/.claude` / `~/.codex`).
+- `track`: project scope only — when `false` (default) the guide is added to `.gitignore`; `track=true` commits it.
+- `overwrite`: refresh an existing install in place.

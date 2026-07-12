@@ -298,6 +298,64 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test_throws ErrorException load_smld(bogus)
         end
     end
+
+    @testset "install_agent_guide" begin
+        # Arg validation
+        @test_throws ArgumentError install_agent_guide(tool = :bogus)
+        @test_throws ArgumentError install_agent_guide(scope = :bogus)
+
+        # Claude, project scope, default track=false → gitignored skill bundle.
+        mktempdir() do dir
+            skill = install_agent_guide(dir = dir)
+            @test skill == joinpath(dir, ".claude", "skills", "smlmanalysis")
+            @test isfile(joinpath(skill, "SKILL.md"))
+
+            refs = readdir(joinpath(skill, "reference"))
+            # SMLMAnalysis + the 10 ecosystem packages, each with a reference file.
+            @test length(refs) == 11
+            for name in ("SMLMAnalysis", "SMLMData", "GaussMLE", "SMLMBaGoL", "SMLMRender")
+                @test "$name.md" in refs
+            end
+
+            skilltext = read(joinpath(skill, "SKILL.md"), String)
+            @test occursin("name: smlmanalysis", skilltext)
+            @test occursin("description:", skilltext)
+            @test occursin("Dependency hierarchy", skilltext)
+
+            # track=false (default) gitignores the skill dir.
+            @test occursin(".claude/skills/smlmanalysis/", read(joinpath(dir, ".gitignore"), String))
+
+            # Re-install without overwrite is refused; with overwrite it succeeds.
+            @test_throws ErrorException install_agent_guide(dir = dir)
+            @test install_agent_guide(dir = dir, overwrite = true) == skill
+        end
+
+        # Claude, track=true → committed (no .gitignore written).
+        mktempdir() do dir
+            install_agent_guide(dir = dir, track = true)
+            @test !isfile(joinpath(dir, ".gitignore"))
+        end
+
+        # Codex, project scope: bundle + a managed block appended to AGENTS.md that
+        # preserves pre-existing content and is idempotent across re-runs.
+        mktempdir() do dir
+            write(joinpath(dir, "AGENTS.md"), "# My project rules\n\nBe careful.\n")
+            bundle = install_agent_guide(dir = dir, tool = :codex)
+            @test bundle == joinpath(dir, "smlm-agent-guide")
+            @test isfile(joinpath(bundle, "GUIDE.md"))
+            @test length(readdir(joinpath(bundle, "reference"))) == 11
+
+            agents = read(joinpath(dir, "AGENTS.md"), String)
+            @test occursin("My project rules", agents)                 # user content kept
+            @test occursin("BEGIN SMLMAnalysis agent guide", agents)   # our block added
+            @test occursin("smlm-agent-guide/GUIDE.md", agents)
+
+            install_agent_guide(dir = dir, tool = :codex, overwrite = true)
+            agents2 = read(joinpath(dir, "AGENTS.md"), String)
+            @test count("BEGIN SMLMAnalysis agent guide", agents2) == 1  # not duplicated
+            @test occursin("My project rules", agents2)
+        end
+    end
 end
 
 if SMLM_TEST_FULL
