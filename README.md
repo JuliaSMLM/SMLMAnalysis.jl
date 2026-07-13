@@ -239,8 +239,10 @@ install_agent_guide(scope=:user)           # install once for all your projects 
 ```
 
 `tool` is `:claude` or `:codex`; `scope` is `:project` (this repo) or `:user` (your
-home). At project scope the guide is added to `.gitignore` unless `track=true`. Re-run
-with `overwrite=true` to refresh it against your current package versions.
+home). At project scope the guide is added to `.gitignore` unless `track=true`.
+Re-running refreshes it against your current package versions; `agent_guide_status()`
+reports whether an install is stale, and `uninstall_agent_guide()` removes it (both act
+only on guides this installer stamped).
 
 ## Documentation
 

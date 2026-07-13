@@ -248,7 +248,7 @@ include("multitarget.jl")
 # AI coding-assistant guide installer
 # ============================================================
 include("agent_guide.jl")
-export install_agent_guide
+export install_agent_guide, uninstall_agent_guide, agent_guide_status
 
 # ============================================================
 # Compact display for SMLMAnalysis-owned config types

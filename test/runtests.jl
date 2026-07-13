@@ -303,11 +303,13 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         # Arg validation
         @test_throws ArgumentError install_agent_guide(tool = :bogus)
         @test_throws ArgumentError install_agent_guide(scope = :bogus)
+        @test_throws ArgumentError uninstall_agent_guide(tool = :bogus)
+        @test_throws ArgumentError agent_guide_status(scope = :bogus)
 
-        # Claude, project scope, default track=false → gitignored skill bundle.
+        # Claude, project scope, default track=false → gitignored, namespaced, stamped.
         mktempdir() do dir
             skill = install_agent_guide(dir = dir)
-            @test skill == joinpath(dir, ".claude", "skills", "smlmanalysis")
+            @test skill == joinpath(dir, ".claude", "skills", "smlma-ecosystem")
             @test isfile(joinpath(skill, "SKILL.md"))
 
             refs = readdir(joinpath(skill, "reference"))
@@ -318,16 +320,45 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             end
 
             skilltext = read(joinpath(skill, "SKILL.md"), String)
-            @test occursin("name: smlmanalysis", skilltext)
+            @test occursin("name: smlma-ecosystem", skilltext)
             @test occursin("description:", skilltext)
+            @test occursin("x-installer: SMLMAnalysis", skilltext)   # provenance stamp
+            @test occursin("x-source-version:", skilltext)
             @test occursin("Dependency hierarchy", skilltext)
 
-            # track=false (default) gitignores the skill dir.
-            @test occursin(".claude/skills/smlmanalysis/", read(joinpath(dir, ".gitignore"), String))
+            # track=false (default) gitignores the namespaced skill dir.
+            @test occursin(".claude/skills/smlma-ecosystem/", read(joinpath(dir, ".gitignore"), String))
 
-            # Re-install without overwrite is refused; with overwrite it succeeds.
+            # Doctor: freshly installed, not stale.
+            st = agent_guide_status(dir = dir)
+            @test st.installed
+            @test !st.stale
+            @test st.source_version == st.current_version
+
+            # Own-install idempotency: re-running our OWN stamped install refreshes
+            # WITHOUT overwrite (no error), returning the same path.
+            @test install_agent_guide(dir = dir) == skill
+
+            # A foreign/unstamped skill in the same dir IS refused unless overwrite.
+            write(joinpath(skill, "SKILL.md"), "---\nname: smlma-ecosystem\n---\nhand-made\n")
             @test_throws ErrorException install_agent_guide(dir = dir)
             @test install_agent_guide(dir = dir, overwrite = true) == skill
+            @test occursin("x-installer: SMLMAnalysis", read(joinpath(skill, "SKILL.md"), String))
+
+            # Uninstall removes only our stamped install.
+            @test uninstall_agent_guide(dir = dir) == [skill]
+            @test !isdir(skill)
+            @test !agent_guide_status(dir = dir).installed
+            @test isempty(uninstall_agent_guide(dir = dir))   # nothing left → no-op
+        end
+
+        # Uninstall leaves a foreign skill untouched.
+        mktempdir() do dir
+            skill = joinpath(dir, ".claude", "skills", "smlma-ecosystem")
+            mkpath(skill)
+            write(joinpath(skill, "SKILL.md"), "---\nname: smlma-ecosystem\n---\nnot ours\n")
+            @test isempty(uninstall_agent_guide(dir = dir))
+            @test isdir(skill)
         end
 
         # Claude, track=true → committed (no .gitignore written).
@@ -336,24 +367,34 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test !isfile(joinpath(dir, ".gitignore"))
         end
 
-        # Codex, project scope: bundle + a managed block appended to AGENTS.md that
-        # preserves pre-existing content and is idempotent across re-runs.
+        # Codex: stamped bundle + a managed block appended to AGENTS.md that preserves
+        # pre-existing content and is idempotent; uninstall strips it back out.
         mktempdir() do dir
             write(joinpath(dir, "AGENTS.md"), "# My project rules\n\nBe careful.\n")
             bundle = install_agent_guide(dir = dir, tool = :codex)
             @test bundle == joinpath(dir, "smlm-agent-guide")
             @test isfile(joinpath(bundle, "GUIDE.md"))
+            @test occursin("x-installer: SMLMAnalysis", read(joinpath(bundle, "GUIDE.md"), String))
             @test length(readdir(joinpath(bundle, "reference"))) == 11
 
             agents = read(joinpath(dir, "AGENTS.md"), String)
-            @test occursin("My project rules", agents)                 # user content kept
-            @test occursin("BEGIN SMLMAnalysis agent guide", agents)   # our block added
+            @test occursin("My project rules", agents)                   # user content kept
+            @test occursin("BEGIN SMLMAnalysis agent-guide", agents)     # our block added
             @test occursin("smlm-agent-guide/GUIDE.md", agents)
 
-            install_agent_guide(dir = dir, tool = :codex, overwrite = true)
+            # Idempotent refresh of our own bundle (no overwrite needed).
+            install_agent_guide(dir = dir, tool = :codex)
             agents2 = read(joinpath(dir, "AGENTS.md"), String)
-            @test count("BEGIN SMLMAnalysis agent guide", agents2) == 1  # not duplicated
+            @test count("BEGIN SMLMAnalysis agent-guide", agents2) == 1  # not duplicated
             @test occursin("My project rules", agents2)
+
+            # Uninstall removes bundle + our block, preserving the user's content.
+            removed = uninstall_agent_guide(dir = dir, tool = :codex)
+            @test joinpath(dir, "smlm-agent-guide") in removed
+            @test !isdir(bundle)
+            agents3 = read(joinpath(dir, "AGENTS.md"), String)
+            @test occursin("My project rules", agents3)
+            @test !occursin("BEGIN SMLMAnalysis agent-guide", agents3)
         end
     end
 end

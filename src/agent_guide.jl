@@ -1,17 +1,32 @@
 # ============================================================
-# AI coding-assistant guide installer
+# AI coding-assistant guide installer (lab skills-installer convention)
 # ============================================================
 # `install_agent_guide()` writes a hierarchical, version-stamped guide to the whole
 # JuliaSMLM ecosystem into a repo (or the user's home) so a coding assistant (Claude
 # Code or Codex) has the APIs of SMLMAnalysis and every sub-package on hand.
 #
-# The content is assembled at call time from the versions RESOLVED in the current
-# environment — each package's `api_overview.md` (falling back to README) is read
-# from its `pkgdir`, so the guide never drifts from what is actually installed.
+# Content is assembled at call time from the versions RESOLVED in the current
+# environment — each package's `api_overview.md` (README fallback) is read from its
+# `pkgdir`, so the guide never drifts from what is actually installed.
+#
+# Follows the lab-wide convention for package-shipped skill/agent-guide installers:
+#   - namespaced install dir  .claude/skills/<pkgprefix>-<skill>/  (collision-safe)
+#   - provenance stamp (x-installer / x-source-version / x-source-commit /
+#     x-installed-format) written into the installed SKILL.md frontmatter
+#   - track=false gitignore default; copy-never-symlink
+#   - re-run refreshes only THIS installer's own stamped install; a foreign or
+#     hand-made target is refused unless overwrite=true
+#   - stamp-scoped uninstall (uninstall_agent_guide) + a doctor (agent_guide_status)
+#   - Codex: one managed, stamped block per installing package in AGENTS.md
+
+const _INSTALLER        = "SMLMAnalysis"
+const _SKILL_DIRNAME    = "smlma-ecosystem"   # <pkgprefix>-<skill>
+const _INSTALLED_FORMAT = 1
+const _CODEX_BUNDLE     = "smlm-agent-guide"
 
 # Ordered ecosystem package list (module => one-line role). SMLMAnalysis itself is
 # prepended in _collect_pkg_docs as the integration layer. Order mirrors the
-# dependency hierarchy: core types first, then the single-step packages, then the
+# dependency hierarchy: core types first, then single-step packages, then the
 # higher-level grouping/clustering packages.
 _ecosystem_packages() = (
     (SMLMData,            "Core types shared by every package: Emitter2D/3D(Fit), Camera, BasicSMLD, ROIBatch"),
@@ -41,9 +56,59 @@ SMLMData  (core types — no deps)
 SMLMAnalysis  (integrates all of the above into one analyze() pipeline)
 """
 
-# Single-line YAML description for the Claude skill frontmatter (also used as the
-# lead line of the Codex guide). Kept free of `: ` so it is a safe YAML plain scalar.
+# Single-line YAML description for the Claude skill frontmatter (also the lead line of
+# the Codex block). Kept free of `: ` so it is a safe YAML plain scalar.
 _guide_description() = "JuliaSMLM SMLM analysis ecosystem — the unified analyze() pipeline (detect, fit, filter, frame-connect, drift-correct, render, cluster, BaGoL) plus the full APIs of every sub-package. Use when writing or debugging single-molecule-localization-microscopy code with SMLMAnalysis.jl or any JuliaSMLM package."
+
+# --- provenance stamp ----------------------------------------------------------
+
+_source_version() = try string(pkgversion(@__MODULE__)) catch; "unknown" end
+
+# Short commit of the installing package's checkout, or "none" for a registered
+# install with no git tree. Never throws — provenance is best-effort.
+function _source_commit()
+    root = pkgdir(@__MODULE__)
+    root === nothing && return "none"
+    try
+        c = strip(readchomp(`git -C $root rev-parse --short=7 HEAD`))
+        isempty(c) ? "none" : String(c)
+    catch
+        "none"
+    end
+end
+
+_stamp_pairs() = ("x-installer"        => _INSTALLER,
+                  "x-source-version"   => _source_version(),
+                  "x-source-commit"    => _source_commit(),
+                  "x-installed-format" => string(_INSTALLED_FORMAT))
+
+_stamp_inline() = join(("$k: $v" for (k, v) in _stamp_pairs()), " | ")
+
+# Read a leading-frontmatter field (between the first two `---` lines). nothing if
+# the file/field is absent — used to identify our own installs by x-installer.
+function _frontmatter_field(path::AbstractString, key::AbstractString)
+    isfile(path) || return nothing
+    seen = 0
+    for ln in readlines(path)
+        s = strip(ln)
+        if s == "---"
+            seen += 1
+            seen == 2 && break
+            continue
+        end
+        if seen == 1 && startswith(s, key * ":")
+            return strip(s[length(key)+2:end], ['"', ' '])
+        end
+    end
+    nothing
+end
+
+# Read an inline `key: value` stamp field from the Codex GUIDE.md comment header.
+function _guide_field(guide::AbstractString, key::AbstractString)
+    isfile(guide) || return nothing
+    m = match(Regex(key * raw":\s*([^\s|]+)"), read(guide, String))
+    m === nothing ? nothing : String(m.captures[1])
+end
 
 # --- content collection --------------------------------------------------------
 
@@ -110,6 +175,21 @@ function _render_guide(entries, refprefix::AbstractString)
     String(take!(io))
 end
 
+# SKILL.md = stamped YAML frontmatter + the rendered guide body.
+function _skill_text(entries)
+    io = IOBuffer()
+    println(io, "---")
+    println(io, "name: ", _SKILL_DIRNAME)
+    println(io, "description: \"", _guide_description(), "\"")
+    for (k, v) in _stamp_pairs()
+        println(io, k, ": ", v)
+    end
+    println(io, "---")
+    println(io)
+    print(io, _render_guide(entries, "reference"))
+    String(take!(io))
+end
+
 function _write_reference!(refdir::AbstractString, e)
     mkpath(refdir)
     p = joinpath(refdir, e.name * ".md")
@@ -141,11 +221,12 @@ function _ensure_gitignored!(root::AbstractString, patterns)
     gi
 end
 
-const _AGENTS_BEGIN = "<!-- BEGIN SMLMAnalysis agent guide (managed by install_agent_guide) -->"
-const _AGENTS_END   = "<!-- END SMLMAnalysis agent guide -->"
+# Package-scoped markers so multiple packages can each own a block in one AGENTS.md.
+const _AGENTS_BEGIN = "<!-- BEGIN SMLMAnalysis agent-guide (managed by install_agent_guide) -->"
+const _AGENTS_END   = "<!-- END SMLMAnalysis agent-guide -->"
 
-# Insert or replace our delimited block in AGENTS.md, leaving any other content
-# untouched. Idempotent: re-running refreshes the block in place.
+# Insert or replace our delimited block in AGENTS.md, leaving other content untouched.
+# Idempotent: re-running refreshes the block in place.
 function _upsert_agents_block!(path::AbstractString, block::AbstractString)
     raw     = isfile(path) ? read(path, String) : ""
     managed = string(_AGENTS_BEGIN, '\n', block, '\n', _AGENTS_END)
@@ -163,7 +244,39 @@ function _upsert_agents_block!(path::AbstractString, block::AbstractString)
     path
 end
 
-# --- public entry point --------------------------------------------------------
+# Remove our block from AGENTS.md; returns true if a block was present and removed.
+function _remove_agents_block!(path::AbstractString)
+    isfile(path) || return false
+    raw = read(path, String)
+    b = findfirst(_AGENTS_BEGIN, raw)
+    e = findfirst(_AGENTS_END, raw)
+    (b === nothing || e === nothing || first(e) < first(b)) && return false
+    pre  = rstrip(raw[1:prevind(raw, first(b))])
+    post = strip(raw[nextind(raw, last(e)):end])
+    write(path, isempty(post) ? (isempty(pre) ? "" : pre * '\n') :
+                                 string(pre, isempty(pre) ? "" : "\n\n", post, '\n'))
+    true
+end
+
+_codex_block() = string(
+    "<!-- ", _stamp_inline(), " -->\n",
+    _guide_description(), "\n\n",
+    "When working with JuliaSMLM / SMLMAnalysis code, read the ecosystem guide at ",
+    "`", _CODEX_BUNDLE, "/GUIDE.md` and the per-package API references under ",
+    "`", _CODEX_BUNDLE, "/reference/`.")
+
+# Skill/bundle directory for a (tool, scope, dir) triple.
+function _install_dir(tool::Symbol, scope::Symbol, dir::AbstractString)
+    if tool == :claude
+        scope == :project ? joinpath(dir, ".claude", "skills", _SKILL_DIRNAME) :
+                            joinpath(homedir(), ".claude", "skills", _SKILL_DIRNAME)
+    else
+        base = scope == :project ? String(dir) : joinpath(homedir(), ".codex")
+        joinpath(base, _CODEX_BUNDLE)
+    end
+end
+
+# --- public entry points -------------------------------------------------------
 
 """
     install_agent_guide(; tool=:claude, scope=:project, track=false,
@@ -177,32 +290,35 @@ environment — each package's `api_overview.md` (falling back to `README.md`) i
 from its `pkgdir` and copied into a `reference/` bundle, with a top-level map linking
 them. Re-running refreshes it against whatever is currently installed.
 
+Follows the lab skills-installer convention: the install carries a provenance stamp
+(`x-installer`, `x-source-version`, `x-source-commit`), so re-running refreshes only
+*this* installer's own install, and [`uninstall_agent_guide`](@ref) /
+[`agent_guide_status`](@ref) act only on stamped installs.
+
 # Keyword arguments
 - `tool::Symbol = :claude` — target assistant:
-  - `:claude` writes a Claude Code **skill** (`SKILL.md` + `reference/*.md`).
-  - `:codex` writes a `smlm-agent-guide/` bundle and adds a pointer block to `AGENTS.md`.
-- `scope::Symbol = :project` — where it lands:
-  - `:project` → into `dir` (the repo): `.claude/skills/smlmanalysis/` or `./AGENTS.md`.
-  - `:user` → into your home: `~/.claude/skills/smlmanalysis/` or `~/.codex/AGENTS.md`
-    (applies to every project you open).
+  - `:claude` writes a Claude Code **skill** (`.claude/skills/smlma-ecosystem/SKILL.md`
+    + `reference/*.md`).
+  - `:codex` writes a `smlm-agent-guide/` bundle and a managed block in `AGENTS.md`.
+- `scope::Symbol = :project` — `:project` → into `dir` (the repo); `:user` → into your
+  home (`~/.claude` / `~/.codex`, applying to every project you open).
 - `track::Bool = false` — **project scope only.** When `false` (default) the installed
   files are added to the repo's `.gitignore`, keeping the guide out of history. Pass
-  `track=true` to commit and share it with the repo. Ignored (with a warning) for
-  `scope=:user`.
-- `overwrite::Bool = false` — refresh an existing install in place. Without it, an
-  existing guide raises an error rather than being clobbered.
-- `dir::AbstractString = pwd()` — the repo root for `scope=:project` (defaults to the
-  current directory).
+  `track=true` to commit and share it. Ignored (with a warning) for `scope=:user`.
+- `overwrite::Bool = false` — replace a target that was **not** installed by this
+  installer (a hand-made skill, or another package's install). Refreshing our own
+  stamped install never needs it.
+- `dir::AbstractString = pwd()` — the repo root for `scope=:project`.
 
 Returns the path of the installed skill/bundle directory.
 
 # Examples
 ```julia
 using SMLMAnalysis
-install_agent_guide()                                   # Claude skill in ./.claude, gitignored
-install_agent_guide(track=true)                         # …and committed to the repo
-install_agent_guide(tool=:codex)                        # Codex AGENTS.md + bundle in this repo
-install_agent_guide(scope=:user)                        # Claude skill for all your projects
+install_agent_guide()                    # Claude skill in ./.claude, gitignored
+install_agent_guide(track=true)          # …and committed to the repo
+install_agent_guide(tool=:codex)         # Codex AGENTS.md + bundle in this repo
+install_agent_guide(scope=:user)         # Claude skill for all your projects
 ```
 """
 function install_agent_guide(; tool::Symbol = :claude,
@@ -218,48 +334,111 @@ function install_agent_guide(; tool::Symbol = :claude,
         @warn "track applies only to scope=:project (the :user guide lives outside any repo); ignoring track=true"
     end
 
-    entries    = _collect_pkg_docs()
-    gitignore  = !track && scope == :project
+    entries   = _collect_pkg_docs()
+    gitignore = !track && scope == :project
+    target    = _install_dir(tool, scope, dir)
 
     if tool == :claude
-        skill_dir = scope == :project ?
-            joinpath(dir, ".claude", "skills", "smlmanalysis") :
-            joinpath(homedir(), ".claude", "skills", "smlmanalysis")
-        wrapper = joinpath(skill_dir, "SKILL.md")
-        if isfile(wrapper) && !overwrite
-            error("A Claude skill is already installed at $skill_dir. Pass overwrite=true to refresh it.")
+        wrapper = joinpath(target, "SKILL.md")
+        # Own-install idempotency: refresh ours freely; refuse a foreign/unstamped
+        # target unless overwrite=true.
+        if isfile(wrapper)
+            owner = _frontmatter_field(wrapper, "x-installer")
+            owner == _INSTALLER || overwrite ||
+                error("$target already exists and was not installed by $_INSTALLER " *
+                      "(x-installer=$(owner === nothing ? "none" : owner)). Pass overwrite=true to replace it.")
         end
-        refdir = joinpath(skill_dir, "reference")
+        refdir = joinpath(target, "reference")
         isdir(refdir) && rm(refdir; recursive = true)
         mkpath(refdir)
         for e in entries
             _write_reference!(refdir, e)
         end
-        frontmatter = string("---\nname: smlmanalysis\ndescription: \"",
-                             _guide_description(), "\"\n---\n\n")
-        write(wrapper, frontmatter * _render_guide(entries, "reference"))
-        gitignore && _ensure_gitignored!(dir, ["/.claude/skills/smlmanalysis/"])
-        return skill_dir
+        write(wrapper, _skill_text(entries))
+        gitignore && _ensure_gitignored!(dir, ["/.claude/skills/$_SKILL_DIRNAME/"])
+        return target
     else # :codex
-        base       = scope == :project ? String(dir) : joinpath(homedir(), ".codex")
-        bundle_dir = joinpath(base, "smlm-agent-guide")
-        agents     = joinpath(base, "AGENTS.md")
-        refdir     = joinpath(bundle_dir, "reference")
-        if isfile(joinpath(bundle_dir, "GUIDE.md")) && !overwrite
-            error("A Codex guide is already installed at $bundle_dir. Pass overwrite=true to refresh it.")
+        guide = joinpath(target, "GUIDE.md")
+        if isfile(guide)
+            owner = _guide_field(guide, "x-installer")
+            owner == _INSTALLER || overwrite ||
+                error("$target already exists and was not installed by $_INSTALLER. Pass overwrite=true to replace it.")
         end
+        refdir = joinpath(target, "reference")
         isdir(refdir) && rm(refdir; recursive = true)
         mkpath(refdir)
         for e in entries
             _write_reference!(refdir, e)
         end
-        write(joinpath(bundle_dir, "GUIDE.md"), _render_guide(entries, "reference"))
-        block = string(_guide_description(), "\n\n",
-                       "When working with JuliaSMLM / SMLMAnalysis code, read the ecosystem guide at ",
-                       "`smlm-agent-guide/GUIDE.md` and the per-package API references under ",
-                       "`smlm-agent-guide/reference/`.")
-        _upsert_agents_block!(agents, block)
-        gitignore && _ensure_gitignored!(dir, ["/smlm-agent-guide/"])
-        return bundle_dir
+        write(guide, string("<!-- ", _stamp_inline(), " -->\n\n", _render_guide(entries, "reference")))
+        agents = joinpath(dirname(target), "AGENTS.md")
+        _upsert_agents_block!(agents, _codex_block())
+        gitignore && _ensure_gitignored!(dir, ["/$_CODEX_BUNDLE/"])
+        return target
     end
+end
+
+"""
+    uninstall_agent_guide(; tool=:claude, scope=:project, dir=pwd()) -> Vector{String}
+
+Remove a guide previously installed by SMLMAnalysis. Removes **only** targets carrying
+SMLMAnalysis's own provenance stamp — a hand-made skill or another package's install is
+left untouched. Returns the paths removed (empty if nothing of ours was found).
+"""
+function uninstall_agent_guide(; tool::Symbol = :claude,
+                                 scope::Symbol = :project,
+                                 dir::AbstractString = pwd())
+    tool in (:claude, :codex) ||
+        throw(ArgumentError("tool must be :claude or :codex, got :$tool"))
+    scope in (:project, :user) ||
+        throw(ArgumentError("scope must be :project or :user, got :$scope"))
+
+    removed = String[]
+    target  = _install_dir(tool, scope, dir)
+    if tool == :claude
+        if isdir(target) && _frontmatter_field(joinpath(target, "SKILL.md"), "x-installer") == _INSTALLER
+            rm(target; recursive = true)
+            push!(removed, target)
+        end
+    else
+        if isdir(target) && _guide_field(joinpath(target, "GUIDE.md"), "x-installer") == _INSTALLER
+            rm(target; recursive = true)
+            push!(removed, target)
+        end
+        agents = joinpath(dirname(target), "AGENTS.md")
+        _remove_agents_block!(agents) && push!(removed, agents)
+    end
+    removed
+end
+
+"""
+    agent_guide_status(; tool=:claude, scope=:project, dir=pwd()) -> NamedTuple
+
+Doctor: report an installed guide's state — `(; installed, path, source_version,
+source_commit, current_version, stale)`. `stale` is true when the stamped
+`source_version` differs from the version currently resolved in this environment
+(re-run [`install_agent_guide`](@ref) to refresh).
+"""
+function agent_guide_status(; tool::Symbol = :claude,
+                              scope::Symbol = :project,
+                              dir::AbstractString = pwd())
+    tool in (:claude, :codex) ||
+        throw(ArgumentError("tool must be :claude or :codex, got :$tool"))
+    scope in (:project, :user) ||
+        throw(ArgumentError("scope must be :project or :user, got :$scope"))
+
+    current = _source_version()
+    target  = _install_dir(tool, scope, dir)
+    stampfile = tool == :claude ? joinpath(target, "SKILL.md") : joinpath(target, "GUIDE.md")
+    reader    = tool == :claude ? _frontmatter_field : _guide_field
+
+    installed = reader(stampfile, "x-installer") == _INSTALLER
+    sv = installed ? reader(stampfile, "x-source-version") : nothing
+    sc = installed ? reader(stampfile, "x-source-commit") : nothing
+    (; installed,
+       path = target,
+       source_version = sv,
+       source_commit = sc,
+       current_version = current,
+       stale = installed && sv !== nothing && sv != current)
 end
