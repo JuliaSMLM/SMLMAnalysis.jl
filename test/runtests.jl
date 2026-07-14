@@ -397,6 +397,30 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test !occursin("BEGIN SMLMAnalysis agent-guide", agents3)
         end
     end
+
+    @testset "lab convention conformance" begin
+        # Explicit conformance check for the lab skills-installer convention
+        # (independent per-package implementations; see the convention doc). Each
+        # assert maps to one spec invariant so the lab-guide can cite this block.
+        mktempdir() do dir
+            skill = install_agent_guide(dir = dir)                    # tool=:claude default
+            # 1. Namespaced install dir: <pkgprefix>-<skill>
+            @test occursin(r"[/\\]smlma-ecosystem$", skill)
+            fm = read(joinpath(skill, "SKILL.md"), String)
+            # 2. Provenance stamp: all four x- fields present
+            for k in ("x-installer:", "x-source-version:", "x-source-commit:", "x-installed-format:")
+                @test occursin(k, fm)
+            end
+            # 3. copy-never-symlink: installed files are real files, not links
+            @test !islink(joinpath(skill, "SKILL.md"))
+            # 4. track=false default anchors a .gitignore entry
+            @test occursin("/.claude/skills/smlma-ecosystem/", read(joinpath(dir, ".gitignore"), String))
+            # 5. own-install refresh is idempotent (no flag, same path)
+            @test install_agent_guide(dir = dir) == skill
+            # 6. stamp-scoped uninstall removes our own install
+            @test uninstall_agent_guide(dir = dir) == [skill]
+        end
+    end
 end
 
 if SMLM_TEST_FULL
