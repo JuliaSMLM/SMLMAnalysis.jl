@@ -5,6 +5,7 @@ using GaussMLE
 using Test
 using Random
 using TOML
+using Statistics
 
 const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true", "1", "yes")
 
@@ -474,6 +475,41 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             end
             @test TOML.parsefile(joinpath(dir, "esc.toml"))["s"] == s
         end
+    end
+
+    @testset "intensity-filter p₂ mixture estimator" begin
+        # Regression for the unbiased double-emitter fraction estimator.
+        # The mixture model must (a) recover a small KNOWN p₂ and, critically,
+        # (b) return ≈0 when there are NO doubles — NOT the ~(1 - rate_percentile)
+        # ≈ 5% floor that the legacy tail-ratio estimate is pinned at.
+        rng = MersenneTwister(20260717)
+        # Peaked, identifiable single-emitter model: Gamma(k=3, θ=1) drawn as the sum
+        # of three exponentials. Field-normalized by the single-emitter p95 (→ ~1),
+        # mirroring the pipeline's photons/λ(x,y).
+        gamma3(r) = -log(rand(r)) - log(rand(r)) - log(rand(r))
+        function make_normalized(p_true, N, r)
+            n_dbl = round(Int, N * p_true)
+            n_sgl = N - n_dbl
+            raw = [gamma3(r) for _ in 1:(n_sgl + 2 * n_dbl)]
+            scale = quantile(raw, 0.95)
+            scale <= 0 && (scale = 1.0)
+            singles = raw[1:n_sgl] ./ scale
+            da = raw[n_sgl+1 : n_sgl+n_dbl] ./ scale
+            db = raw[n_sgl+n_dbl+1 : n_sgl+2*n_dbl] ./ scale
+            vcat(singles, da .+ db)   # f_double = f_single ⊛ f_single (sum of two singles)
+        end
+        cfg = IntensityFilterConfig(p2_n_bins = 200)
+        @test cfg.p2_method === :mixture   # new behavior is the default
+
+        # (a) p_true = 1% → recovered within a few × and clearly off the 5% floor.
+        p_hat = SMLMAnalysis._estimate_p2_mixture(make_normalized(0.01, 60_000, rng), cfg)
+        @test p_hat !== nothing
+        @test 0.003 <= p_hat <= 0.03
+
+        # (b) p_true = 0% → near zero, NOT pinned near 1 - rate_percentile (~0.05).
+        p_hat0 = SMLMAnalysis._estimate_p2_mixture(make_normalized(0.0, 60_000, rng), cfg)
+        @test p_hat0 !== nothing
+        @test p_hat0 < 0.02
     end
 end
 

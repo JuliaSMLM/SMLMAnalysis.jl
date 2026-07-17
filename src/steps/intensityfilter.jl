@@ -31,6 +31,26 @@ on-time variance. The Gaussian field fit then smooths across bins.
 - `min_bin_count::Int`: Minimum emitters per bin for rate estimation (default: 30)
 - `rate_percentile::Float64`: Percentile of per-bin photon distribution used as the
   expected single-emitter rate (default: 0.95). Higher = more permissive.
+
+# p₂ (double-emitter fraction, info-only)
+`p₂` is the estimated fraction of localizations that are actually two overlapping
+emitters. It is reported in `IntensityFilterInfo` and does **not** affect which
+localizations are filtered.
+
+- `estimate_p2::Bool`: Whether to estimate p₂ (default: `true`).
+- `p2_method::Symbol`: Estimator for p₂ (default: `:mixture`).
+    - `:mixture` — threshold-free two-component mixture fit of the field-normalized
+      photon distribution: `h(x) = (1-p)·f_single(x) + p·f_double(x)` with
+      `f_double = f_single ⊛ f_single`. `f_single` is a Gamma model fit jointly with
+      the mixing weight `p`; `p` is returned directly as the double fraction. Uses the
+      whole distribution (no tail threshold), so it is unbiased and does not floor near
+      `1 - rate_percentile`.
+    - `:tail` — legacy tail-ratio estimate `Σh(>τ) / Σf_double(>τ)` at `p2_tail_threshold`.
+      Biased high (floored near `1 - rate_percentile`) because it attributes the entire
+      single-emitter tail to doubles. Kept for comparison/back-compat only.
+- `p2_tail_threshold::Float64`: Tail threshold τ (in units of λ) for the `:tail` method
+  and for the tail-mass diagnostics reported in `IntensityFilterInfo` (default: 1.0).
+- `p2_n_bins::Int`: Number of histogram bins used for p₂ estimation (default: 200).
 """
 @kwdef struct IntensityFilterConfig <: SMLMData.AbstractSMLMConfig
     cutoff::Float64 = 0.01
@@ -39,6 +59,7 @@ on-time variance. The Gaussian field fit then smooths across bins.
     min_bin_count::Int = 30
     rate_percentile::Float64 = 0.95
     estimate_p2::Bool = true
+    p2_method::Symbol = :mixture
     p2_tail_threshold::Float64 = 1.0
     p2_n_bins::Int = 200
 end
@@ -395,38 +416,37 @@ function _convolve_1d(h::Vector{Float64})
 end
 
 """
-    _estimate_p2(xs, ys, photons, field_model, cfg) -> (p2, tail_obs, tail_f2)
+    _field_normalized_photons(xs, ys, photons, field_model) -> Vector{Float64}
 
-Estimate double-emitter fraction via mixture decomposition of field-normalized photons.
-
-Algorithm:
-1. Compute normalized photons: `n_i = photons_i / λ(x_i, y_i)`
-2. Histogram f_obs with `p2_n_bins` bins over `[0, p99.5]`
-3. Self-convolve: `f₂ = conv(f_obs, f_obs)` — distribution of sum of two singles
-4. At threshold `τ`: `p₂ = Σf_obs(>τ) / Σf₂(>τ)`
-
-Returns `(nothing, nothing, nothing)` if estimation fails (e.g., zero tail mass).
+Field-normalized photon counts `n_i = photons_i / max(1, λ(x_i, y_i))`. Under a
+well-fit field model, single emitters cluster near 1 and genuine doubles near 2.
 """
-function _estimate_p2(xs, ys, photons, field_model, cfg::IntensityFilterConfig)
+function _field_normalized_photons(xs, ys, photons, field_model)
     n = length(xs)
-    n < 100 && return (nothing, nothing, nothing)
-
-    # Field-normalized photon counts
     normalized = Vector{Float64}(undef, n)
     for i in 1:n
         λ = field_model(xs[i], ys[i])
         normalized[i] = photons[i] / max(1.0, λ)
     end
+    normalized
+end
 
-    # Histogram range: [0, p99.5]
+"""
+    _p2_tail_masses(normalized, cfg) -> (tail_obs, tail_f2)
+
+Diagnostic tail masses at `τ = cfg.p2_tail_threshold`: the observed mass above τ and
+the self-convolution (double-emitter) mass above τ, using a `[0, p99.5]` histogram with
+`cfg.p2_n_bins` bins. These populate `IntensityFilterInfo` and back the legacy `:tail`
+estimator. Returns `(nothing, nothing)` on failure.
+"""
+function _p2_tail_masses(normalized, cfg::IntensityFilterConfig)
     upper = quantile(normalized, 0.995)
-    upper <= 0 && return (nothing, nothing, nothing)
+    upper <= 0 && return (nothing, nothing)
 
     n_bins = cfg.p2_n_bins
     bin_width = upper / n_bins
     τ = cfg.p2_tail_threshold
 
-    # Build normalized histogram (probability density)
     h = zeros(Float64, n_bins)
     n_in_range = 0
     for v in normalized
@@ -436,26 +456,133 @@ function _estimate_p2(xs, ys, photons, field_model, cfg::IntensityFilterConfig)
             n_in_range += 1
         end
     end
-    n_in_range == 0 && return (nothing, nothing, nothing)
-    h ./= n_in_range  # normalize to probability
+    n_in_range == 0 && return (nothing, nothing)
+    h ./= n_in_range
 
-    # Self-convolve to get double-emitter distribution
     f2 = _convolve_1d(h)
-    f2_bin_width = bin_width  # same bin width, centers shift
 
-    # Tail mass of f_obs above τ
     τ_bin = clamp(floor(Int, τ / bin_width) + 1, 1, n_bins)
     tail_obs = sum(h[τ_bin:end])
-
-    # Tail mass of f₂ above τ
-    # f₂ has bins centered at (i-1)*bin_width for i=1:2n-1
-    # equivalent: bin i in f₂ covers values from (i-1)*bin_width
     τ_bin_f2 = clamp(floor(Int, τ / bin_width) + 1, 1, length(f2))
     tail_f2 = sum(f2[τ_bin_f2:end])
 
-    # p₂ = tail_obs / tail_f₂
-    tail_f2 <= 0 && return (nothing, tail_obs, nothing)
-    p2 = tail_obs / tail_f2
+    return (tail_obs, tail_f2)
+end
+
+"""
+    _estimate_p2_mixture(normalized, cfg) -> Union{Float64, Nothing}
+
+Threshold-free double-emitter fraction via a two-component mixture fit of the
+field-normalized photon distribution:
+
+    h(x) = (1 - p)·f_single(x) + p·f_double(x),   f_double = f_single ⊛ f_single
+
+`f_single` is modelled as a Gamma density (2 shape/scale parameters); `f_double` is its
+numerical self-convolution (`_convolve_1d`). The three parameters `(k, θ, p)` are fit by
+maximum likelihood (multinomial NLL of the binned counts) via Nelder-Mead, and `p` — the
+mixing weight — is returned directly as the double fraction, clamped to `[0, 1]`.
+
+Unlike the legacy tail-ratio estimate this uses the whole distribution: the Gamma tail is
+pinned by the bulk, so any excess near `x ≈ 2` (where singles are scarce) is attributed to
+doubles rather than assumed away. It therefore removes the `~1 - rate_percentile` floor and
+returns ≈0 when there are no doubles.
+
+Note: identifiability requires a peaked single-emitter distribution (mode away from 0). For
+a near-exponential single (Gamma shape ≈ 1) a small double fraction is partly absorbable by
+the Gamma shape and may be under-estimated. Returns `nothing` if the fit fails.
+"""
+function _estimate_p2_mixture(normalized, cfg::IntensityFilterConfig)
+    x = filter(v -> isfinite(v) && v > 0, normalized)
+    length(x) < 100 && return nothing
+
+    # Histogram grid extended past the double regime (~2×) so f_double fits on-grid.
+    upper = clamp(quantile(x, 0.999), 3.0, 12.0)
+    n_bins = cfg.p2_n_bins
+    bin_width = upper / n_bins
+    centers = [(i - 0.5) * bin_width for i in 1:n_bins]
+
+    counts = zeros(Float64, n_bins)
+    n_in_range = 0
+    for v in x
+        if 0 <= v < upper
+            idx = clamp(floor(Int, v / bin_width) + 1, 1, n_bins)
+            counts[idx] += 1.0
+            n_in_range += 1
+        end
+    end
+    n_in_range == 0 && return nothing
+
+    # Method-of-moments init for the Gamma single-emitter model.
+    μ = mean(x)
+    σ2 = var(x)
+    k0 = clamp(μ^2 / max(σ2, 1e-6), 0.5, 50.0)
+    θ0 = clamp(σ2 / max(μ, 1e-6), 1e-3, 100.0)
+
+    # Model density on the grid: (1-p)·f_single + p·f_single⊛f_single.
+    model = function (k, θ, p)
+        fs = [pdf(Gamma(k, θ), c) for c in centers]
+        s = sum(fs)
+        (s <= 0 || !isfinite(s)) && return nothing
+        fs ./= s
+        fd = _convolve_1d(fs)[1:n_bins]
+        (1 - p) .* fs .+ p .* fd
+    end
+
+    # Multinomial negative log-likelihood of the binned counts.
+    nll = function (par)
+        k = exp(par[1]); θ = exp(par[2]); p = 1 / (1 + exp(-par[3]))
+        (!isfinite(k) || !isfinite(θ) || k <= 0.1 || k > 200 || θ <= 0) && return 1e12
+        m = model(k, θ, p)
+        m === nothing && return 1e12
+        s = 0.0
+        @inbounds for i in 1:n_bins
+            mi = m[i] < 1e-12 ? 1e-12 : m[i]
+            s -= counts[i] * log(mi)
+        end
+        isfinite(s) ? s : 1e12
+    end
+
+    p0 = [log(k0), log(θ0), log(0.01 / 0.99)]
+    res = try
+        optimize(nll, p0, NelderMead(), Optim.Options(iterations=5000, g_tol=1e-9))
+    catch err
+        err isa InterruptException && rethrow()
+        @warn "intensityfilter: p₂ mixture fit failed; reporting no estimate" exception=err
+        return nothing
+    end
+
+    p = 1 / (1 + exp(-Optim.minimizer(res)[3]))
+    isfinite(p) ? clamp(p, 0.0, 1.0) : nothing
+end
+
+"""
+    _estimate_p2(xs, ys, photons, field_model, cfg) -> (p2, tail_obs, tail_f2)
+
+Estimate the double-emitter fraction p₂ (info-only) from field-normalized photons.
+
+`p2` is produced by `cfg.p2_method`:
+- `:mixture` (default) — threshold-free mixture fit (`_estimate_p2_mixture`); unbiased.
+- `:tail` — legacy tail-ratio `tail_obs / tail_f2` at `cfg.p2_tail_threshold`; biased high.
+
+`tail_obs` / `tail_f2` are always returned as tail-mass diagnostics regardless of method.
+Returns `(nothing, nothing, nothing)` if there are too few localizations to estimate.
+"""
+function _estimate_p2(xs, ys, photons, field_model, cfg::IntensityFilterConfig)
+    n = length(xs)
+    n < 100 && return (nothing, nothing, nothing)
+
+    normalized = _field_normalized_photons(xs, ys, photons, field_model)
+
+    tail_obs, tail_f2 = _p2_tail_masses(normalized, cfg)
+
+    p2 = if cfg.p2_method === :mixture
+        _estimate_p2_mixture(normalized, cfg)
+    elseif cfg.p2_method === :tail
+        (tail_obs === nothing || tail_f2 === nothing || tail_f2 <= 0) ? nothing :
+            tail_obs / tail_f2
+    else
+        throw(ArgumentError("Unknown p2_method $(cfg.p2_method); expected :mixture or :tail"))
+    end
 
     return (p2, tail_obs, tail_f2)
 end

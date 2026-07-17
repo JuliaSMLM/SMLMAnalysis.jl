@@ -69,7 +69,7 @@ using JLD2
 using CairoMakie
 using NearestNeighbors
 using Optim
-using Distributions: Poisson, ccdf
+using Distributions: Poisson, ccdf, Gamma, pdf
 
 # Re-export from SMLMData
 export AbstractCamera, IdealCamera, SCMOSCamera
