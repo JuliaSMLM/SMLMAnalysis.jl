@@ -99,8 +99,8 @@ println("  Frames per dataset: $(result.smld.n_frames)")
 println("  Total time: $(round(info.elapsed_s, digits=2))s")
 println()
 println("Step info available:")
-for (name, _) in info.steps
-    println("  info.steps[:$name]")
+for si in info.step_infos
+    println("  stepinfo(info, :$(si.name))")
 end
 println()
 println("Output saved to: $OUTPUT_DIR")

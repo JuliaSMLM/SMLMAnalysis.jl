@@ -86,7 +86,7 @@ config = AnalysisConfig(
     ],
 )
 (result, info) = analyze(image_stacks, config)
-info.steps[:detectfit]    # the DetectFitInfo
+stepinfo(info, :detectfit).info    # the DetectFitInfo
 ```
 
 ## Output & interpretation

@@ -203,7 +203,7 @@ Every `analyze()` call returns `(result, info)`:
 | `result.smld_connected` | Connected SMLD with track info |
 | `result.drift_model` | Fitted drift model |
 | `info.elapsed_s` | Total wall time |
-| `info.steps[:detectfit]` | Typed info struct from upstream package |
+| `stepinfo(info, :detectfit).info` | Typed info struct from upstream package |
 | `info.step_infos` | Vector of StepInfos with per-step timing, config, and summary |
 
 When `outdir` is set, each step writes to `outdir/01_detectfit/`, `outdir/02_filter/`, etc. with saved configs, summary stats, and diagnostic plots.

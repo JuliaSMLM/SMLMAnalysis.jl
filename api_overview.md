@@ -85,10 +85,13 @@ Aggregated metadata from pipeline run.
 
 **Fields:**
 - `elapsed_s::Float64` - Total elapsed time in seconds
-- `steps::Dict{Symbol, Any}` - Per-step info keyed by step name
 - `step_infos::Vector{StepInfo}` - Full step history
 
-**Step info types:**
+Look up a step by name with `stepinfo(info, name)` (first match, throws `KeyError` if none)
+or `stepinfos(info, name)` (all matches, in order). Both take a `Symbol` or `String` and
+return `StepInfo`; reach the upstream typed info via `.info`.
+
+**Step info types** (via `stepinfo(info, name).info`):
 - `:detectfit` -> `(boxes=BoxesInfo, fit=FitInfo)`
 - `:filter` -> `nothing`
 - `:frameconnect` -> `FrameConnectInfo`
