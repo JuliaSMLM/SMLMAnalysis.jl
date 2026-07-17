@@ -52,7 +52,7 @@ config = AnalysisConfig(
 
 (result, info) = analyze(image_stacks, config)
 result.smld          # final localizations (a SMLMData.BasicSMLD)
-info.steps           # per-step info from each upstream package
+info.step_infos      # per-step history; stepinfo(info, :detectfit) looks one up by name
 ```
 
 The same steps can be run one at a time for interactive exploration — every

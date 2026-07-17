@@ -120,15 +120,25 @@ The whole run aggregates these into an [`AnalysisInfo`](@ref):
 
 ```julia
 (result, info) = analyze(data, config)
-info.elapsed_s              # total wall-clock time
-info.step_infos             # Vector{StepInfo} — full ordered history
-info.steps[:driftcorrect]   # the DriftInfo from the drift step
-info.steps[:detectfit]      # the DetectFitInfo, etc.
+info.elapsed_s                       # total wall-clock time
+info.step_infos                      # Vector{StepInfo} — full ordered history
+stepinfo(info, :driftcorrect).info   # the DriftInfo from the drift step
+stepinfo(info, :detectfit).info      # the DetectFitInfo, etc.
 ```
 
-`info.steps` is keyed by step name and holds each upstream package's own info
-struct, so you reach a step's detailed results (e.g. `FrameConnectInfo`,
-`DriftInfo`, `BaGoLInfo`) directly.
+[`stepinfo(info, name)`](@ref) searches `info.step_infos` for the first step with that
+name (a `Symbol` or `String`) and returns its `StepInfo`; reach the upstream package's own
+info struct (e.g. `FrameConnectInfo`, `DriftInfo`, `BaGoLInfo`) via `.info`. When a step
+name repeats (e.g. several render steps), [`stepinfos(info, name)`](@ref) returns them all
+in pipeline order.
+
+!!! note "Migration from `info.steps`"
+    The `info.steps::Dict{Symbol,Any}` field was removed (from both `AnalysisInfo` and
+    `MultiTargetInfo`). Replace `info.steps[:x]` with `stepinfo(info, :x).info`. The old
+    Dict returned the *last* occurrence of a duplicated step name and hid repeats behind
+    suffixed keys like `:compositerender_3`; the accessors return the *first* match and
+    expose every repeat via `stepinfos(info, :compositerender)`. `MultiTargetInfo.channels`
+    is unchanged.
 
 ## On-disk outputs
 

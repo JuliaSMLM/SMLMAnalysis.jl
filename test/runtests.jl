@@ -12,14 +12,15 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         # Test AnalysisInfo constructor
         info = AnalysisInfo()
         @test info.elapsed_s == 0.0
-        @test isempty(info.steps)
         @test isempty(info.step_infos)
 
         # Test AnalysisInfo with data
-        steps = Dict{Symbol, Any}(:test => (a=1, b=2))
-        info = AnalysisInfo(1.5, steps, StepInfo[])
+        cfg0 = FilterConfig()
+        si0 = StepInfo(1, cfg0, 0.2, Dict{Symbol,Any}(); info=FilterInfo(10, 8, 0.2))
+        info = AnalysisInfo(1.5, StepInfo[si0])
         @test info.elapsed_s == 1.5
-        @test info.steps[:test].a == 1
+        @test length(info.step_infos) == 1
+        @test info.step_infos[1].info isa FilterInfo
 
         # Test StepInfo with typed info
         cfg = FilterConfig()
@@ -366,6 +367,33 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test eltype(labs.emitters) <: GaussMLE.Emitter2DFitSigma   # NOT Emitter2DFit
             @test labs.emitters[2].σ ≈ 0.13                             # PSF-width σ preserved
             @test labs.emitters[2].σ_xy ≈ 0.003
+        end
+    end
+
+    @testset "stepinfo/stepinfos accessors" begin
+        # Build StepInfos directly; FilterConfig → name "filter" (repeated),
+        # DensityFilterConfig → name "densityfilter" (unique).
+        si_a = StepInfo(1, FilterConfig(), 0.1, Dict{Symbol,Any}(); info=FilterInfo(100, 90, 0.1))
+        si_b = StepInfo(2, DensityFilterConfig(), 0.2, Dict{Symbol,Any}(); info=DensityFilterInfo(90, 80, 5, 0.2))
+        si_c = StepInfo(3, FilterConfig(), 0.3, Dict{Symbol,Any}(); info=FilterInfo(200, 150, 0.3))
+        steps = StepInfo[si_a, si_b, si_c]
+
+        for info in (AnalysisInfo(1.0, steps),
+                     MultiTargetInfo(1.0, Dict{Symbol,AnalysisInfo}(), steps))
+            # Symbol and String name lookup return the same StepInfo
+            @test stepinfo(info, :densityfilter) === si_b
+            @test stepinfo(info, "densityfilter") === si_b
+            @test stepinfo(info, :densityfilter).info isa DensityFilterInfo
+
+            # Repeated name: stepinfo returns the FIRST, stepinfos returns ALL in order
+            @test stepinfo(info, :filter) === si_a
+            @test stepinfo(info, "filter") === si_a
+            @test stepinfos(info, :filter) == [si_a, si_c]
+            @test [si.number for si in stepinfos(info, "filter")] == [1, 3]
+
+            # Missing name: stepinfo throws KeyError, stepinfos returns empty
+            @test_throws KeyError stepinfo(info, :nope)
+            @test isempty(stepinfos(info, :nope))
         end
     end
 end

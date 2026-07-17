@@ -441,16 +441,16 @@ Aggregated metadata from all analysis steps, following the tuple-pattern.
 
 # Fields
 - `elapsed_s::Float64`: Total elapsed time in seconds
-- `steps::Dict{Symbol, Any}`: Step name → upstream info struct mapping
 - `step_infos::Vector{StepInfo}`: Full step history with timing and config
+
+Look up a step by name with the [`stepinfo`](@ref) / [`stepinfos`](@ref) accessors.
 """
 struct AnalysisInfo <: SMLMData.AbstractSMLMInfo
     elapsed_s::Float64
-    steps::Dict{Symbol, Any}
     step_infos::Vector{StepInfo}
 end
 
-AnalysisInfo() = AnalysisInfo(0.0, Dict{Symbol, Any}(), StepInfo[])
+AnalysisInfo() = AnalysisInfo(0.0, StepInfo[])
 
 # ============================================================
 # AnalysisResult - immutable result from analyze()
@@ -471,7 +471,7 @@ Immutable result from `analyze()`. Replaces the old mutable `Analysis` struct.
 result.smld               # Final SMLD
 result.drift_model        # Drift model for plotting
 result.smld_connected     # Connected SMLD for track analysis
-info.steps[:driftcorrect] # Step info from upstream packages
+stepinfo(info, :driftcorrect).info # Step info from upstream packages
 ```
 """
 struct AnalysisResult
@@ -664,14 +664,45 @@ Aggregated metadata from a multi-target analysis.
 - `elapsed_s::Float64`: Total elapsed time in seconds
 - `channels::Dict{Symbol, AnalysisInfo}`: Per-channel analysis info
 - `step_infos::Vector{StepInfo}`: Multi-target step history (composite renders, alignment, etc.)
-- `steps::Dict{Symbol, Any}`: Step name → info mapping for convenience
+
+Look up a cross-channel step by name with the [`stepinfo`](@ref) / [`stepinfos`](@ref)
+accessors (these search `step_infos`, not the per-channel `channels`).
 """
 struct MultiTargetInfo <: SMLMData.AbstractSMLMInfo
     elapsed_s::Float64
     channels::Dict{Symbol, AnalysisInfo}
     step_infos::Vector{StepInfo}
-    steps::Dict{Symbol, Any}
 end
+
+"""
+    stepinfo(info, name) -> StepInfo
+
+The FIRST pipeline step whose name matches `name` (a `Symbol` or `String`, e.g.
+`:frameconnect`), searching `info.step_infos`. Throws `KeyError` if none matches. Access
+the upstream typed info via `.info`, timing via `.elapsed_s`, config via `.config`.
+
+For `MultiTargetInfo` this searches only the cross-channel `step_infos`, NOT the per-channel
+histories in `info.channels`. When a step name repeats (e.g. several `render` steps) this
+returns the first; use [`stepinfos`](@ref) to get them all. (This differs from the removed
+`steps` Dict, which returned the LAST occurrence.)
+"""
+function stepinfo(info::Union{AnalysisInfo,MultiTargetInfo}, name::Union{Symbol,AbstractString})
+    key = String(name)
+    idx = findfirst(si -> si.name == key, info.step_infos)
+    idx === nothing && throw(KeyError(key))
+    return info.step_infos[idx]
+end
+
+"""
+    stepinfos(info, name) -> Vector{StepInfo}
+
+All steps whose name matches `name` (a `Symbol` or `String`), in pipeline order (empty if
+none). Use when a step type repeats, e.g. `stepinfos(info, :compositerender)` to recover the
+several composite renders that the removed `steps` Dict hid behind suffixed keys. Same
+`MultiTargetInfo` caveat as [`stepinfo`](@ref): it searches `step_infos`, not `channels`.
+"""
+stepinfos(info::Union{AnalysisInfo,MultiTargetInfo}, name::Union{Symbol,AbstractString}) =
+    filter(si -> si.name == String(name), info.step_infos)
 
 function Base.show(io::IO, mtr::MultiTargetResult)
     n = sum(length(s.emitters) for s in mtr.smlds)

@@ -129,9 +129,9 @@ config = AnalysisConfig(
     outdir = "output/",
 )
 (result, info) = analyze(image_stacks, config)
-result.smld               # Final SMLD
-info.steps[:detectfit]    # DetectFit step info
-info.steps[:driftcorrect] # Drift step info
+result.smld                          # Final SMLD
+stepinfo(info, :detectfit).info      # DetectFit step info
+stepinfo(info, :driftcorrect).info   # Drift step info
 ```
 """
 function analyze(data, config::AnalysisConfig)
@@ -307,13 +307,7 @@ function _run_pipeline(initial_state, steps::Vector{SMLMData.AbstractSMLMConfig}
     result = AnalysisResult(last_smld, smld_connected, drift_model)
 
     elapsed_s = (time_ns() - t_start) / 1e9
-    steps_dict = Dict{Symbol, Any}()
-    for si in step_infos
-        if si.info !== nothing
-            steps_dict[Symbol(si.name)] = si.info
-        end
-    end
-    info = AnalysisInfo(elapsed_s, steps_dict, step_infos)
+    info = AnalysisInfo(elapsed_s, step_infos)
 
     if outdir !== nothing
         _write_summary(outdir, step_infos, last_smld)

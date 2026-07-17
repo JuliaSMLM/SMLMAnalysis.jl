@@ -101,7 +101,7 @@ keys(result)        # the channel labels, in order
 info.elapsed_s      # total wall time, seconds
 info.channels[:IgG] # AnalysisInfo for one channel's pipeline
 info.step_infos     # Vector{StepInfo} for the cross-channel steps
-info.steps          # Dict{Symbol, Any}: step name => upstream info
+stepinfo(info, :crossalign).info  # look up a cross-channel step by name (searches step_infos, not channels)
 ```
 
 ## Cross-channel steps

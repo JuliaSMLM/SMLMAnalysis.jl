@@ -106,7 +106,7 @@ result.smld_connected   # tracks from FrameConnectConfig (nothing if not run)
 result.drift_model      # fitted drift polynomial from DriftConfig (nothing if not run)
 
 info.elapsed_s          # total wall time, seconds
-info.steps[:driftcorrect]  # upstream info struct keyed by step name
+stepinfo(info, :driftcorrect).info  # upstream info struct, looked up by step name
 info.step_infos         # Vector{StepInfo}: per-step timing, config, summary
 ```
 

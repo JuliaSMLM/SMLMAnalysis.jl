@@ -103,7 +103,6 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
     composite_dir = joinpath(config.outdir, "composite")
     mkpath(composite_dir)
     step_infos = StepInfo[]
-    steps_dict = Dict{Symbol, Any}()
 
     state = smlds
     for (i, step_cfg) in enumerate(config.steps)
@@ -111,11 +110,6 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
         (state, step_info) = analyze(state, step_cfg;
             outdir=composite_dir, step_number=i, verbose=v, colors=colors, labels=config.labels)
         push!(step_infos, step_info)
-
-        # Store in steps dict (use step_name with index for duplicates)
-        sname = step_name(step_cfg)
-        key = haskey(steps_dict, Symbol(sname)) ? Symbol("$(sname)_$i") : Symbol(sname)
-        steps_dict[key] = step_info.info
     end
 
     # Write composite readme
@@ -127,7 +121,7 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
     # Build result
     elapsed_s = (time_ns() - t_start) / 1e9
     result = MultiTargetResult(config.labels, state, channel_results, step_infos, config.outdir)
-    info = MultiTargetInfo(elapsed_s, channel_infos, step_infos, steps_dict)
+    info = MultiTargetInfo(elapsed_s, channel_infos, step_infos)
 
     v >= Verbosity.PROGRESS && @info "Multi-target complete: $(sum(length(s.emitters) for s in state)) total localizations ($(round(elapsed_s, digits=1))s)"
 

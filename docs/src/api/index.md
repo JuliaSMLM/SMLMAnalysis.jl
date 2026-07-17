@@ -21,6 +21,8 @@ SMLMAnalysis
 
 ```@docs
 analyze
+stepinfo
+stepinfos
 ```
 
 ## Types
