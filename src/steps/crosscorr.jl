@@ -132,14 +132,33 @@ function _compute_crosscorr(smld_a::SMLMData.BasicSMLD, smld_b::SMLMData.BasicSM
     area = (x_max - x_min) * (y_max - y_min)
     bounds = (x_min, x_max, y_min, y_max)
 
-    # Bin edges
+    # Bin edges — use dr as the step so the pair-counting width (floor(dist/dr)),
+    # the annulus areas, and the r_centers all share one width. When r_max is not
+    # an integer multiple of dr the last edge (n_bins*dr) extends just past r_max.
     n_bins = ceil(Int, cfg.r_max / cfg.dr)
-    r_edges = range(0.0, cfg.r_max, length=n_bins + 1)
+    r_edges = range(0.0, step=cfg.dr, length=n_bins + 1)
     r_centers = [(r_edges[i] + r_edges[i+1]) / 2 for i in 1:n_bins]
+    search_radius = last(r_edges)   # = n_bins*dr, the outer edge of the last bin
 
     # Handle empty channels
     if n_a == 0 || n_b == 0
         return (collect(r_centers), ones(n_bins), area)
+    end
+
+    # Channel B density uses channel B's OWN FOV (its camera may differ from A's).
+    cam_b = smld_b.camera
+    xb_min = first(cam_b.pixel_edges_x)
+    xb_max = last(cam_b.pixel_edges_x)
+    yb_min = first(cam_b.pixel_edges_y)
+    yb_max = last(cam_b.pixel_edges_y)
+    area_b = (xb_max - xb_min) * (yb_max - yb_min)
+
+    # Ripley edge weights are computed against channel A's bounds (the A points are the
+    # query centers). This correction assumes A and B share a FOV; full different-FOV
+    # support (correlating over the A∩B intersection region) is a future enhancement.
+    if !(isapprox(x_min, xb_min; atol=1e-6) && isapprox(x_max, xb_max; atol=1e-6) &&
+         isapprox(y_min, yb_min; atol=1e-6) && isapprox(y_max, yb_max; atol=1e-6))
+        @warn "CrossCorr: channels A and B have different FOVs; edge correction assumes a shared FOV (intersection-region support is a future enhancement)." bounds_a=bounds bounds_b=(xb_min, xb_max, yb_min, yb_max)
     end
 
     # Build KDTree from channel B
@@ -152,18 +171,20 @@ function _compute_crosscorr(smld_a::SMLMData.BasicSMLD, smld_b::SMLMData.BasicSM
 
     # Accumulate weighted pair counts per bin
     counts = zeros(Float64, n_bins)
-    density_b = n_b / area
+    density_b = n_b / area_b
 
     point = zeros(2)   # reused query buffer — avoids a per-emitter [xa, ya] allocation
     for i in 1:n_a
         xa, ya = em_a[i].x, em_a[i].y
         point[1] = xa; point[2] = ya
-        idxs = inrange(tree_b, point, cfg.r_max)
+        idxs = inrange(tree_b, point, search_radius)
 
         for j in idxs
             xb, yb = em_b[j].x, em_b[j].y
             dist = sqrt((xa - xb)^2 + (ya - yb)^2)
-            dist == 0.0 && continue
+            # Keep dist == 0: for a cross-correlation of two DISTINCT channels an
+            # exactly-coincident A/B pair is the strongest co-localization signal
+            # (not a self-pair). It lands in bin 1.
 
             bin = floor(Int, dist / cfg.dr) + 1
             bin > n_bins && continue
@@ -201,6 +222,11 @@ which are inverted to up-weight their contributions.
 """
 function _ripley_edge_weight(x::Real, y::Real, r::Real, bounds::NTuple{4,<:Real})
     x_min, x_max, y_min, y_max = bounds
+
+    # r == 0: a zero-radius circle is a point fully inside the FOV → weight 1.0.
+    # Makes the coincident-pair (dist==0) contribution unambiguous and avoids any
+    # 0/0 in the arc math below.
+    r == 0 && return 1.0
 
     # Distances to each boundary
     d_left   = x - x_min
