@@ -13,6 +13,7 @@ data/
 /dev/
 *.log
 .claude/
+/CLAUDE.md
 .slackclaw_state.json
 
 # OS / editor temp files
