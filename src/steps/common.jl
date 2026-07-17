@@ -338,6 +338,22 @@ function _with_dataset(e::GaussMLE.Emitter2DFitSigmaXY{T}, ds::Int) where T
     )
 end
 
+function _with_dataset(e::GaussMLE.Emitter2DFitGaussMLE{T}, ds::Int) where T
+    GaussMLE.Emitter2DFitGaussMLE{T}(
+        e.x, e.y, e.photons, e.bg,
+        e.σ_x, e.σ_y, e.σ_xy, e.σ_photons, e.σ_bg,
+        e.pvalue, e.frame, ds, e.track_id, e.id
+    )
+end
+
+function _with_dataset(e::GaussMLE.Emitter3DFitGaussMLE{T}, ds::Int) where T
+    GaussMLE.Emitter3DFitGaussMLE{T}(
+        e.x, e.y, e.z, e.photons, e.bg,
+        e.σ_x, e.σ_y, e.σ_z, e.σ_xy, e.σ_xz, e.σ_yz, e.σ_photons, e.σ_bg,
+        e.pvalue, e.frame, ds, e.track_id, e.id
+    )
+end
+
 # ============================================================
 # Output helpers (used by all step save functions)
 # ============================================================

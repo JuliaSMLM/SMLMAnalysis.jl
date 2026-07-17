@@ -71,8 +71,13 @@ function save_smld(filepath::String, smld::BasicSMLD{T,E};
                    compression::Int=3) where {T,E}
 
     n = length(smld.emitters)
-    is_3d = E <: Emitter3DFit
-    emitter_type_name = string(nameof(E))
+    # Derive type + dimensionality from the concrete first emitter, not the SMLD's E
+    # type parameter: the pipeline can hand us a BasicSMLD{T,AbstractEmitter} whose E
+    # would otherwise mislabel the file and silently drop fields on reload. `:z`
+    # detection also covers Emitter3DFitGaussMLE, which is not <: Emitter3DFit.
+    ET = n > 0 ? typeof(smld.emitters[1]) : E
+    is_3d = n > 0 ? hasproperty(smld.emitters[1], :z) : (E <: Emitter3DFit)
+    emitter_type_name = string(nameof(ET))
 
     # Detect emitter type features
     has_sigma = n > 0 && hasproperty(smld.emitters[1], :σ)      # Emitter2DFitSigma
@@ -143,6 +148,11 @@ function save_smld(filepath::String, smld::BasicSMLD{T,E};
                 σ_z = [e.σ_z for e in smld.emitters]
                 em["z", compress=compression] = z
                 em["sigma_z", compress=compression] = σ_z
+                # Off-diagonal position covariances (present on 3D fit types)
+                if hasproperty(smld.emitters[1], :σ_xz)
+                    em["sigma_xz", compress=compression] = [e.σ_xz for e in smld.emitters]
+                    em["sigma_yz", compress=compression] = [e.σ_yz for e in smld.emitters]
+                end
             end
 
             # GaussMLE Emitter2DFitSigma fields (isotropic PSF)
@@ -396,12 +406,15 @@ function load_smld(filepath::String)
 
             # Optional position covariance σ_xy (v1.2+; older files default it to 0)
             σ_xy = haskey(em, "sigma_xy") ? read(em["sigma_xy"]) : nothing
+            # Optional off-diagonal 3D covariances σ_xz/σ_yz (3D fit types)
+            σ_xz = haskey(em, "sigma_xz") ? read(em["sigma_xz"]) : nothing
+            σ_yz = haskey(em, "sigma_yz") ? read(em["sigma_yz"]) : nothing
 
             # Construct emitters based on type
             emitters = _construct_emitters(
                 emitter_type_str, T, n_emitters, is_3d,
                 x, y, z, photons, bg,
-                σ_x, σ_y, σ_z, σ_photons, σ_bg, σ_xy,
+                σ_x, σ_y, σ_z, σ_photons, σ_bg, σ_xy, σ_xz, σ_yz,
                 psf_sigma, σ_sigma,
                 psf_sigma_x, psf_sigma_y, σ_sigma_x, σ_sigma_y,
                 pvalue,
@@ -488,7 +501,7 @@ Internal: Construct emitters of the appropriate type based on emitter_type_str.
 function _construct_emitters(
     emitter_type_str::String, T::Type, n::Int, is_3d::Bool,
     x, y, z, photons, bg,
-    σ_x, σ_y, σ_z, σ_photons, σ_bg, σ_xy,
+    σ_x, σ_y, σ_z, σ_photons, σ_bg, σ_xy, σ_xz, σ_yz,
     psf_sigma, σ_sigma,
     psf_sigma_x, psf_sigma_y, σ_sigma_x, σ_sigma_y,
     pvalue,
@@ -528,13 +541,42 @@ function _construct_emitters(
             Int(frame[i]), Int(dataset[i]), Int(track_id[i]), Int(id[i])
         ) for i in 1:n]
 
+    elseif emitter_type_str == "Emitter2DFitGaussMLE" && GaussMLEEmitterTypes !== nothing
+        # GaussMLE fixed-width 2D type (GaussianXYNB)
+        Emitter2DFitGaussMLE = GaussMLEEmitterTypes.Emitter2DFitGaussMLE
+        return [Emitter2DFitGaussMLE{T}(
+            T(x[i]), T(y[i]), T(photons[i]), T(bg[i]),
+            T(σ_x[i]), T(σ_y[i]),
+            σ_xy !== nothing ? T(σ_xy[i]) : T(0),
+            T(σ_photons[i]), T(σ_bg[i]),
+            pvalue !== nothing ? T(pvalue[i]) : T(0),
+            Int(frame[i]), Int(dataset[i]), Int(track_id[i]), Int(id[i])
+        ) for i in 1:n]
+
+    elseif emitter_type_str == "Emitter3DFitGaussMLE" && GaussMLEEmitterTypes !== nothing
+        # GaussMLE astigmatic 3D type (AstigmaticXYZNB)
+        Emitter3DFitGaussMLE = GaussMLEEmitterTypes.Emitter3DFitGaussMLE
+        return [Emitter3DFitGaussMLE{T}(
+            T(x[i]), T(y[i]), T(z[i]), T(photons[i]), T(bg[i]),
+            T(σ_x[i]), T(σ_y[i]), T(σ_z[i]),
+            σ_xy !== nothing ? T(σ_xy[i]) : T(0),
+            σ_xz !== nothing ? T(σ_xz[i]) : T(0),
+            σ_yz !== nothing ? T(σ_yz[i]) : T(0),
+            T(σ_photons[i]), T(σ_bg[i]),
+            pvalue !== nothing ? T(pvalue[i]) : T(0),
+            Int(frame[i]), Int(dataset[i]), Int(track_id[i]), Int(id[i])
+        ) for i in 1:n]
+
     elseif is_3d
-        # Standard 3D emitter
+        # Standard 3D emitter (with full position covariance)
         return [Emitter3DFit{T}(
             T(x[i]), T(y[i]), T(z[i]),
             T(photons[i]), T(bg[i]),
             T(σ_x[i]), T(σ_y[i]), T(σ_z[i]),
             T(σ_photons[i]), T(σ_bg[i]);
+            σ_xy = σ_xy !== nothing ? T(σ_xy[i]) : T(0),
+            σ_xz = σ_xz !== nothing ? T(σ_xz[i]) : T(0),
+            σ_yz = σ_yz !== nothing ? T(σ_yz[i]) : T(0),
             frame=Int(frame[i]),
             dataset=Int(dataset[i]),
             track_id=Int(track_id[i]),
@@ -569,6 +611,10 @@ function _empty_emitters(emitter_type_str::String, T::Type, is_3d::Bool)
         return GaussMLEEmitterTypes.Emitter2DFitSigmaXY{T}[]
     elseif emitter_type_str == "Emitter2DFitSigma" && GaussMLEEmitterTypes !== nothing
         return GaussMLEEmitterTypes.Emitter2DFitSigma{T}[]
+    elseif emitter_type_str == "Emitter2DFitGaussMLE" && GaussMLEEmitterTypes !== nothing
+        return GaussMLEEmitterTypes.Emitter2DFitGaussMLE{T}[]
+    elseif emitter_type_str == "Emitter3DFitGaussMLE" && GaussMLEEmitterTypes !== nothing
+        return GaussMLEEmitterTypes.Emitter3DFitGaussMLE{T}[]
     elseif is_3d
         return Emitter3DFit{T}[]
     else

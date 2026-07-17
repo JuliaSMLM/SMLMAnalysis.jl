@@ -243,7 +243,13 @@ function _detectfit_core(image_stacks, camera::SMLMData.AbstractCamera, cfg::Det
 
     _warn_unequal_frame_counts(frames_per_dataset, v)
 
-    smld = BasicSMLD(all_emitters, camera, n_frames_per_dataset, n_datasets_val, Dict{String,Any}())
+    # Narrow the accumulated AbstractEmitter[] to its concrete element type before
+    # building the SMLD. A single fitter yields one concrete emitter type; keeping
+    # BasicSMLD{T,AbstractEmitter} would erase it, breaking type-stable dispatch and
+    # making save_smld mislabel the file so a reload degrades to base Emitter2DFit
+    # (dropping the PSF-width σ). Empty stays as-is (handled by the n==0 paths).
+    emitters = isempty(all_emitters) ? all_emitters : identity.(all_emitters)
+    smld = BasicSMLD(emitters, camera, n_frames_per_dataset, n_datasets_val, Dict{String,Any}())
 
     detect_info = DetectFitInfo(all_boxes_info, all_fit_info,
         n_datasets_val, total_rois, total_fits, n_frames_per_dataset, t, selected_indices)

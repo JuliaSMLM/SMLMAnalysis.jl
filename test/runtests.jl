@@ -298,6 +298,76 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test_throws ErrorException load_smld(bogus)
         end
     end
+
+    @testset "GaussMLE emitter types + abstract-eltype round-trip" begin
+        # Regression coverage for the AbstractEmitter type-erasure + serialization fix:
+        #  - _with_dataset must handle EVERY advertised GaussMLE emitter type
+        #    (GaussianXYNB → Emitter2DFitGaussMLE, AstigmaticXYZNB → Emitter3DFitGaussMLE),
+        #    or detectfit throws a MethodError the moment those fitters are used.
+        #  - save_smld/load_smld must round-trip those types and the standard-3D
+        #    off-diagonal covariances, AND must key off the concrete emitter even when
+        #    the SMLD is typed BasicSMLD{T,AbstractEmitter} (as the pre-narrowing
+        #    pipeline produced) rather than degrading to Emitter2DFit and dropping σ.
+        cam = IdealCamera(8, 8, 0.1)
+        T = Float64
+
+        # _with_dataset must not MethodError for the fixed-width / astigmatic types.
+        e2g = GaussMLE.Emitter2DFitGaussMLE{T}(0.1, 0.2, 1000.0, 5.0,
+                0.01, 0.012, 0.003, 20.0, 0.5, 0.4, 1, 1, 0, 1)
+        e3g = GaussMLE.Emitter3DFitGaussMLE{T}(0.1, 0.2, 0.3, 1000.0, 5.0,
+                0.01, 0.012, 0.02, 0.003, 0.001, 0.002, 20.0, 0.5, 0.4, 1, 1, 0, 1)
+        @test SMLMAnalysis._with_dataset(e2g, 7).dataset == 7
+        @test SMLMAnalysis._with_dataset(e2g, 7).σ_xy ≈ 0.003
+        @test SMLMAnalysis._with_dataset(e3g, 7).dataset == 7
+        @test SMLMAnalysis._with_dataset(e3g, 7).σ_yz ≈ 0.002
+
+        mktempdir() do dir
+            # Emitter2DFitGaussMLE (GaussianXYNB) round-trip.
+            g2 = [GaussMLE.Emitter2DFitGaussMLE{T}(0.1i, 0.2i, 1000.0 + i, 5.0,
+                    0.01, 0.012, 0.003, 20.0, 0.5, 0.4, i, 1, 0, i) for i in 1:4]
+            s2 = BasicSMLD(g2, cam, 10, 1, Dict{String,Any}())
+            p2 = joinpath(dir, "g2.h5"); save_smld(p2, s2); l2 = load_smld(p2)
+            @test eltype(l2.emitters) <: GaussMLE.Emitter2DFitGaussMLE
+            for (a, b) in zip(s2.emitters, l2.emitters), f in fieldnames(GaussMLE.Emitter2DFitGaussMLE)
+                @test getfield(a, f) ≈ getfield(b, f)
+            end
+
+            # Emitter3DFitGaussMLE (AstigmaticXYZNB) round-trip: z + full covariance.
+            g3 = [GaussMLE.Emitter3DFitGaussMLE{T}(0.1i, 0.2i, 0.3i, 1000.0 + i, 5.0,
+                    0.01, 0.012, 0.02, 0.003, 0.001, 0.002, 20.0, 0.5, 0.4, i, 1, 0, i) for i in 1:4]
+            s3 = BasicSMLD(g3, cam, 10, 1, Dict{String,Any}())
+            p3 = joinpath(dir, "g3.h5"); save_smld(p3, s3); l3 = load_smld(p3)
+            @test eltype(l3.emitters) <: GaussMLE.Emitter3DFitGaussMLE
+            @test l3.emitters[2].z ≈ 0.6
+            @test l3.emitters[2].σ_xz ≈ 0.001
+            @test l3.emitters[2].σ_yz ≈ 0.002
+
+            # Standard Emitter3DFit: off-diagonal covariances σ_xz/σ_yz survive
+            # (they were never written before this fix).
+            e3 = [Emitter3DFit{T}(0.1i, 0.2i, 0.3i, 1000.0 + i, 5.0,
+                    0.01, 0.012, 0.02, 20.0, 0.5;
+                    σ_xy=0.003, σ_xz=0.001, σ_yz=0.002, frame=i, dataset=1, id=i) for i in 1:4]
+            s3s = BasicSMLD(e3, cam, 10, 1, Dict{String,Any}())
+            p3s = joinpath(dir, "e3.h5"); save_smld(p3s, s3s); l3s = load_smld(p3s)
+            @test eltype(l3s.emitters) <: Emitter3DFit
+            @test l3s.emitters[2].σ_xz ≈ 0.001
+            @test l3s.emitters[2].σ_yz ≈ 0.002
+
+            # Abstract-eltype SMLD (as the pipeline produced before narrowing):
+            # save_smld must reload it as concrete Emitter2DFitSigma, NOT degrade to
+            # Emitter2DFit and drop the PSF-width σ.
+            abs_v = AbstractEmitter[GaussMLE.Emitter2DFitSigma{T}(
+                        0.1i, 0.2i, 1000.0 + i, 5.0, 0.13,
+                        0.01, 0.012, 0.003, 20.0, 0.5, 0.002,
+                        0.4, i, 1, 0, i) for i in 1:4]
+            @test eltype(abs_v) == AbstractEmitter
+            s_abs = BasicSMLD(abs_v, cam, 10, 1, Dict{String,Any}())
+            pabs = joinpath(dir, "abs.h5"); save_smld(pabs, s_abs); labs = load_smld(pabs)
+            @test eltype(labs.emitters) <: GaussMLE.Emitter2DFitSigma   # NOT Emitter2DFit
+            @test labs.emitters[2].σ ≈ 0.13                             # PSF-width σ preserved
+            @test labs.emitters[2].σ_xy ≈ 0.003
+        end
+    end
 end
 
 if SMLM_TEST_FULL
@@ -334,12 +404,20 @@ if SMLM_TEST_FULL
             @test length(info.step_infos) == 3
             @test info.elapsed_s >= 0
 
-            # The fitted output is Emitter2DFitSigma and round-trips through HDF5.
+            # detectfit narrows the accumulated AbstractEmitter[] to a concrete type;
+            # the default GaussianXYNBS fitter yields Emitter2DFitSigma.
+            @test isconcretetype(eltype(result.smld.emitters))
+            @test eltype(result.smld.emitters) <: GaussMLE.Emitter2DFitSigma
+
+            # The fitted output round-trips through HDF5 losslessly — concrete type and
+            # PSF-width σ preserved (σ was silently lost when the SMLD was AbstractEmitter-typed).
             mktempdir() do dir
                 p = joinpath(dir, "pipeline.h5")
                 save_smld(p, result.smld)
                 reloaded = load_smld(p)
                 @test length(reloaded.emitters) == length(result.smld.emitters)
+                @test eltype(reloaded.emitters) <: GaussMLE.Emitter2DFitSigma
+                @test reloaded.emitters[1].σ ≈ result.smld.emitters[1].σ
                 @test reloaded.emitters[1].σ_xy ≈ result.smld.emitters[1].σ_xy
             end
 

@@ -44,19 +44,28 @@ function _with_log_file(f, outdir)
     outdir === nothing && return f()
 
     logpath = joinpath(outdir, "log.txt")
-    try
-        open(logpath, "w") do io
-            println(io, "=== SMLMAnalysis $(Dates.now()) ===")
-            file_logger = Logging.SimpleLogger(io, Logging.Info)
-            tee = TeeLogger(Logging.AbstractLogger[Logging.current_logger(), file_logger])
-            Logging.with_logger(tee) do
-                f()
-            end
-            flush(io)
-        end
+    # Guard ONLY the log-file open (e.g. outdir not writable): on failure, fall back to
+    # running the pipeline once with no file logging. The pipeline call must NOT sit
+    # inside this catch — otherwise an IOError raised deep in a step would be caught
+    # here and silently re-run the entire (expensive) pipeline.
+    io = try
+        open(logpath, "w")
     catch err
         err isa Union{Base.IOError, SystemError} || rethrow()
-        f()
+        @warn "Could not open log file; continuing without file logging" logpath exception=(err, catch_backtrace())
+        return f()
+    end
+
+    try
+        println(io, "=== SMLMAnalysis $(Dates.now()) ===")
+        file_logger = Logging.SimpleLogger(io, Logging.Info)
+        tee = TeeLogger(Logging.AbstractLogger[Logging.current_logger(), file_logger])
+        Logging.with_logger(tee) do
+            f()
+        end
+    finally
+        flush(io)
+        close(io)
     end
 end
 
