@@ -221,7 +221,8 @@ save_smld("output/after_detectfit.h5", smld)
     calibration=CalibrationConfig(clamp_k_to_one=true)))
 cal = fc_info.info.calibration   # CalibrationResult
 (smld_dc, dc_info) = analyze(smld_fc, DriftConfig(degree=2))
-(img, _) = analyze(smld_dc, RenderConfig(zoom=20, colormap=:inferno))
+(smld_dc, _) = analyze(smld_dc, RenderConfig(zoom=20, colormap=:inferno))  # pass-through; writes image to outdir
+(img, _) = render(smld_dc, RenderConfig(zoom=20, colormap=:inferno))       # in-memory image array
 
 # Resume from saved checkpoint in new session
 smld = load_smld("output/after_detectfit.h5")

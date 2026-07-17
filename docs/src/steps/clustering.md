@@ -103,7 +103,8 @@ noise points are dropped from the returned SMLD rather than labeled `0`).
 # Density-based clustering, then render colored by cluster id
 (labeled, info) = analyze(smld, DBSCANConfig(eps_nm = 50.0, min_points = 5))
 info.info.n_clusters                       # number of clusters found
-(img, _) = analyze(labeled, RenderConfig(zoom = 20))   # labels flow through emitter.id
+(labeled, _) = analyze(labeled, RenderConfig(zoom = 20))  # pass-through; labels flow through emitter.id
+(img, _) = render(labeled, RenderConfig(zoom = 20))       # image array, colored by cluster id
 
 # Read-only: is the data clustered at all?
 (_, h) = analyze(smld, HopkinsConfig())
