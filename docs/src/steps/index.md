@@ -68,10 +68,12 @@ reference and links to the upstream documentation for algorithm details.
 |------|--------|-------------------|
 | Detection | Gaussian-filter local-max + sCMOS-aware thresholding | Huang et al., *Nat. Methods* **10**, 653 (2013) |
 | Fitting | MLE Gaussian/astigmatic PSF; CRLB precision | Smith et al., *Nat. Methods* **7**, 373 (2010) |
+| Quality filter | χ²/LLR goodness-of-fit p-value | Huang et al., *Biomed. Opt. Express* **2**, 1377 (2011) |
 | Frame connection | Spatiotemporal LAP clustering of repeated blinks | Schodt & Lidke, *Front. Bioinform.* (2021) |
 | Drift correction | Fiducial-free entropy minimization (Legendre basis) | Cnossen et al., *Opt. Express* **29**, 27961 (2021); Wester et al., *Sci. Rep.* **11**, 23672 (2021) |
 | Bayesian grouping | Collapsed reversible-jump MCMC grouping | Fazel et al., *Nat. Commun.* **13**, 7152 (2022) |
-| Clustering | DBSCAN; Voronoi tessellation (SR-Tesseler) | Ester et al., *KDD-96* (1996); Levet et al., *Nat. Methods* **12**, 1065 (2015) |
+| Clustering | DBSCAN; HDBSCAN; Voronoi (SR-Tesseler); Hopkins tendency | Ester et al., *KDD-96* (1996); Campello et al., *PAKDD* (2013); Levet et al., *Nat. Methods* **12**, 1065 (2015); Hopkins & Skellam, *Ann. Bot.* **18**, 213 (1954) |
+| Cross-correlation | Pair-correlation *g(r)* between channels | Sengupta et al., *Nat. Methods* **8**, 969 (2011); Veatch et al., *PLoS ONE* **7**, e31457 (2012) |
 
 The native SMLMAnalysis steps — [Quality Filter](@ref), [Intensity Filter](@ref),
 [Density Filter](@ref), and the multi-channel steps — are described in full on

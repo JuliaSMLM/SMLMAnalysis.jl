@@ -5,7 +5,39 @@
 [![Build Status](https://github.com/JuliaSMLM/SMLMAnalysis.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/JuliaSMLM/SMLMAnalysis.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Coverage](https://codecov.io/gh/JuliaSMLM/SMLMAnalysis.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/JuliaSMLM/SMLMAnalysis.jl)
 
-SMLM analysis pipeline for the [JuliaSMLM](https://github.com/JuliaSMLM) ecosystem: detection, fitting, filtering, frame connection, drift correction, and super-resolution rendering with provenance tracking.
+SMLM analysis pipeline for the [JuliaSMLM](https://github.com/JuliaSMLM) ecosystem: detection, fitting, filtering, frame connection, drift correction, grouping, clustering, and super-resolution rendering with provenance tracking.
+
+## Analysis steps & primary literature
+
+Every step is a `…Config` you drop into an `AnalysisConfig` (or call standalone via `analyze(state, cfg)`). The method each implements comes from the primary literature cited here; full references with DOIs are in [References](#references).
+
+| Step (config) | What it does | Primary reference(s) |
+|---|---|---|
+| **Detection** (`DetectFitConfig`→`BoxerConfig`) | Finds candidate emitters / ROIs in the raw frames | Huang 2013 [¹](#references) |
+| **Fitting** (`DetectFitConfig`→`GaussMLEConfig`) | Maximum-likelihood localization reaching the Cramér–Rao bound; 2D/3D-astigmatic PSF models | Smith 2010 [²](#references); Huang 2013 [¹](#references) |
+| **Filter** (`FilterConfig`) | Quality cuts on photons, background, precision, track length, and the χ²/LLR goodness-of-fit **p-value** | Huang 2011 [³](#references) |
+| **Intensity filter** (`IntensityFilterConfig`) | Rejects multi-emitter events via a Poisson upper-tail test against a fitted excitation-field model | *(native to this package)* |
+| **Density filter** (`DensityFilterConfig`) | Removes isolated localizations by local k-nearest-neighbor density | *(standard practice)* |
+| **Frame connection** (`FrameConnectConfig`) | Links repeated blinks of one fluorophore across frames (spatiotemporal LAP) | Schodt 2021 [⁴](#references) |
+| **Drift correction** (`DriftConfig`) | Fiducial-free sample-drift estimation by entropy minimization (DME) | Cnossen 2021 [⁵](#references); Wester 2021 [⁶](#references) |
+| **BaGoL** (`BaGoLConfig`) | Bayesian Grouping of Localizations — RJMCMC grouping for sub-nm precision | Fazel 2022 [⁷](#references) |
+| **Clustering** (`DBSCANConfig`, `HDBSCANConfig`, `HierarchicalConfig`, `VoronoiConfig`) | Groups localizations into clusters | DBSCAN: Ester 1996 [⁸](#references); HDBSCAN: Campello 2013 [⁹](#references); Voronoi/SR-Tesseler: Levet 2015 [¹⁰](#references) |
+| **Spatial statistics** (`HopkinsConfig`, `VoronoiDensityConfig`) | Clustering-tendency and local-density statistics | Hopkins 1954 [¹¹](#references); Levet 2015 [¹⁰](#references) |
+| **Cross-correlation** (`CrossCorrConfig`) | Pair-correlation *g(r)* between two channels (co-localization) | Sengupta 2011 [¹²](#references); Veatch 2012 [¹³](#references) |
+| **Edge classification** (`edgeclassify`) | Labels localizations as cell interior / membrane / outside | *(native to this package)* |
+| **Render / Composite** (`RenderConfig`, `CompositeRenderConfig`) | Super-resolution image; multi-color composite of aligned channels | *(visualization)* |
+| **Cross-channel align** (`CrossAlignConfig`) | Registers color channels (entropy / FFT cross-correlation) | Wester 2021 [⁶](#references) |
+
+## Coming soon
+
+Planned steps wrapping in-progress JuliaSMLM packages (config surface not yet exposed here):
+
+| Method | Package | Reference |
+|---|---|---|
+| **Fourier Ring Correlation** resolution | SMLMResolution | Nieuwenhuizen 2013 [¹⁴](#coming-soon-references) |
+| **BaMF** — Bayesian Multi-emitter Fitting (RJMCMC) | SMLMBaMF | Fazel 2019 [¹⁵](#coming-soon-references) |
+| **PSF learning** — data-driven PSF modeling | PSFLearning | Liu 2024 [¹⁶](#coming-soon-references) |
+| **Deep-learning SR** — U-Net dense localization (DECODE-style) | SMLMDeepFit | Speiser 2021 [¹⁷](#coming-soon-references) |
 
 ## Installation
 
@@ -228,6 +260,29 @@ All packages share [SMLMData.jl](https://github.com/JuliaSMLM/SMLMData.jl) types
 
 - [Stable docs](https://JuliaSMLM.github.io/SMLMAnalysis.jl/stable/) - Full guide, configuration reference, and API
 - [API Overview](api_overview.md) - LLM-parseable API reference
+
+## References
+
+1. Huang, F., Hartwich, T.M.P., Rivera-Molina, F.E. *et al.* "Video-rate nanoscopy using sCMOS camera-specific single-molecule localization algorithms." *Nature Methods* **10**, 653–658 (2013). [doi:10.1038/nmeth.2488](https://doi.org/10.1038/nmeth.2488)
+2. Smith, C.S., Joseph, N., Rieger, B., Lidke, K.A. "Fast, single-molecule localization that achieves theoretically minimum uncertainty." *Nature Methods* **7**, 373–375 (2010). [doi:10.1038/nmeth.1449](https://doi.org/10.1038/nmeth.1449)
+3. Huang, F., Schwartz, S.L., Byars, J.M., Lidke, K.A. "Simultaneous multiple-emitter fitting for single molecule super-resolution imaging." *Biomedical Optics Express* **2**(5), 1377–1393 (2011). [doi:10.1364/BOE.2.001377](https://doi.org/10.1364/BOE.2.001377)
+4. Schodt, D.J., Lidke, K.A. "Spatiotemporal Clustering of Repeated Super-Resolution Localizations via Linear Assignment Problem." *Frontiers in Bioinformatics* **1**, 724325 (2021). [doi:10.3389/fbinf.2021.724325](https://doi.org/10.3389/fbinf.2021.724325)
+5. Cnossen, J., Cui, T.J., Joo, C., Smith, C. "Drift correction in localization microscopy using entropy minimization." *Optics Express* **29**(18), 27961–27974 (2021). [doi:10.1364/OE.426620](https://doi.org/10.1364/OE.426620)
+6. Wester, M.J., Schodt, D.J., Mazloom-Farsibaf, H., Fazel, M., Pallikkuth, S., Lidke, K.A. "Robust, fiducial-free drift correction for super-resolution imaging." *Scientific Reports* **11**, 23672 (2021). [doi:10.1038/s41598-021-02850-7](https://doi.org/10.1038/s41598-021-02850-7)
+7. Fazel, M., Wester, M.J., Schodt, D.J. *et al.* "High-precision estimation of emitter positions using Bayesian grouping of localizations." *Nature Communications* **13**, 7152 (2022). [doi:10.1038/s41467-022-34894-2](https://doi.org/10.1038/s41467-022-34894-2)
+8. Ester, M., Kriegel, H.-P., Sander, J., Xu, X. "A density-based algorithm for discovering clusters in large spatial databases with noise." *Proc. 2nd Int. Conf. Knowledge Discovery and Data Mining (KDD-96)*, 226–231 (1996).
+9. Campello, R.J.G.B., Moulavi, D., Sander, J. "Density-based clustering based on hierarchical density estimates." *PAKDD 2013*, LNCS **7819**, 160–172. [doi:10.1007/978-3-642-37456-2_14](https://doi.org/10.1007/978-3-642-37456-2_14)
+10. Levet, F., Hosy, E., Kechkar, A. *et al.* "SR-Tesseler: a method to segment and quantify localization-based super-resolution microscopy data." *Nature Methods* **12**, 1065–1071 (2015). [doi:10.1038/nmeth.3579](https://doi.org/10.1038/nmeth.3579)
+11. Hopkins, B., Skellam, J.G. "A new method for determining the type of distribution of plant individuals." *Annals of Botany* **18**(2), 213–227 (1954). [doi:10.1093/oxfordjournals.aob.a083391](https://doi.org/10.1093/oxfordjournals.aob.a083391)
+12. Sengupta, P., Jovanovic-Talisman, T., Skoko, D., Renz, M., Veatch, S.L., Lippincott-Schwartz, J. "Probing protein heterogeneity in the plasma membrane using PALM and pair correlation analysis." *Nature Methods* **8**, 969–975 (2011). [doi:10.1038/nmeth.1704](https://doi.org/10.1038/nmeth.1704)
+13. Veatch, S.L., Machta, B.B., Shelby, S.A., Chiang, E.N., Holowka, D.A., Baird, B.A. "Correlation functions quantify super-resolution images and estimate apparent clustering due to over-counting." *PLoS ONE* **7**(2), e31457 (2012). [doi:10.1371/journal.pone.0031457](https://doi.org/10.1371/journal.pone.0031457)
+
+### Coming-soon references
+
+14. Nieuwenhuizen, R.P.J., Lidke, K.A., Bates, M. *et al.* "Measuring image resolution in optical nanoscopy." *Nature Methods* **10**, 557–562 (2013). [doi:10.1038/nmeth.2448](https://doi.org/10.1038/nmeth.2448)
+15. Fazel, M., Wester, M.J., Mazloom-Farsibaf, H. *et al.* "Bayesian multiple emitter fitting using reversible jump Markov chain Monte Carlo." *Scientific Reports* **9**, 13791 (2019). [doi:10.1038/s41598-019-50232-x](https://doi.org/10.1038/s41598-019-50232-x)
+16. Liu, S., Chen, J., Hellgoth, J. *et al.* "Universal inverse modelling of point spread functions for SMLM localization and microscope characterization." *Nature Methods* **21**, 1082–1093 (2024). [doi:10.1038/s41592-024-02282-x](https://doi.org/10.1038/s41592-024-02282-x)
+17. Speiser, A., Müller, L.-R., Hoess, P. *et al.* "Deep learning enables fast and dense single-molecule localization with high accuracy." *Nature Methods* **18**, 1082–1090 (2021). [doi:10.1038/s41592-021-01236-x](https://doi.org/10.1038/s41592-021-01236-x)
 
 ## License
 

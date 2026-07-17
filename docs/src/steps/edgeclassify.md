@@ -66,3 +66,18 @@ StepInfo summary records the gate `:method`, emitter counts, and the number of c
 
 See the [SMLMClustering documentation](https://github.com/JuliaSMLM/SMLMClustering.jl)
 for the algorithm details and the full per-config parameter list.
+
+## References
+
+Edge classification is a method native to
+[SMLMClustering](https://github.com/JuliaSMLM/SMLMClustering.jl) (`KdeValleyConfig`
+/ `OuterPolygonConfig`). The outer-cell boundary is built from an
+alpha-shape / concave-hull of the localization cloud; the Voronoi-area density that
+the KDE-valley gate builds on is that of SR-Tesseler:
+
+- F. Levet, *et al.* "SR-Tesseler: a method to segment and quantify
+  localization-based super-resolution microscopy data." *Nature Methods* **12**,
+  1065–1071 (2015). [doi:10.1038/nmeth.3579](https://doi.org/10.1038/nmeth.3579)
+
+See the [SMLMClustering edge-classification docs](https://github.com/JuliaSMLM/SMLMClustering.jl)
+for the boundary-extraction algorithms and their references.

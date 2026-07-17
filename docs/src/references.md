@@ -58,10 +58,18 @@ and links to the backing package's documentation for the algorithm details.
   Algorithm for Discovering Clusters in Large Spatial Databases with Noise."
   *Proc. 2nd Int. Conf. on Knowledge Discovery and Data Mining (KDD-96)*,
   226–231 (1996).
+- **HDBSCAN.** R. J. G. B. Campello, D. Moulavi, J. Sander. "Density-Based
+  Clustering Based on Hierarchical Density Estimates." *PAKDD 2013*, LNCS
+  **7819**, 160–172.
+  [doi:10.1007/978-3-642-37456-2_14](https://doi.org/10.1007/978-3-642-37456-2_14)
 - **Voronoi / SR-Tesseler.** F. Levet, *et al.* "SR-Tesseler: a method to
   segment and quantify localization-based super-resolution microscopy data."
   *Nature Methods* **12**, 1065–1071 (2015).
   [doi:10.1038/nmeth.3579](https://doi.org/10.1038/nmeth.3579)
+- **Clustering tendency (Hopkins statistic).** B. Hopkins, J. G. Skellam. "A new
+  method for determining the type of distribution of plant individuals." *Annals
+  of Botany* **18**, 213–227 (1954).
+  [doi:10.1093/oxfordjournals.aob.a083391](https://doi.org/10.1093/oxfordjournals.aob.a083391)
 
 See the [SMLMClustering documentation](https://github.com/JuliaSMLM/SMLMClustering.jl)
 for the full set of backends and their individual references.
@@ -74,6 +82,10 @@ for the full set of backends and their individual references.
   *et al.* "Probing protein heterogeneity in the plasma membrane using PALM and
   pair correlation analysis." *Nature Methods* **8**, 969–975 (2011).
   [doi:10.1038/nmeth.1704](https://doi.org/10.1038/nmeth.1704)
+- **Over-counting correction.** S. L. Veatch, B. B. Machta, S. A. Shelby, *et
+  al.* "Correlation functions quantify super-resolution images and estimate
+  apparent clustering due to over-counting." *PLoS ONE* **7**(2), e31457 (2012).
+  [doi:10.1371/journal.pone.0031457](https://doi.org/10.1371/journal.pone.0031457)
 
 ## Methods native to SMLMAnalysis
 
