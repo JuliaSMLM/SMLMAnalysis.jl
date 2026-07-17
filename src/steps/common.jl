@@ -382,6 +382,55 @@ end
 """Check if a value is a config-like struct (has fields, not a primitive/collection)."""
 _is_config_struct(v) = isstructtype(typeof(v)) && !(v isa Union{Number, String, Symbol, AbstractArray, AbstractDict, Tuple, SMLMData.AbstractCamera})
 
+"""
+    _toml_value(v) -> String
+
+Render a scalar config/info value as a syntactically valid TOML value string.
+
+The pipeline writes `config.toml` / `info.toml` provenance records with a hand-rolled
+serializer; without this, common config value types emit invalid TOML: tuples render as
+`(500.0, Inf)` (parens aren't TOML, `Inf` must be `inf`), ranges as `1:19`, symbol vectors
+as `[:red, :blue]`, and strings interpolate unescaped `"`/`\\`. Routing every scalar emit
+through `_toml_value` guarantees the `.toml` files parse back.
+
+Mapping:
+- `AbstractString` → escaped TOML basic string (quotes `"`, escapes `\\ " \\n \\t \\r`).
+- `Symbol` → quoted string.
+- `Bool` → `"true"`/`"false"` (checked before `Integer`, since `Bool <: Integer`).
+- `Integer` → decimal.
+- `AbstractFloat` → decimal, with `Inf`/`NaN` mapped to TOML `inf`/`-inf`/`nan`.
+- `AbstractRange` → quoted string form (e.g. `"1:19"`; not materialized).
+- `Tuple`/`AbstractVector` → TOML array, elements recursed (e.g. `(500.0, Inf)` → `[500.0, inf]`).
+- anything else → its `string(...)` form, quoted, so nothing is ever emitted raw/invalid.
+"""
+function _toml_value(v)::String
+    if v isa AbstractString
+        # Multi-pair `replace` matches simultaneously (each source char examined once),
+        # so backslash-escaping doesn't re-escape the backslashes it introduces.
+        s = replace(String(v),
+                    "\\" => "\\\\",
+                    "\"" => "\\\"",
+                    "\n" => "\\n",
+                    "\t" => "\\t",
+                    "\r" => "\\r")
+        return "\"" * s * "\""
+    elseif v isa Symbol
+        return _toml_value(String(v))
+    elseif v isa Bool                       # before Integer: Bool <: Integer in Julia
+        return v ? "true" : "false"
+    elseif v isa Integer
+        return string(v)
+    elseif v isa AbstractFloat
+        return isinf(v) ? (v > 0 ? "inf" : "-inf") : (isnan(v) ? "nan" : string(v))
+    elseif v isa AbstractRange              # before AbstractVector: AbstractRange <: AbstractVector
+        return _toml_value(string(v))
+    elseif v isa Tuple || v isa AbstractVector
+        return "[" * join(map(_toml_value, v), ", ") * "]"
+    else
+        return _toml_value(string(v))
+    end
+end
+
 """Write config fields to TOML. Nested structs become [section] blocks."""
 function _write_config_fields!(io::IO, cfg; section::String="")
     for f in fieldnames(typeof(cfg))
@@ -394,12 +443,10 @@ function _write_config_fields!(io::IO, cfg; section::String="")
             println(io, "\n[$f]")
             println(io, "type = \"$(nameof(typeof(v)))\"")
             _write_config_fields!(io, v; section=string(f))
-        elseif v isa String
-            println(io, "$f = \"$v\"")
-        elseif v isa Symbol
-            println(io, "$f = \"$v\"")
         else
-            println(io, "$f = $v")
+            # Every scalar value goes through _toml_value for valid TOML
+            # (escaped strings, tuple/range/vector arrays, inf/nan floats).
+            println(io, "$f = $(_toml_value(v))")
         end
     end
 end
@@ -433,23 +480,23 @@ end
 
 """Write a single field to info.toml, skipping complex types."""
 function _write_info_field!(io::IO, name::Symbol, v::Number)
-    # Bool <: Number, so this method also handles true/false (TOML-valid as-is).
-    println(io, "$name = $v")
+    # Bool <: Number, so this method also handles true/false. _toml_value maps
+    # Inf/NaN floats to TOML inf/nan (a raw `Inf` would otherwise be invalid TOML).
+    println(io, "$name = $(_toml_value(v))")
 end
 function _write_info_field!(io::IO, name::Symbol, v::String)
-    println(io, "$name = \"$v\"")
+    println(io, "$name = $(_toml_value(v))")
 end
 function _write_info_field!(io::IO, name::Symbol, v::Symbol)
-    println(io, "$name = \"$v\"")
+    println(io, "$name = $(_toml_value(v))")
 end
 function _write_info_field!(io::IO, name::Symbol, v::Nothing)
     println(io, "$name = \"nothing\"")
 end
 function _write_info_field!(io::IO, name::Symbol, v::Tuple)
-    # Only write tuples of scalars
+    # Only write tuples of scalars; _toml_value escapes/renders each element as valid TOML.
     if all(x -> x isa Union{Number, Bool, String, Symbol}, v)
-        vals = join([x isa String || x isa Symbol ? "\"$x\"" : "$x" for x in v], ", ")
-        println(io, "$name = [$vals]")
+        println(io, "$name = $(_toml_value(v))")
     end
     # Skip tuples containing complex types
 end

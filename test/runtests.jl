@@ -4,6 +4,7 @@ using SMLMDriftCorrection
 using GaussMLE
 using Test
 using Random
+using TOML
 
 const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true", "1", "yes")
 
@@ -366,6 +367,45 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test eltype(labs.emitters) <: GaussMLE.Emitter2DFitSigma   # NOT Emitter2DFit
             @test labs.emitters[2].σ ≈ 0.13                             # PSF-width σ preserved
             @test labs.emitters[2].σ_xy ≈ 0.003
+        end
+    end
+
+    @testset "TOML provenance is valid" begin
+        # Provenance files are named .toml and must parse back. The hand-rolled
+        # serializer used to emit invalid TOML for tuples ((500.0, Inf)), ranges
+        # (1:19), symbol vectors ([:red, :blue]), and unescaped strings. _toml_value
+        # fixes every scalar-emit point; assert the round-trip actually works.
+        mktempdir() do dir
+            # FilterConfig: photons/precision are Tuple{Float64,Float64}; Inf must
+            # serialize as TOML `inf`. FilterConfig has no nested-config fields, so
+            # every value sits at the root table.
+            cfg = FilterConfig(photons=(500.0, Inf), precision=(0.0, 0.02))
+            SMLMAnalysis._save_config!(dir, cfg)
+            parsed = TOML.parsefile(joinpath(dir, "config.toml"))   # throws if invalid TOML
+            @test parsed["type"] == "FilterConfig"
+            @test parsed["photons"][1] == 500.0
+            @test isinf(parsed["photons"][2])        # `inf` parses back to Inf::Float64
+            @test parsed["precision"] == [0.0, 0.02]
+
+            # DetectFitConfig.datasets is an AbstractVector{Int}; a UnitRange (1:19)
+            # used to emit the bare, invalid `datasets = 1:19`. It must now parse.
+            cfg2 = DetectFitConfig(datasets=1:19)
+            SMLMAnalysis._save_config!(dir, cfg2)
+            @test TOML.parsefile(joinpath(dir, "config.toml")) isa AbstractDict  # no parse error
+
+            # _toml_value unit behavior for the hard scalar types.
+            @test SMLMAnalysis._toml_value(1:19) == "\"1:19\""       # range -> quoted, not materialized
+            @test SMLMAnalysis._toml_value((500.0, Inf)) == "[500.0, inf]"
+            @test SMLMAnalysis._toml_value([:red, :blue]) == "[\"red\", \"blue\"]"
+            @test SMLMAnalysis._toml_value(true) == "true"
+
+            # String escaping: embedded quote, backslash, and newline survive a
+            # write -> TOML.parse round-trip (the old String branch escaped nothing).
+            s = "he said \"hi\"\\\n done"
+            open(joinpath(dir, "esc.toml"), "w") do io
+                println(io, "s = $(SMLMAnalysis._toml_value(s))")
+            end
+            @test TOML.parsefile(joinpath(dir, "esc.toml"))["s"] == s
         end
     end
 end
