@@ -474,3 +474,36 @@ images, metadata = load_mic_h5(path)
 info = load_mic_h5_info(path)
 block = load_mic_h5_block(path, block_index)
 ```
+
+## AI Assistant Guide
+
+### install_agent_guide
+
+```julia
+install_agent_guide(; tool=:claude, scope=:project, track=false,
+                      overwrite=false, dir=pwd()) -> String
+```
+
+Writes a hierarchical, version-stamped ecosystem guide (the `analyze()` pipeline plus
+every sub-package's `api_overview.md`, read from each `pkgdir`) for an AI coding
+assistant. Returns the installed skill/bundle directory. Follows the lab
+skills-installer convention (namespaced dir, `x-` provenance stamp, own-install
+idempotent refresh).
+
+- `tool`: `:claude` → Claude Code skill (`.claude/skills/smlma-ecosystem/SKILL.md` + `reference/*.md`); `:codex` → `smlm-agent-guide/` bundle + a managed block in `AGENTS.md`.
+- `scope`: `:project` (into `dir`) or `:user` (into `~/.claude` / `~/.codex`).
+- `track`: project scope only — when `false` (default) the guide is added to `.gitignore`; `track=true` commits it.
+- `overwrite`: replace a target **not** installed by this installer (hand-made, or another package's). Re-running refreshes our own stamped install without it.
+
+### uninstall_agent_guide / agent_guide_status
+
+```julia
+uninstall_agent_guide(; tool=:claude, scope=:project, dir=pwd()) -> Vector{String}
+agent_guide_status(; tool=:claude, scope=:project, dir=pwd()) -> NamedTuple
+```
+
+`uninstall_agent_guide` removes a previously installed guide, but only targets carrying
+this installer's provenance stamp (a hand-made skill or another package's install is
+left untouched); returns the paths removed. `agent_guide_status` is a doctor: returns
+`(; installed, path, source_version, source_commit, current_version, stale)`, with
+`stale=true` when the installed version differs from the resolved one.

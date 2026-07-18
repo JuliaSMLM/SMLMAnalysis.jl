@@ -246,6 +246,12 @@ export analyze
 include("multitarget.jl")
 
 # ============================================================
+# AI coding-assistant guide installer
+# ============================================================
+include("agent_guide.jl")
+export install_agent_guide, uninstall_agent_guide, agent_guide_status
+
+# ============================================================
 # Compact display for SMLMAnalysis-owned config types
 # ============================================================
 # Scoped to owned types only (see _show_config in types.jl). One method covers the

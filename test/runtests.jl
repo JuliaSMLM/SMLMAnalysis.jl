@@ -539,6 +539,129 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test isempty(stepinfos(info, :nope))
         end
     end
+
+    @testset "install_agent_guide" begin
+        # Arg validation
+        @test_throws ArgumentError install_agent_guide(tool = :bogus)
+        @test_throws ArgumentError install_agent_guide(scope = :bogus)
+        @test_throws ArgumentError uninstall_agent_guide(tool = :bogus)
+        @test_throws ArgumentError agent_guide_status(scope = :bogus)
+
+        # Claude, project scope, default track=false → gitignored, namespaced, stamped.
+        mktempdir() do dir
+            skill = install_agent_guide(dir = dir)
+            @test skill == joinpath(dir, ".claude", "skills", "smlma-ecosystem")
+            @test isfile(joinpath(skill, "SKILL.md"))
+
+            refs = readdir(joinpath(skill, "reference"))
+            # SMLMAnalysis + the 10 ecosystem packages, each with a reference file.
+            @test length(refs) == 11
+            for name in ("SMLMAnalysis", "SMLMData", "GaussMLE", "SMLMBaGoL", "SMLMRender")
+                @test "$name.md" in refs
+            end
+
+            skilltext = read(joinpath(skill, "SKILL.md"), String)
+            @test occursin("name: smlma-ecosystem", skilltext)
+            @test occursin("description:", skilltext)
+            @test occursin("x-installer: SMLMAnalysis", skilltext)   # provenance stamp
+            @test occursin("x-source-version:", skilltext)
+            @test occursin("Dependency hierarchy", skilltext)
+
+            # track=false (default) gitignores the namespaced skill dir.
+            @test occursin(".claude/skills/smlma-ecosystem/", read(joinpath(dir, ".gitignore"), String))
+
+            # Doctor: freshly installed, not stale.
+            st = agent_guide_status(dir = dir)
+            @test st.installed
+            @test !st.stale
+            @test st.source_version == st.current_version
+
+            # Own-install idempotency: re-running our OWN stamped install refreshes
+            # WITHOUT overwrite (no error), returning the same path.
+            @test install_agent_guide(dir = dir) == skill
+
+            # A foreign/unstamped skill in the same dir IS refused unless overwrite.
+            write(joinpath(skill, "SKILL.md"), "---\nname: smlma-ecosystem\n---\nhand-made\n")
+            @test_throws ErrorException install_agent_guide(dir = dir)
+            @test install_agent_guide(dir = dir, overwrite = true) == skill
+            @test occursin("x-installer: SMLMAnalysis", read(joinpath(skill, "SKILL.md"), String))
+
+            # Uninstall removes only our stamped install.
+            @test uninstall_agent_guide(dir = dir) == [skill]
+            @test !isdir(skill)
+            @test !agent_guide_status(dir = dir).installed
+            @test isempty(uninstall_agent_guide(dir = dir))   # nothing left → no-op
+        end
+
+        # Uninstall leaves a foreign skill untouched.
+        mktempdir() do dir
+            skill = joinpath(dir, ".claude", "skills", "smlma-ecosystem")
+            mkpath(skill)
+            write(joinpath(skill, "SKILL.md"), "---\nname: smlma-ecosystem\n---\nnot ours\n")
+            @test isempty(uninstall_agent_guide(dir = dir))
+            @test isdir(skill)
+        end
+
+        # Claude, track=true → committed (no .gitignore written).
+        mktempdir() do dir
+            install_agent_guide(dir = dir, track = true)
+            @test !isfile(joinpath(dir, ".gitignore"))
+        end
+
+        # Codex: stamped bundle + a managed block appended to AGENTS.md that preserves
+        # pre-existing content and is idempotent; uninstall strips it back out.
+        mktempdir() do dir
+            write(joinpath(dir, "AGENTS.md"), "# My project rules\n\nBe careful.\n")
+            bundle = install_agent_guide(dir = dir, tool = :codex)
+            @test bundle == joinpath(dir, "smlm-agent-guide")
+            @test isfile(joinpath(bundle, "GUIDE.md"))
+            @test occursin("x-installer: SMLMAnalysis", read(joinpath(bundle, "GUIDE.md"), String))
+            @test length(readdir(joinpath(bundle, "reference"))) == 11
+
+            agents = read(joinpath(dir, "AGENTS.md"), String)
+            @test occursin("My project rules", agents)                   # user content kept
+            @test occursin("BEGIN SMLMAnalysis agent-guide", agents)     # our block added
+            @test occursin("smlm-agent-guide/GUIDE.md", agents)
+
+            # Idempotent refresh of our own bundle (no overwrite needed).
+            install_agent_guide(dir = dir, tool = :codex)
+            agents2 = read(joinpath(dir, "AGENTS.md"), String)
+            @test count("BEGIN SMLMAnalysis agent-guide", agents2) == 1  # not duplicated
+            @test occursin("My project rules", agents2)
+
+            # Uninstall removes bundle + our block, preserving the user's content.
+            removed = uninstall_agent_guide(dir = dir, tool = :codex)
+            @test joinpath(dir, "smlm-agent-guide") in removed
+            @test !isdir(bundle)
+            agents3 = read(joinpath(dir, "AGENTS.md"), String)
+            @test occursin("My project rules", agents3)
+            @test !occursin("BEGIN SMLMAnalysis agent-guide", agents3)
+        end
+    end
+
+    @testset "lab convention conformance" begin
+        # Explicit conformance check for the lab skills-installer convention
+        # (independent per-package implementations; see the convention doc). Each
+        # assert maps to one spec invariant so the lab-guide can cite this block.
+        mktempdir() do dir
+            skill = install_agent_guide(dir = dir)                    # tool=:claude default
+            # 1. Namespaced install dir: <pkgprefix>-<skill>
+            @test occursin(r"[/\\]smlma-ecosystem$", skill)
+            fm = read(joinpath(skill, "SKILL.md"), String)
+            # 2. Provenance stamp: all four x- fields present
+            for k in ("x-installer:", "x-source-version:", "x-source-commit:", "x-installed-format:")
+                @test occursin(k, fm)
+            end
+            # 3. copy-never-symlink: installed files are real files, not links
+            @test !islink(joinpath(skill, "SKILL.md"))
+            # 4. track=false default anchors a .gitignore entry
+            @test occursin("/.claude/skills/smlma-ecosystem/", read(joinpath(dir, ".gitignore"), String))
+            # 5. own-install refresh is idempotent (no flag, same path)
+            @test install_agent_guide(dir = dir) == skill
+            # 6. stamp-scoped uninstall removes our own install
+            @test uninstall_agent_guide(dir = dir) == [skill]
+        end
+    end
 end
 
 if SMLM_TEST_FULL
