@@ -593,6 +593,18 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test isempty(uninstall_agent_guide(dir = dir))   # nothing left → no-op
         end
 
+        # Guard-gap regression: a hand-made target dir with a reference/ but NO
+        # SKILL.md must be REFUSED (not silently wiped) unless overwrite=true.
+        mktempdir() do dir
+            skill = joinpath(dir, ".claude", "skills", "smlma-ecosystem")
+            mkpath(joinpath(skill, "reference"))
+            write(joinpath(skill, "reference", "keep.md"), "hand-made")
+            @test_throws ErrorException install_agent_guide(dir = dir)
+            @test isfile(joinpath(skill, "reference", "keep.md"))            # survived
+            @test install_agent_guide(dir = dir, overwrite = true) == skill  # overwrite proceeds
+            @test isfile(joinpath(skill, "SKILL.md"))
+        end
+
         # Uninstall leaves a foreign skill untouched.
         mktempdir() do dir
             skill = joinpath(dir, ".claude", "skills", "smlma-ecosystem")

@@ -341,9 +341,11 @@ function install_agent_guide(; tool::Symbol = :claude,
     if tool == :claude
         wrapper = joinpath(target, "SKILL.md")
         # Own-install idempotency: refresh ours freely; refuse a foreign/unstamped
-        # target unless overwrite=true.
-        if isfile(wrapper)
-            owner = _frontmatter_field(wrapper, "x-installer")
+        # target unless overwrite=true. Guard whenever the dir exists with content —
+        # NOT only when SKILL.md is present — so a hand-made dir with a reference/ but
+        # no SKILL.md is not silently wiped by the rm below.
+        if isdir(target) && !isempty(readdir(target))
+            owner = isfile(wrapper) ? _frontmatter_field(wrapper, "x-installer") : nothing
             owner == _INSTALLER || overwrite ||
                 error("$target already exists and was not installed by $_INSTALLER " *
                       "(x-installer=$(owner === nothing ? "none" : owner)). Pass overwrite=true to replace it.")
@@ -359,8 +361,10 @@ function install_agent_guide(; tool::Symbol = :claude,
         return target
     else # :codex
         guide = joinpath(target, "GUIDE.md")
-        if isfile(guide)
-            owner = _guide_field(guide, "x-installer")
+        # Same guard as :claude — refuse any non-empty foreign target, not only one
+        # that already has our GUIDE.md, so a stray reference/ is not wiped.
+        if isdir(target) && !isempty(readdir(target))
+            owner = isfile(guide) ? _guide_field(guide, "x-installer") : nothing
             owner == _INSTALLER || overwrite ||
                 error("$target already exists and was not installed by $_INSTALLER. Pass overwrite=true to replace it.")
         end
