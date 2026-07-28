@@ -68,7 +68,7 @@ function driftcorrect_step(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig
     if dir !== nothing
         converged = hasproperty(drift_info, :converged) ? drift_info.converged : nothing
         iterations = hasproperty(drift_info, :iterations) ? drift_info.iterations : nothing
-        _save_driftcorrect_outputs!(dir, drift_model, cfg, v, t, max_drift, inter_shifts, n_frames, converged, iterations, drift_info)
+        _save_driftcorrect_outputs!(dir, drift_model, cfg, v, t, max_drift, inter_shifts, n_frames, converged, iterations, drift_info, corrected_smld)
 
         if checkpoint >= Checkpoint.EXPENSIVE
             _save_step_smld(dir, corrected_smld;
@@ -150,7 +150,8 @@ end
 
 function _save_driftcorrect_outputs!(dir::String, drift_model, cfg::SMLMDriftCorrection.DriftConfig, v::Int, t::Float64,
                              max_drift::Float64, inter_shifts::Vector{Float64}, n_frames::Int,
-                             converged::Union{Bool,Nothing}, iterations::Union{Int,Nothing}, drift_info)
+                             converged::Union{Bool,Nothing}, iterations::Union{Int,Nothing}, drift_info,
+                             corrected_smld=nothing)
     mkpath(dir)
     _save_config!(dir, cfg)
     _save_info!(dir, drift_info)
@@ -158,6 +159,8 @@ function _save_driftcorrect_outputs!(dir::String, drift_model, cfg::SMLMDriftCor
     if v >= Verbosity.STANDARD
         _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n_frames, converged, iterations, drift_info)
         _save_drift_figures(dir, drift_model, n_frames, cfg.dataset_mode; n_chunks=cfg.n_chunks)
+        corrected_smld === nothing ||
+            _save_drift_residual_variance(dir, corrected_smld, v)
     end
 
     if v >= Verbosity.DETAILED
@@ -295,6 +298,146 @@ function _write_residual_correlation!(io::IO, rc, n_datasets::Int)
             println(io, "- corr_z: $(_fmt_corr(inter_rc.corr_z))")
         end
     end
+end
+
+const RESIDUAL_MAX_LOCS = 150_000
+
+"""
+    _save_drift_residual_variance(dir, corrected_smld, v)
+
+Residual-drift variance analysis -> `drift_residual_variance.png` (+ the numbers in
+`residual_variance.md`).
+
+The trajectory plot shows the drift the model REMOVED; this shows what is LEFT. Via
+`SMLMDriftCorrection.position_frame_correlation`, each localization gets a residual against the
+mean of its K nearest spatial neighbours. If correction worked those residuals are uncorrelated
+with frame number, so the binned mean sits on zero and the binned variance is flat. A sloping
+mean, or a variance that grows with frame, is uncorrected drift.
+
+Panels: (1) binned residual variance vs frame -- flat = good; (2) binned residual MEAN vs frame
+-- the systematic part, should sit on zero; (3) per-dataset |correlation| of residual with frame;
+(4) inter-dataset residuals (multi-dataset only), i.e. leftover registration error.
+
+Subsampled to RESIDUAL_MAX_LOCS because the diagnostic is a K-nearest-neighbour search and these
+cells reach 1.3M localizations. Sampling is deterministic (fixed stride, not RNG) so re-running
+a cell gives the same figure.
+"""
+function _save_drift_residual_variance(dir, corrected_smld, v::Int)
+    DC = SMLMDriftCorrection
+    emitters = corrected_smld.emitters
+    n = length(emitters)
+    n < 200 && return nothing     # too few localizations for a meaningful residual estimate
+
+    smld_diag = corrected_smld
+    if n > RESIDUAL_MAX_LOCS
+        stride = cld(n, RESIDUAL_MAX_LOCS)
+        smld_diag = _smld_with_emitters(corrected_smld, emitters[1:stride:end])
+        v >= Verbosity.DETAILED &&
+            @info "    residual diagnostic subsampled $(n) -> $(length(smld_diag.emitters)) locs (stride $stride)"
+    end
+
+    local intra, inter
+    try
+        intra = DC.position_frame_correlation(smld_diag; K=20, mode=:intra)
+        inter = smld_diag.n_datasets > 1 ?
+                DC.position_frame_correlation(smld_diag; K=20, mode=:inter) : nothing
+    catch err
+        v >= Verbosity.PROGRESS &&
+            @warn "  residual-variance diagnostic failed; skipping" exception=err
+        return nothing
+    end
+
+    fig = Figure(size=(1500, 400))
+    ax1 = Axis(fig[1, 1]; xlabel="Frame", ylabel="residual variance (nm²)",
+               title="Residual variance vs frame (flat = corrected)")
+    ax2 = Axis(fig[1, 2]; xlabel="Frame", ylabel="mean residual (nm)",
+               title="Systematic residual (should be 0)")
+    ax3 = Axis(fig[1, 3]; xlabel="Dataset", ylabel="|corr(residual, frame)|",
+               title="Per-dataset residual–frame correlation")
+
+    for pd in intra.per_dataset
+        length(pd.frames) < 50 && continue
+        for (res, col) in ((pd.residuals_x, :steelblue), (pd.residuals_y, :crimson))
+            res === nothing && continue
+            ctr, vv, mm = _bin_residuals(pd.frames, res .* 1000)   # um -> nm
+            isempty(ctr) && continue
+            lines!(ax1, ctr, vv; color=(col, 0.5))
+            lines!(ax2, ctr, mm; color=(col, 0.5))
+        end
+    end
+    hlines!(ax2, [0.0]; color=(:black, 0.6), linestyle=:dash)
+
+    dsx = [pd.dataset for pd in intra.per_dataset]
+    barplot!(ax3, dsx .- 0.2, [abs(pd.corr_x) for pd in intra.per_dataset];
+             width=0.4, color=(:steelblue, 0.8), label="x")
+    barplot!(ax3, dsx .+ 0.2, [abs(pd.corr_y) for pd in intra.per_dataset];
+             width=0.4, color=(:crimson, 0.8), label="y")
+    axislegend(ax3; position=:lt, framevisible=false)
+
+    if inter !== nothing && inter.residuals_x !== nothing
+        ctrx, _, mmx = _bin_residuals(Float64.(inter.dataset_indices), inter.residuals_x .* 1000)
+        ctry, _, mmy = _bin_residuals(Float64.(inter.dataset_indices), inter.residuals_y .* 1000)
+        # Skip the panel entirely when binning yields nothing (e.g. metadata says
+        # n_datasets > 1 but every localization sits in one dataset): an axis with no
+        # labelled plots makes axislegend throw and would take the whole step down.
+        if !isempty(ctrx) || !isempty(ctry)
+            ax4 = Axis(fig[1, 4]; xlabel="Dataset index", ylabel="residual (nm)",
+                       title="Inter-dataset residual (registration)")
+            isempty(ctrx) || lines!(ax4, ctrx, mmx; color=:steelblue, label="x")
+            isempty(ctry) || lines!(ax4, ctry, mmy; color=:crimson, label="y")
+            hlines!(ax4, [0.0]; color=(:black, 0.6), linestyle=:dash)
+            axislegend(ax4; position=:lt, framevisible=false)
+        end
+    end
+
+    save(joinpath(dir, "drift_residual_variance.png"), fig)
+
+    open(joinpath(dir, "residual_variance.md"), "w") do io
+        println(io, "# Residual Drift Variance\n")
+        println(io, "Residual of each localization vs the mean of its K=20 nearest neighbours,")
+        println(io, "correlated with frame (intra) / dataset index (inter). Near-zero correlation")
+        println(io, "means the drift model removed the systematic motion.\n")
+        println(io, "- **Localizations used**: $(length(smld_diag.emitters))",
+                    n > RESIDUAL_MAX_LOCS ? " (subsampled from $n)" : "")
+        println(io, "- **mean |corr| x**: $(round(intra.summary.mean_abs_corr_x, digits=4))")
+        println(io, "- **mean |corr| y**: $(round(intra.summary.mean_abs_corr_y, digits=4))")
+        if inter !== nothing
+            println(io, "- **inter-dataset corr x**: $(round(inter.corr_x, digits=4))")
+            println(io, "- **inter-dataset corr y**: $(round(inter.corr_y, digits=4))")
+        end
+        println(io, "\n| Dataset | n_locs | corr_x | corr_y |")
+        println(io, "|---------|--------|--------|--------|")
+        for pd in intra.per_dataset
+            println(io, "| $(pd.dataset) | $(pd.n_locs) | $(round(pd.corr_x, digits=4)) | $(round(pd.corr_y, digits=4)) |")
+        end
+    end
+    return nothing
+end
+
+"""bin values against x, returning (centres, variance, mean) with sparse bins dropped.
+
+`nbins` ADAPTS to the sample size: a fixed 40 bins silently produced empty panels on the
+sparse cells (576 locs over 5 datasets => ~3 per bin, all below the 5-point floor). Aim for
+~25 points per bin, clamped to [5, 40]."""
+function _bin_residuals(x::AbstractVector, y::AbstractVector; nbins::Int=0)
+    (isempty(x) || length(x) != length(y)) && return (Float64[], Float64[], Float64[])
+    nbins = nbins > 0 ? nbins : clamp(length(x) ÷ 25, 5, 40)
+    lo, hi = extrema(x)
+    hi <= lo && return (Float64[], Float64[], Float64[])
+    w = (hi - lo) / nbins
+    ctr = Float64[]; vv = Float64[]; mm = Float64[]
+    for b in 1:nbins
+        l = lo + (b - 1) * w; r = l + w
+        idx = b == nbins ? findall(v -> l <= v <= r, x) : findall(v -> l <= v < r, x)
+        length(idx) < 5 && continue
+        push!(ctr, l + w / 2); push!(vv, var(@view y[idx])); push!(mm, mean(@view y[idx]))
+    end
+    (ctr, vv, mm)
+end
+
+"rebuild an SMLD of the same type with a different emitter vector (for subsampling)"
+function _smld_with_emitters(smld::BasicSMLD, emitters)
+    BasicSMLD(emitters, smld.camera, smld.n_frames, smld.n_datasets, copy(smld.metadata))
 end
 
 function _save_drift_figures(dir, drift_model, n_frames, dataset_mode::Symbol; n_chunks::Int=0)
