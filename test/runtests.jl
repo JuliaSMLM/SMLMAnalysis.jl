@@ -10,6 +10,20 @@ using Statistics
 const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true", "1", "yes")
 
 @testset "fast" begin
+    @testset "exports resolve" begin
+        # Every exported name must have a defined binding. `export AbstractCamera`
+        # was dangling: SMLMData and Makie (via CairoMakie) both export an
+        # AbstractCamera, the ambiguity left the module binding undeclared, and
+        # downstream `f(x::AbstractCamera)` threw UndefVarError after
+        # `using SMLMAnalysis`. This sweep catches any future collision a new
+        # dependency introduces.
+        dangling = [n for n in names(SMLMAnalysis) if !isdefined(SMLMAnalysis, n)]
+        @test isempty(dangling)
+        # And the binding must be SMLMData's camera type, not Makie's.
+        @test AbstractCamera === SMLMAnalysis.SMLMData.AbstractCamera
+        @test IdealCamera <: AbstractCamera
+    end
+
     @testset "Types" begin
         # Test AnalysisInfo constructor
         info = AnalysisInfo()
