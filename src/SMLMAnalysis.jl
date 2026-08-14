@@ -72,6 +72,10 @@ using Optim
 using Distributions: Poisson, ccdf, Gamma, pdf
 
 # Re-export from SMLMData
+# AbstractCamera must be declared explicitly: CairoMakie also exports an unrelated
+# Makie.AbstractCamera, and the ambiguity would leave the exported binding
+# undeclared (dangling export → UndefVarError in downstream `using` code).
+using SMLMData: AbstractCamera
 export AbstractCamera, IdealCamera, SCMOSCamera
 export AbstractEmitter, Emitter2D, Emitter3D, Emitter2DFit, Emitter3DFit
 export BasicSMLD, ROIBatch
