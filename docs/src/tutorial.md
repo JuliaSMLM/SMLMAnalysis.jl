@@ -19,7 +19,7 @@ fluor = GenericFluor(photons=50000.0, k_off=20.0, k_on=0.02)
 (_, sim_info) = simulate(sim_params; pattern=pattern, molecule=fluor, camera=camera)
 ```
 
-Image generation uses `gen_images` from SMLMSim with a Gaussian PSF model. See the example scripts for the full setup including the per-dataset image generation workaround.
+Image generation uses `gen_images` from SMLMSim with a Gaussian PSF model, one call per dataset. See `examples/generate_data.jl` for the full setup.
 
 ## AnalysisConfig Approach
 
@@ -293,7 +293,7 @@ bagol.compression   # localizations-to-emitters ratio
 bagol.final_μ       # refined mean localizations per emitter
 ```
 
-BaGoL is state-modifying: `smld_bagol` replaces `smld` for any downstream render. Its diagnostics are written to the step folder (`08_bagol/`) — the 2 nm posterior image, partition circles, the localization-vs-MAP-N overlay, and MCMC acceptance rates — using SMLMBaGoL's own report system rather than inline rendering.
+BaGoL is state-modifying: `smld_bagol` replaces `smld` for any downstream render. Its diagnostics are written to the step folder (`NN_bagol/`, numbered by its position in the pipeline) — the 2 nm posterior image, partition circles, the localization-vs-MAP-N overlay, and MCMC acceptance rates — using SMLMBaGoL's own report system rather than inline rendering.
 
 ### Count distribution
 

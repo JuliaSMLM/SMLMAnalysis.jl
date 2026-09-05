@@ -46,6 +46,11 @@ using Pkg
 Pkg.add("SMLMAnalysis")
 ```
 
+Requires Julia 1.12 or newer. A CUDA-capable GPU is recommended for the fitting
+step (GaussMLE); start Julia with `-t auto`, since several steps are threaded. See
+[Installation & Setup](https://JuliaSMLM.github.io/SMLMAnalysis.jl/dev/workflows/install/)
+for details.
+
 ## Quick Start
 
 ```julia
@@ -251,6 +256,8 @@ SMLMData (core types: Emitter, Camera, BasicSMLD)
     +-- SMLMRender (super-resolution rendering)
     +-- SMLMSim (simulation + image generation)
     +-- MicroscopePSFs (PSF models)
+    +-- SMLMBaGoL (Bayesian grouping of localizations)
+    +-- SMLMClustering (clustering, spatial statistics, edge classification)
     +-- SMLMAnalysis (integrates all)
 ```
 
