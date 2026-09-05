@@ -24,6 +24,11 @@ const _SKILL_DIRNAME    = "smlma-ecosystem"   # <pkgprefix>-<skill>
 const _INSTALLED_FORMAT = 1
 const _CODEX_BUNDLE     = "smlm-agent-guide"
 
+# The exact phrase _write_reference! puts in the first line of every reference file it
+# writes. Ownership of a reference file is decided by looking for this phrase (see
+# _own_reference_file), so the two can never drift apart.
+const _REF_STAMP = "by SMLMAnalysis.install_agent_guide()"
+
 # Ordered ecosystem package list (module => one-line role). SMLMAnalysis itself is
 # prepended in _collect_pkg_docs as the integration layer. Order mirrors the
 # dependency hierarchy: core types first, then single-step packages, then the
@@ -190,35 +195,47 @@ function _skill_text(entries)
     String(take!(io))
 end
 
+# A reference file is ours iff it is a regular (non-symlink) file whose first line
+# carries the install header. Files a user adds or rewrites are never ours.
+function _own_reference_file(p::AbstractString)
+    (isfile(p) && !islink(p)) || return false
+    first_line = open(io -> (eof(io) ? "" : readline(io)), p)
+    return occursin(_REF_STAMP, first_line)
+end
+
 function _write_reference!(refdir::AbstractString, e)
     mkpath(refdir)
     p = joinpath(refdir, e.name * ".md")
-    open(p, "w") do io
-        println(io, "<!-- $(e.name) v$(e.version) — copied from $(e.source) by ",
-                    "SMLMAnalysis.install_agent_guide(). Do not edit; re-run to refresh. -->")
-        println(io)
-        print(io, e.text)
-    end
+    content = string("<!-- $(e.name) v$(e.version) — copied from $(e.source) $_REF_STAMP. ",
+                      "Do not edit; re-run to refresh. -->\n\n", e.text)
+    _write_atomic(p, content)
     p
 end
 
-# Remove only the reference files this installer generated (per the manifest written at
-# install time, falling back to the known package names for a pre-manifest install),
-# then drop reference/ only if nothing else is in it. Never follows symlinks.
+# Preflight every destination reference file before mutating anything: a symlink is
+# refused outright (never written through, regardless of overwrite); an existing
+# regular file that doesn't carry our provenance stamp is refused unless
+# overwrite=true (a plain refresh of our own install never needs it).
+function _preflight_reference_files(refdir::AbstractString, entries, overwrite::Bool)
+    for e in entries
+        p = joinpath(refdir, e.name * ".md")
+        islink(p) && throw(ArgumentError("$p is a symlink; refusing to write through it"))
+        if isfile(p) && !_own_reference_file(p) && !overwrite
+            error("$p exists and was not written by $_INSTALLER. Pass overwrite=true to replace it.")
+        end
+    end
+    nothing
+end
+
+# Remove only the reference files this installer generated — identified by the
+# per-file provenance stamp _write_reference! writes into every file it creates, not a
+# manifest — then drop reference/ only if nothing else is in it. Never follows symlinks.
 function _remove_generated_reference!(refdir::AbstractString)
-    isdir(refdir) || return nothing
-    islink(refdir) && return nothing
-    manifest = joinpath(refdir, ".smlma-manifest")
-    names = if isfile(manifest)
-        filter(!isempty, strip.(readlines(manifest)))
-    else
-        vcat([string(_INSTALLER) * ".md"], [string(nameof(mod)) * ".md" for (mod, _) in _ecosystem_packages()])
-    end
-    for n in names
+    (isdir(refdir) && !islink(refdir)) || return nothing
+    for n in readdir(refdir)
         p = joinpath(refdir, n)
-        isfile(p) && !islink(p) && rm(p)
+        _own_reference_file(p) && rm(p)
     end
-    isfile(manifest) && rm(manifest)
     if isempty(readdir(refdir))
         rm(refdir)
     else
@@ -232,7 +249,8 @@ end
 # Append patterns to <root>/.gitignore (creating it if needed), skipping any already
 # present. Preserves a missing trailing newline in the existing file.
 function _ensure_gitignored!(root::AbstractString, patterns)
-    gi   = joinpath(root, ".gitignore")
+    gi = joinpath(root, ".gitignore")
+    islink(gi) && throw(ArgumentError("$gi is a symlink; refusing to write through it"))
     raw  = isfile(gi) ? read(gi, String) : ""
     have = Set(strip.(split(raw, '\n')))
     todo = [p for p in patterns if !(strip(p) in have)]
@@ -242,7 +260,7 @@ function _ensure_gitignored!(root::AbstractString, patterns)
     isempty(buf) || (buf *= '\n')
     buf *= "# SMLMAnalysis agent guide — installed with track=false (install_agent_guide)\n"
     buf *= join(todo, '\n') * '\n'
-    write(gi, buf)
+    _write_atomic(gi, buf)
     gi
 end
 
@@ -253,18 +271,19 @@ const _AGENTS_END   = "<!-- END SMLMAnalysis agent-guide -->"
 # Insert or replace our delimited block in AGENTS.md, leaving other content untouched.
 # Idempotent: re-running refreshes the block in place.
 function _upsert_agents_block!(path::AbstractString, block::AbstractString)
+    islink(path) && throw(ArgumentError("$path is a symlink; refusing to write through it"))
     raw     = isfile(path) ? read(path, String) : ""
     managed = string(_AGENTS_BEGIN, '\n', block, '\n', _AGENTS_END)
     b = findfirst(_AGENTS_BEGIN, raw)
     e = findfirst(_AGENTS_END, raw)
     if b !== nothing && e !== nothing && first(e) > first(b)
         newraw = raw[1:prevind(raw, first(b))] * managed * raw[nextind(raw, last(e)):end]
-        write(path, newraw)
+        _write_atomic(path, newraw)
     else
         buf = raw
         isempty(buf) || endswith(buf, '\n') || (buf *= '\n')
         isempty(buf) || (buf *= '\n')
-        write(path, buf * managed * '\n')
+        _write_atomic(path, buf * managed * '\n')
     end
     path
 end
@@ -281,6 +300,10 @@ end
 # `pre * post` otherwise byte-for-byte, so user content (including indentation the
 # user appended after the block) is never touched.
 function _remove_agents_block!(path::AbstractString)
+    if islink(path)
+        @warn "$path is a symlink; leaving it untouched"
+        return false
+    end
     isfile(path) || return false
     raw = read(path, String)
     b = findfirst(_AGENTS_BEGIN, raw)
@@ -290,7 +313,7 @@ function _remove_agents_block!(path::AbstractString)
     post = raw[nextind(raw, last(e)):end]
     endswith(pre, "\n\n") && (pre = chop(pre))
     startswith(post, "\n") && (post = chop(post; head = 1, tail = 0))
-    write(path, pre * post)
+    _write_atomic(path, pre * post)
     true
 end
 
@@ -302,11 +325,36 @@ _codex_block() = string(
     "`", _CODEX_BUNDLE, "/reference/`.")
 
 # expanduser is a no-op on Windows; handle a leading ~ ourselves on every platform.
+# Strip any further leading separators after "~/" too, so "~//repo" resolves under
+# home rather than being joinpath'd with an absolute-looking "/repo" remainder.
 function _expand_home(dir::AbstractString)
     d = String(dir)
     d == "~" && return homedir()
-    (startswith(d, "~/") || startswith(d, "~\\")) && return joinpath(homedir(), d[3:end])
+    if startswith(d, "~/") || startswith(d, "~\\")
+        rest = lstrip(d[3:end], ['/', '\\'])
+        return isempty(rest) ? homedir() : joinpath(homedir(), rest)
+    end
     return expanduser(d)
+end
+
+# Write via a temp file + rename so an existing hardlink or symlink at `path` is
+# replaced as a directory entry, never truncated in place (which would overwrite
+# whatever inode the user's link points at).
+function _write_atomic(path::AbstractString, content::AbstractString)
+    tmp = joinpath(dirname(path), ".$(basename(path)).tmp-$(getpid())")
+    write(tmp, content)
+    mv(tmp, path; force = true)
+    path
+end
+
+# Reason a (target, stamp, refdir) triple must not be mutated or trusted, or nothing.
+function _unsafe_reason(target, stamp, refdir)
+    islink(target) && return "$target is a symlink"
+    islink(stamp)  && return "$stamp is a symlink"
+    islink(refdir) && return "$refdir is a symlink"
+    (ispath(target) && !isdir(target)) && return "$target is not a directory"
+    (ispath(refdir) && !isdir(refdir)) && return "$refdir is not a directory"
+    nothing
 end
 
 # Skill/bundle directory for a (tool, scope, dir) triple.
@@ -337,10 +385,16 @@ them. Re-running refreshes it against whatever is currently installed.
 Follows the lab skills-installer convention: the install carries a provenance stamp
 (`x-installer`, `x-source-version`, `x-source-commit`), so re-running refreshes only
 *this* installer's own install, and [`uninstall_agent_guide`](@ref) /
-[`agent_guide_status`](@ref) act only on stamped installs. A refresh regenerates only
-the reference files listed in its own manifest (`reference/.smlma-manifest`), so files
-you add inside `reference/` yourself survive; a symlinked target, wrapper, or reference
-directory is refused with an `ArgumentError` rather than mutated through.
+[`agent_guide_status`](@ref) act only on stamped installs. Ownership of a reference
+file is decided per file, not by a manifest: a file counts as ours iff it is a regular
+(non-symlink) file whose first line carries the install header this package has always
+written, so a refresh regenerates only files it wrote and anything you add inside
+`reference/` yourself survives. An existing file at one of our names that lacks that
+header is refused unless `overwrite=true`. A symlinked target, wrapper, reference
+directory, reference file, `.gitignore`, or `AGENTS.md` is never written through — it
+is refused with an `ArgumentError` rather than mutated. All installer writes are
+atomic (temp file + rename), so an existing hardlink at one of our paths is replaced
+as a directory entry rather than truncated in place.
 
 # Keyword arguments
 - `tool::Symbol = :claude` — target assistant:
@@ -390,12 +444,9 @@ function install_agent_guide(; tool::Symbol = :claude,
         wrapper = joinpath(target, "SKILL.md")
         refdir  = joinpath(target, "reference")
         # Never mutate through a symlink: a symlinked target/wrapper/reference dir may
-        # point outside the install dir entirely (uninstall's old rm(target) only ever
-        # unlinked the link, but write(wrapper, ...) and rm(refdir; recursive=true)
-        # follow a symlink and can clobber or delete files that live elsewhere).
-        islink(target) && throw(ArgumentError("$target is a symlink; refusing to install through it"))
-        islink(wrapper) && throw(ArgumentError("$wrapper is a symlink; refusing to install through it"))
-        islink(refdir) && throw(ArgumentError("$refdir is a symlink; refusing to install through it"))
+        # point outside the install dir entirely. Checked before any mutation.
+        r = _unsafe_reason(target, wrapper, refdir)
+        r === nothing || throw(ArgumentError(r * "; refusing to install"))
         # Own-install idempotency: refresh ours freely; refuse a foreign/unstamped
         # target unless overwrite=true. Guard whenever the dir exists with content —
         # NOT only when SKILL.md is present — so a hand-made dir with a reference/ but
@@ -406,23 +457,23 @@ function install_agent_guide(; tool::Symbol = :claude,
                 error("$target already exists and was not installed by $_INSTALLER " *
                       "(x-installer=$(owner === nothing ? "none" : owner)). Pass overwrite=true to replace it.")
         end
-        # Regenerate only the reference files we generated last time (per the
-        # manifest); anything a user added inside reference/ survives a refresh.
+        # Preflight every reference destination before mutating anything.
+        _preflight_reference_files(refdir, entries, overwrite)
+        # Regenerate only the reference files we generated last time (identified by
+        # their per-file stamp); anything a user added inside reference/ survives.
         _remove_generated_reference!(refdir)
         mkpath(refdir)
         for e in entries
             _write_reference!(refdir, e)
         end
-        write(joinpath(refdir, ".smlma-manifest"), join((e.name * ".md" for e in entries), '\n') * '\n')
-        write(wrapper, _skill_text(entries))
+        _write_atomic(wrapper, _skill_text(entries))
         gitignore && _ensure_gitignored!(dir, ["/.claude/skills/$_SKILL_DIRNAME/"])
         return target
     else # :codex
         guide  = joinpath(target, "GUIDE.md")
         refdir = joinpath(target, "reference")
-        islink(target) && throw(ArgumentError("$target is a symlink; refusing to install through it"))
-        islink(guide) && throw(ArgumentError("$guide is a symlink; refusing to install through it"))
-        islink(refdir) && throw(ArgumentError("$refdir is a symlink; refusing to install through it"))
+        r = _unsafe_reason(target, guide, refdir)
+        r === nothing || throw(ArgumentError(r * "; refusing to install"))
         # Same guard as :claude — refuse any non-empty foreign target, not only one
         # that already has our GUIDE.md, so a stray reference/ is not wiped.
         if isdir(target) && !isempty(readdir(target))
@@ -430,13 +481,13 @@ function install_agent_guide(; tool::Symbol = :claude,
             owner == _INSTALLER || overwrite ||
                 error("$target already exists and was not installed by $_INSTALLER. Pass overwrite=true to replace it.")
         end
+        _preflight_reference_files(refdir, entries, overwrite)
         _remove_generated_reference!(refdir)
         mkpath(refdir)
         for e in entries
             _write_reference!(refdir, e)
         end
-        write(joinpath(refdir, ".smlma-manifest"), join((e.name * ".md" for e in entries), '\n') * '\n')
-        write(guide, string("<!-- ", _stamp_inline(), " -->\n\n", _render_guide(entries, "reference")))
+        _write_atomic(guide, string("<!-- ", _stamp_inline(), " -->\n\n", _render_guide(entries, "reference")))
         agents = joinpath(dirname(target), "AGENTS.md")
         _upsert_agents_block!(agents, _codex_block())
         gitignore && _ensure_gitignored!(dir, ["/$_CODEX_BUNDLE/"])
@@ -450,14 +501,15 @@ end
 Remove a guide previously installed by SMLMAnalysis. Acts **only** on a target carrying
 SMLMAnalysis's own provenance stamp — a hand-made skill or another package's install is
 left untouched — and even then removes only `SKILL.md`/`GUIDE.md`, the reference files
-listed in `reference/.smlma-manifest` (falling back to the known package names for a
-pre-manifest install), and — for `tool=:codex` — this package's managed block in
-`AGENTS.md`. Anything else, including files you added inside `reference/` yourself, is
-preserved; `reference/` and the install directory are removed only when nothing else
-remains in them, and a non-empty directory is left in place and reported with `@info`.
-A symlinked target (or a symlinked `SKILL.md`/`GUIDE.md`) is never followed — it is left
-untouched with a `@warn`. Returns the paths removed (empty if nothing of ours was
-found, including when the target is a symlink).
+carrying this package's per-file install header, and — for `tool=:codex` — this
+package's managed block in `AGENTS.md`. Anything else, including files you added
+inside `reference/` yourself, is preserved; `reference/` and the install directory are
+removed only when nothing else remains in them, and a non-empty directory is left in
+place and reported with `@info`. A symlinked target, `SKILL.md`/`GUIDE.md`, or
+`reference/` directory is never followed — it is left untouched with a `@warn` (and,
+for `tool=:codex`, the `AGENTS.md` block is then also left in place). Returns the paths
+removed (empty if nothing of ours was found, including when the target is unsafe to
+touch).
 """
 function uninstall_agent_guide(; tool::Symbol = :claude,
                                  scope::Symbol = :project,
@@ -471,17 +523,25 @@ function uninstall_agent_guide(; tool::Symbol = :claude,
     removed = String[]
     target  = _install_dir(tool, scope, dir)
     if tool == :claude
-        stamp = joinpath(target, "SKILL.md")
-        if islink(target) || islink(stamp)
-            @warn "$target is a symlink (or its SKILL.md is); leaving it untouched"
-        elseif isdir(target) && _frontmatter_field(stamp, "x-installer") == _INSTALLER
+        stamp  = joinpath(target, "SKILL.md")
+        refdir = joinpath(target, "reference")
+        r = _unsafe_reason(target, stamp, refdir)
+        if r !== nothing
+            @warn r * "; leaving it untouched"
+            return removed
+        end
+        if isdir(target) && _frontmatter_field(stamp, "x-installer") == _INSTALLER
             push!(removed, _remove_own_files!(target, stamp))
         end
     else
-        stamp = joinpath(target, "GUIDE.md")
-        if islink(target) || islink(stamp)
-            @warn "$target is a symlink (or its GUIDE.md is); leaving it untouched"
-        elseif isdir(target) && _guide_field(stamp, "x-installer") == _INSTALLER
+        stamp  = joinpath(target, "GUIDE.md")
+        refdir = joinpath(target, "reference")
+        r = _unsafe_reason(target, stamp, refdir)
+        if r !== nothing
+            @warn r * "; leaving it untouched"
+            return removed
+        end
+        if isdir(target) && _guide_field(stamp, "x-installer") == _INSTALLER
             push!(removed, _remove_own_files!(target, stamp))
         end
         agents = joinpath(dirname(target), "AGENTS.md")
@@ -491,10 +551,10 @@ function uninstall_agent_guide(; tool::Symbol = :claude,
 end
 
 # Remove exactly what install_agent_guide writes into `target` — the stamped wrapper
-# file and the reference files listed in its manifest — then drop the directory only
-# if it is empty. Never `rm(target; recursive=true)`: after an `overwrite=true` install
-# into a hand-made directory the stamp is ours but the directory may still hold the
-# user's own files, and a recursive delete would take them with it.
+# file and the reference files carrying its per-file stamp — then drop the directory
+# only if it is empty. Never `rm(target; recursive=true)`: after an `overwrite=true`
+# install into a hand-made directory the stamp is ours but the directory may still hold
+# the user's own files, and a recursive delete would take them with it.
 function _remove_own_files!(target::AbstractString, stamp::AbstractString)
     isfile(stamp) && rm(stamp)
     refdir = joinpath(target, "reference")
@@ -526,11 +586,13 @@ function agent_guide_status(; tool::Symbol = :claude,
     current = _source_version()
     target  = _install_dir(tool, scope, _expand_home(dir))
     stampfile = tool == :claude ? joinpath(target, "SKILL.md") : joinpath(target, "GUIDE.md")
+    refdir    = joinpath(target, "reference")
     reader    = tool == :claude ? _frontmatter_field : _guide_field
 
-    # A symlinked target/stamp is never followed elsewhere in this file; report it as
-    # not-installed here too rather than reading through it.
-    installed = !islink(target) && !islink(stampfile) && reader(stampfile, "x-installer") == _INSTALLER
+    # A symlinked target/stamp/reference dir is never followed elsewhere in this file;
+    # report it as not-installed here too rather than reading through it.
+    installed = _unsafe_reason(target, stampfile, refdir) === nothing &&
+                reader(stampfile, "x-installer") == _INSTALLER
     sv = installed ? reader(stampfile, "x-source-version") : nothing
     sc = installed ? reader(stampfile, "x-source-commit") : nothing
     (; installed,
