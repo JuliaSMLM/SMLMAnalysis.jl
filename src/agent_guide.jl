@@ -202,6 +202,31 @@ function _write_reference!(refdir::AbstractString, e)
     p
 end
 
+# Remove only the reference files this installer generated (per the manifest written at
+# install time, falling back to the known package names for a pre-manifest install),
+# then drop reference/ only if nothing else is in it. Never follows symlinks.
+function _remove_generated_reference!(refdir::AbstractString)
+    isdir(refdir) || return nothing
+    islink(refdir) && return nothing
+    manifest = joinpath(refdir, ".smlma-manifest")
+    names = if isfile(manifest)
+        filter(!isempty, strip.(readlines(manifest)))
+    else
+        vcat([string(_INSTALLER) * ".md"], [string(nameof(mod)) * ".md" for (mod, _) in _ecosystem_packages()])
+    end
+    for n in names
+        p = joinpath(refdir, n)
+        isfile(p) && !islink(p) && rm(p)
+    end
+    isfile(manifest) && rm(manifest)
+    if isempty(readdir(refdir))
+        rm(refdir)
+    else
+        @info "$(refdir): kept files this installer did not write" remaining=readdir(refdir)
+    end
+    nothing
+end
+
 # --- git / AGENTS.md side effects ----------------------------------------------
 
 # Append patterns to <root>/.gitignore (creating it if needed), skipping any already
@@ -245,16 +270,27 @@ function _upsert_agents_block!(path::AbstractString, block::AbstractString)
 end
 
 # Remove our block from AGENTS.md; returns true if a block was present and removed.
+#
+# Exact inverse of _upsert_agents_block!, not a generic strip: that function, on first
+# insert, normalizes any nonempty pre-existing content to end with a blank line (one
+# newline to terminate its last line if needed, plus one blank-line newline) before the
+# BEGIN marker, and always places exactly one literal "\n" right after the END marker
+# (a later refresh copies both sides verbatim, so this holds no matter how many times
+# the block has been refreshed). Removal undoes only those two installer-added
+# characters — one trailing "\n" off `pre`, one leading "\n" off `post` — and returns
+# `pre * post` otherwise byte-for-byte, so user content (including indentation the
+# user appended after the block) is never touched.
 function _remove_agents_block!(path::AbstractString)
     isfile(path) || return false
     raw = read(path, String)
     b = findfirst(_AGENTS_BEGIN, raw)
     e = findfirst(_AGENTS_END, raw)
     (b === nothing || e === nothing || first(e) < first(b)) && return false
-    pre  = rstrip(raw[1:prevind(raw, first(b))])
-    post = strip(raw[nextind(raw, last(e)):end])
-    write(path, isempty(post) ? (isempty(pre) ? "" : pre * '\n') :
-                                 string(pre, isempty(pre) ? "" : "\n\n", post, '\n'))
+    pre  = raw[1:prevind(raw, first(b))]
+    post = raw[nextind(raw, last(e)):end]
+    endswith(pre, "\n\n") && (pre = chop(pre))
+    startswith(post, "\n") && (post = chop(post; head = 1, tail = 0))
+    write(path, pre * post)
     true
 end
 
@@ -264,6 +300,14 @@ _codex_block() = string(
     "When working with JuliaSMLM / SMLMAnalysis code, read the ecosystem guide at ",
     "`", _CODEX_BUNDLE, "/GUIDE.md` and the per-package API references under ",
     "`", _CODEX_BUNDLE, "/reference/`.")
+
+# expanduser is a no-op on Windows; handle a leading ~ ourselves on every platform.
+function _expand_home(dir::AbstractString)
+    d = String(dir)
+    d == "~" && return homedir()
+    (startswith(d, "~/") || startswith(d, "~\\")) && return joinpath(homedir(), d[3:end])
+    return expanduser(d)
+end
 
 # Skill/bundle directory for a (tool, scope, dir) triple.
 function _install_dir(tool::Symbol, scope::Symbol, dir::AbstractString)
@@ -293,7 +337,10 @@ them. Re-running refreshes it against whatever is currently installed.
 Follows the lab skills-installer convention: the install carries a provenance stamp
 (`x-installer`, `x-source-version`, `x-source-commit`), so re-running refreshes only
 *this* installer's own install, and [`uninstall_agent_guide`](@ref) /
-[`agent_guide_status`](@ref) act only on stamped installs.
+[`agent_guide_status`](@ref) act only on stamped installs. A refresh regenerates only
+the reference files listed in its own manifest (`reference/.smlma-manifest`), so files
+you add inside `reference/` yourself survive; a symlinked target, wrapper, or reference
+directory is refused with an `ArgumentError` rather than mutated through.
 
 # Keyword arguments
 - `tool::Symbol = :claude` — target assistant:
@@ -333,7 +380,7 @@ function install_agent_guide(; tool::Symbol = :claude,
     if track && scope == :user
         @warn "track applies only to scope=:project (the :user guide lives outside any repo); ignoring track=true"
     end
-    dir = expanduser(String(dir))   # `dir="~/repo"` must not create a literal `~` under the cwd
+    dir = _expand_home(dir)   # `dir="~/repo"` must not create a literal `~` under the cwd
 
     entries   = _collect_pkg_docs()
     gitignore = !track && scope == :project
@@ -341,6 +388,14 @@ function install_agent_guide(; tool::Symbol = :claude,
 
     if tool == :claude
         wrapper = joinpath(target, "SKILL.md")
+        refdir  = joinpath(target, "reference")
+        # Never mutate through a symlink: a symlinked target/wrapper/reference dir may
+        # point outside the install dir entirely (uninstall's old rm(target) only ever
+        # unlinked the link, but write(wrapper, ...) and rm(refdir; recursive=true)
+        # follow a symlink and can clobber or delete files that live elsewhere).
+        islink(target) && throw(ArgumentError("$target is a symlink; refusing to install through it"))
+        islink(wrapper) && throw(ArgumentError("$wrapper is a symlink; refusing to install through it"))
+        islink(refdir) && throw(ArgumentError("$refdir is a symlink; refusing to install through it"))
         # Own-install idempotency: refresh ours freely; refuse a foreign/unstamped
         # target unless overwrite=true. Guard whenever the dir exists with content —
         # NOT only when SKILL.md is present — so a hand-made dir with a reference/ but
@@ -351,17 +406,23 @@ function install_agent_guide(; tool::Symbol = :claude,
                 error("$target already exists and was not installed by $_INSTALLER " *
                       "(x-installer=$(owner === nothing ? "none" : owner)). Pass overwrite=true to replace it.")
         end
-        refdir = joinpath(target, "reference")
-        isdir(refdir) && rm(refdir; recursive = true)
+        # Regenerate only the reference files we generated last time (per the
+        # manifest); anything a user added inside reference/ survives a refresh.
+        _remove_generated_reference!(refdir)
         mkpath(refdir)
         for e in entries
             _write_reference!(refdir, e)
         end
+        write(joinpath(refdir, ".smlma-manifest"), join((e.name * ".md" for e in entries), '\n') * '\n')
         write(wrapper, _skill_text(entries))
         gitignore && _ensure_gitignored!(dir, ["/.claude/skills/$_SKILL_DIRNAME/"])
         return target
     else # :codex
-        guide = joinpath(target, "GUIDE.md")
+        guide  = joinpath(target, "GUIDE.md")
+        refdir = joinpath(target, "reference")
+        islink(target) && throw(ArgumentError("$target is a symlink; refusing to install through it"))
+        islink(guide) && throw(ArgumentError("$guide is a symlink; refusing to install through it"))
+        islink(refdir) && throw(ArgumentError("$refdir is a symlink; refusing to install through it"))
         # Same guard as :claude — refuse any non-empty foreign target, not only one
         # that already has our GUIDE.md, so a stray reference/ is not wiped.
         if isdir(target) && !isempty(readdir(target))
@@ -369,12 +430,12 @@ function install_agent_guide(; tool::Symbol = :claude,
             owner == _INSTALLER || overwrite ||
                 error("$target already exists and was not installed by $_INSTALLER. Pass overwrite=true to replace it.")
         end
-        refdir = joinpath(target, "reference")
-        isdir(refdir) && rm(refdir; recursive = true)
+        _remove_generated_reference!(refdir)
         mkpath(refdir)
         for e in entries
             _write_reference!(refdir, e)
         end
+        write(joinpath(refdir, ".smlma-manifest"), join((e.name * ".md" for e in entries), '\n') * '\n')
         write(guide, string("<!-- ", _stamp_inline(), " -->\n\n", _render_guide(entries, "reference")))
         agents = joinpath(dirname(target), "AGENTS.md")
         _upsert_agents_block!(agents, _codex_block())
@@ -388,11 +449,15 @@ end
 
 Remove a guide previously installed by SMLMAnalysis. Acts **only** on a target carrying
 SMLMAnalysis's own provenance stamp — a hand-made skill or another package's install is
-left untouched — and even then removes only the files this installer wrote (`SKILL.md` /
-`GUIDE.md` and `reference/`). The directory itself is removed only when nothing else
-remains, so anything you added alongside (notes, scripts) survives; a non-empty
-directory is left in place and reported with `@info`. Returns the paths removed (empty
-if nothing of ours was found).
+left untouched — and even then removes only `SKILL.md`/`GUIDE.md`, the reference files
+listed in `reference/.smlma-manifest` (falling back to the known package names for a
+pre-manifest install), and — for `tool=:codex` — this package's managed block in
+`AGENTS.md`. Anything else, including files you added inside `reference/` yourself, is
+preserved; `reference/` and the install directory are removed only when nothing else
+remains in them, and a non-empty directory is left in place and reported with `@info`.
+A symlinked target (or a symlinked `SKILL.md`/`GUIDE.md`) is never followed — it is left
+untouched with a `@warn`. Returns the paths removed (empty if nothing of ours was
+found, including when the target is a symlink).
 """
 function uninstall_agent_guide(; tool::Symbol = :claude,
                                  scope::Symbol = :project,
@@ -401,18 +466,22 @@ function uninstall_agent_guide(; tool::Symbol = :claude,
         throw(ArgumentError("tool must be :claude or :codex, got :$tool"))
     scope in (:project, :user) ||
         throw(ArgumentError("scope must be :project or :user, got :$scope"))
-    dir = expanduser(String(dir))
+    dir = _expand_home(dir)
 
     removed = String[]
     target  = _install_dir(tool, scope, dir)
     if tool == :claude
         stamp = joinpath(target, "SKILL.md")
-        if isdir(target) && _frontmatter_field(stamp, "x-installer") == _INSTALLER
+        if islink(target) || islink(stamp)
+            @warn "$target is a symlink (or its SKILL.md is); leaving it untouched"
+        elseif isdir(target) && _frontmatter_field(stamp, "x-installer") == _INSTALLER
             push!(removed, _remove_own_files!(target, stamp))
         end
     else
         stamp = joinpath(target, "GUIDE.md")
-        if isdir(target) && _guide_field(stamp, "x-installer") == _INSTALLER
+        if islink(target) || islink(stamp)
+            @warn "$target is a symlink (or its GUIDE.md is); leaving it untouched"
+        elseif isdir(target) && _guide_field(stamp, "x-installer") == _INSTALLER
             push!(removed, _remove_own_files!(target, stamp))
         end
         agents = joinpath(dirname(target), "AGENTS.md")
@@ -422,14 +491,14 @@ function uninstall_agent_guide(; tool::Symbol = :claude,
 end
 
 # Remove exactly what install_agent_guide writes into `target` — the stamped wrapper
-# file and the `reference/` bundle — then drop the directory only if it is empty.
-# Never `rm(target; recursive=true)`: after an `overwrite=true` install into a
-# hand-made directory the stamp is ours but the directory may still hold the user's
-# own files, and a recursive delete would take them with it.
+# file and the reference files listed in its manifest — then drop the directory only
+# if it is empty. Never `rm(target; recursive=true)`: after an `overwrite=true` install
+# into a hand-made directory the stamp is ours but the directory may still hold the
+# user's own files, and a recursive delete would take them with it.
 function _remove_own_files!(target::AbstractString, stamp::AbstractString)
     isfile(stamp) && rm(stamp)
     refdir = joinpath(target, "reference")
-    isdir(refdir) && rm(refdir; recursive = true)
+    _remove_generated_reference!(refdir)
     if isempty(readdir(target))
         rm(target)
         return String(target)
@@ -455,11 +524,13 @@ function agent_guide_status(; tool::Symbol = :claude,
         throw(ArgumentError("scope must be :project or :user, got :$scope"))
 
     current = _source_version()
-    target  = _install_dir(tool, scope, expanduser(String(dir)))
+    target  = _install_dir(tool, scope, _expand_home(dir))
     stampfile = tool == :claude ? joinpath(target, "SKILL.md") : joinpath(target, "GUIDE.md")
     reader    = tool == :claude ? _frontmatter_field : _guide_field
 
-    installed = reader(stampfile, "x-installer") == _INSTALLER
+    # A symlinked target/stamp is never followed elsewhere in this file; report it as
+    # not-installed here too rather than reading through it.
+    installed = !islink(target) && !islink(stampfile) && reader(stampfile, "x-installer") == _INSTALLER
     sv = installed ? reader(stampfile, "x-source-version") : nothing
     sc = installed ? reader(stampfile, "x-source-commit") : nothing
     (; installed,
