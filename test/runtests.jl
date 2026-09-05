@@ -721,6 +721,39 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test !agent_guide_status(dir = dir, tool = :codex).installed
         end
 
+        # Data-loss regression: a DIRECTORY (not just a symlink) sitting at a reference
+        # file's name must be refused, never wiped by mv(...; force=true)'s implicit
+        # recursive rm of the destination. Exercised via :claude; :codex shares the same
+        # _preflight_reference_files helper.
+        mktempdir() do dir
+            skill  = install_agent_guide(dir = dir)
+            refdir = joinpath(skill, "reference")
+            datamd = joinpath(refdir, "SMLMData.md")
+            rm(datamd)
+            mkpath(datamd)
+            write(joinpath(datamd, "keep.txt"), "keep")
+
+            @test_throws ArgumentError install_agent_guide(dir = dir)
+            @test isdir(datamd)                                 # not wiped
+            @test isfile(joinpath(datamd, "keep.txt"))           # contents survived
+        end
+
+        # Same regression for AGENTS.md itself: a directory there must be refused
+        # BEFORE any bundle content is written (nothing half-installed).
+        mktempdir() do dir
+            mkpath(joinpath(dir, "AGENTS.md"))
+            @test_throws ArgumentError install_agent_guide(dir = dir, tool = :codex)
+            @test !ispath(joinpath(dir, "smlm-agent-guide"))    # bundle never written
+        end
+
+        # _write_atomic: a failed write (destination is a directory, refused outright)
+        # must leave no stray temp file behind.
+        mktempdir() do dir
+            mkpath(joinpath(dir, "somedir"))
+            @test_throws ArgumentError SMLMAnalysis._write_atomic(joinpath(dir, "somedir"), "x")
+            @test readdir(dir) == ["somedir"]   # no stray .somedir.tmp-<pid>
+        end
+
         if Sys.isunix()
             # (a) target itself is a symlink to a real, stamped install elsewhere:
             # neither install nor uninstall may follow it (Claude).
@@ -857,6 +890,26 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
                 @test !agent_guide_status(dir = dir).installed
                 @test isempty(uninstall_agent_guide(dir = dir))
                 @test isfile(joinpath(skill, "SKILL.md"))
+            end
+
+            # (i) Ordering regression: a symlinked .gitignore must be refused BEFORE
+            # the skill bundle is written — never a half-installed guide.
+            mktempdir() do dir
+                external = joinpath(dir, "external-gitignore-order")
+                write(external, "external\n")
+                symlink(external, joinpath(dir, ".gitignore"))
+                @test_throws ArgumentError install_agent_guide(dir = dir)
+                @test !ispath(joinpath(dir, ".claude", "skills", "smlma-ecosystem", "SKILL.md"))
+            end
+
+            # (j) Same ordering regression for a symlinked AGENTS.md (Codex): GUIDE.md
+            # must never appear.
+            mktempdir() do dir
+                external = joinpath(dir, "external-agents-order")
+                write(external, "external\n")
+                symlink(external, joinpath(dir, "AGENTS.md"))
+                @test_throws ArgumentError install_agent_guide(dir = dir, tool = :codex)
+                @test !isfile(joinpath(dir, "smlm-agent-guide", "GUIDE.md"))
             end
         end
 

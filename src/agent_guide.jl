@@ -220,6 +220,8 @@ function _preflight_reference_files(refdir::AbstractString, entries, overwrite::
     for e in entries
         p = joinpath(refdir, e.name * ".md")
         islink(p) && throw(ArgumentError("$p is a symlink; refusing to write through it"))
+        (ispath(p) && !isfile(p)) &&
+            throw(ArgumentError("$p exists and is not a regular file; refusing to replace it"))
         if isfile(p) && !_own_reference_file(p) && !overwrite
             error("$p exists and was not written by $_INSTALLER. Pass overwrite=true to replace it.")
         end
@@ -246,11 +248,20 @@ end
 
 # --- git / AGENTS.md side effects ----------------------------------------------
 
+# A side-effect file (.gitignore, AGENTS.md) we are about to rewrite must be absent or a
+# plain regular file — never a symlink or a directory. Checked BEFORE any mutation.
+function _refuse_nonfile(path::AbstractString)
+    islink(path) && throw(ArgumentError("$path is a symlink; refusing to write through it"))
+    (ispath(path) && !isfile(path)) &&
+        throw(ArgumentError("$path exists and is not a regular file; refusing to replace it"))
+    nothing
+end
+
 # Append patterns to <root>/.gitignore (creating it if needed), skipping any already
 # present. Preserves a missing trailing newline in the existing file.
 function _ensure_gitignored!(root::AbstractString, patterns)
     gi = joinpath(root, ".gitignore")
-    islink(gi) && throw(ArgumentError("$gi is a symlink; refusing to write through it"))
+    _refuse_nonfile(gi)
     raw  = isfile(gi) ? read(gi, String) : ""
     have = Set(strip.(split(raw, '\n')))
     todo = [p for p in patterns if !(strip(p) in have)]
@@ -271,7 +282,7 @@ const _AGENTS_END   = "<!-- END SMLMAnalysis agent-guide -->"
 # Insert or replace our delimited block in AGENTS.md, leaving other content untouched.
 # Idempotent: re-running refreshes the block in place.
 function _upsert_agents_block!(path::AbstractString, block::AbstractString)
-    islink(path) && throw(ArgumentError("$path is a symlink; refusing to write through it"))
+    _refuse_nonfile(path)
     raw     = isfile(path) ? read(path, String) : ""
     managed = string(_AGENTS_BEGIN, '\n', block, '\n', _AGENTS_END)
     b = findfirst(_AGENTS_BEGIN, raw)
@@ -302,6 +313,10 @@ end
 function _remove_agents_block!(path::AbstractString)
     if islink(path)
         @warn "$path is a symlink; leaving it untouched"
+        return false
+    end
+    if ispath(path) && !isfile(path)
+        @warn "$path exists and is not a regular file; leaving it untouched"
         return false
     end
     isfile(path) || return false
@@ -337,13 +352,28 @@ function _expand_home(dir::AbstractString)
     return expanduser(d)
 end
 
-# Write via a temp file + rename so an existing hardlink or symlink at `path` is
-# replaced as a directory entry, never truncated in place (which would overwrite
-# whatever inode the user's link points at).
+# Write via mktemp (unpredictable name, created fresh — never a guessable path an
+# attacker could pre-place a symlink/hardlink at) + rename, so an existing hardlink at
+# `path` is replaced as a directory entry rather than truncated in place (which would
+# overwrite whatever inode the user's link points at). Refuses outright to write
+# through a symlink, or onto any existing non-regular-file path (e.g. a directory):
+# `mv(...; force = true)` does `rm(path; recursive = true)` first, which would delete a
+# directory and everything inside it. On any failure the temp file is removed so a
+# failed write never leaves stray temp files behind.
 function _write_atomic(path::AbstractString, content::AbstractString)
-    tmp = joinpath(dirname(path), ".$(basename(path)).tmp-$(getpid())")
-    write(tmp, content)
-    mv(tmp, path; force = true)
+    islink(path) && throw(ArgumentError("$path is a symlink; refusing to write through it"))
+    (ispath(path) && !isfile(path)) &&
+        throw(ArgumentError("$path exists and is not a regular file; refusing to replace it"))
+    (tmp, io) = mktemp(dirname(path))
+    try
+        write(io, content)
+        close(io)
+        mv(tmp, path; force = true)
+    catch
+        close(io)
+        rm(tmp; force = true)
+        rethrow()
+    end
     path
 end
 
@@ -354,6 +384,7 @@ function _unsafe_reason(target, stamp, refdir)
     islink(refdir) && return "$refdir is a symlink"
     (ispath(target) && !isdir(target)) && return "$target is not a directory"
     (ispath(refdir) && !isdir(refdir)) && return "$refdir is not a directory"
+    (ispath(stamp) && !islink(stamp) && !isfile(stamp)) && return "$stamp is not a regular file"
     nothing
 end
 
@@ -392,9 +423,12 @@ written, so a refresh regenerates only files it wrote and anything you add insid
 `reference/` yourself survives. An existing file at one of our names that lacks that
 header is refused unless `overwrite=true`. A symlinked target, wrapper, reference
 directory, reference file, `.gitignore`, or `AGENTS.md` is never written through — it
-is refused with an `ArgumentError` rather than mutated. All installer writes are
-atomic (temp file + rename), so an existing hardlink at one of our paths is replaced
-as a directory entry rather than truncated in place.
+is refused with an `ArgumentError` rather than mutated; a directory (or any other
+non-regular file) at one of those paths is refused the same way, and the `.gitignore` /
+`AGENTS.md` side-effect files are checked before anything is written, so a refusal
+never leaves a half-installed guide behind. All installer writes are atomic (temp file
++ rename), so an existing hardlink at one of our paths is replaced as a directory entry
+rather than truncated in place.
 
 # Keyword arguments
 - `tool::Symbol = :claude` — target assistant:
@@ -447,6 +481,9 @@ function install_agent_guide(; tool::Symbol = :claude,
         # point outside the install dir entirely. Checked before any mutation.
         r = _unsafe_reason(target, wrapper, refdir)
         r === nothing || throw(ArgumentError(r * "; refusing to install"))
+        # Preflight the .gitignore side effect too, before anything is written — a
+        # half-installed bundle behind a refused .gitignore would be worse than none.
+        gitignore && _refuse_nonfile(joinpath(dir, ".gitignore"))
         # Own-install idempotency: refresh ours freely; refuse a foreign/unstamped
         # target unless overwrite=true. Guard whenever the dir exists with content —
         # NOT only when SKILL.md is present — so a hand-made dir with a reference/ but
@@ -474,6 +511,11 @@ function install_agent_guide(; tool::Symbol = :claude,
         refdir = joinpath(target, "reference")
         r = _unsafe_reason(target, guide, refdir)
         r === nothing || throw(ArgumentError(r * "; refusing to install"))
+        # Preflight both side-effect files before anything is written — a
+        # half-installed bundle behind a refused AGENTS.md/.gitignore would be worse
+        # than none.
+        _refuse_nonfile(joinpath(dirname(target), "AGENTS.md"))
+        gitignore && _refuse_nonfile(joinpath(dir, ".gitignore"))
         # Same guard as :claude — refuse any non-empty foreign target, not only one
         # that already has our GUIDE.md, so a stray reference/ is not wiped.
         if isdir(target) && !isempty(readdir(target))
