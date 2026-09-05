@@ -333,6 +333,7 @@ function install_agent_guide(; tool::Symbol = :claude,
     if track && scope == :user
         @warn "track applies only to scope=:project (the :user guide lives outside any repo); ignoring track=true"
     end
+    dir = expanduser(String(dir))   # `dir="~/repo"` must not create a literal `~` under the cwd
 
     entries   = _collect_pkg_docs()
     gitignore = !track && scope == :project
@@ -385,9 +386,13 @@ end
 """
     uninstall_agent_guide(; tool=:claude, scope=:project, dir=pwd()) -> Vector{String}
 
-Remove a guide previously installed by SMLMAnalysis. Removes **only** targets carrying
+Remove a guide previously installed by SMLMAnalysis. Acts **only** on a target carrying
 SMLMAnalysis's own provenance stamp — a hand-made skill or another package's install is
-left untouched. Returns the paths removed (empty if nothing of ours was found).
+left untouched — and even then removes only the files this installer wrote (`SKILL.md` /
+`GUIDE.md` and `reference/`). The directory itself is removed only when nothing else
+remains, so anything you added alongside (notes, scripts) survives; a non-empty
+directory is left in place and reported with `@info`. Returns the paths removed (empty
+if nothing of ours was found).
 """
 function uninstall_agent_guide(; tool::Symbol = :claude,
                                  scope::Symbol = :project,
@@ -396,23 +401,41 @@ function uninstall_agent_guide(; tool::Symbol = :claude,
         throw(ArgumentError("tool must be :claude or :codex, got :$tool"))
     scope in (:project, :user) ||
         throw(ArgumentError("scope must be :project or :user, got :$scope"))
+    dir = expanduser(String(dir))
 
     removed = String[]
     target  = _install_dir(tool, scope, dir)
     if tool == :claude
-        if isdir(target) && _frontmatter_field(joinpath(target, "SKILL.md"), "x-installer") == _INSTALLER
-            rm(target; recursive = true)
-            push!(removed, target)
+        stamp = joinpath(target, "SKILL.md")
+        if isdir(target) && _frontmatter_field(stamp, "x-installer") == _INSTALLER
+            push!(removed, _remove_own_files!(target, stamp))
         end
     else
-        if isdir(target) && _guide_field(joinpath(target, "GUIDE.md"), "x-installer") == _INSTALLER
-            rm(target; recursive = true)
-            push!(removed, target)
+        stamp = joinpath(target, "GUIDE.md")
+        if isdir(target) && _guide_field(stamp, "x-installer") == _INSTALLER
+            push!(removed, _remove_own_files!(target, stamp))
         end
         agents = joinpath(dirname(target), "AGENTS.md")
         _remove_agents_block!(agents) && push!(removed, agents)
     end
     removed
+end
+
+# Remove exactly what install_agent_guide writes into `target` — the stamped wrapper
+# file and the `reference/` bundle — then drop the directory only if it is empty.
+# Never `rm(target; recursive=true)`: after an `overwrite=true` install into a
+# hand-made directory the stamp is ours but the directory may still hold the user's
+# own files, and a recursive delete would take them with it.
+function _remove_own_files!(target::AbstractString, stamp::AbstractString)
+    isfile(stamp) && rm(stamp)
+    refdir = joinpath(target, "reference")
+    isdir(refdir) && rm(refdir; recursive = true)
+    if isempty(readdir(target))
+        rm(target)
+        return String(target)
+    end
+    @info "uninstall_agent_guide: removed SMLMAnalysis's files from $target but kept the directory — it still holds files this installer did not write." remaining=readdir(target)
+    return String(target)
 end
 
 """
@@ -432,7 +455,7 @@ function agent_guide_status(; tool::Symbol = :claude,
         throw(ArgumentError("scope must be :project or :user, got :$scope"))
 
     current = _source_version()
-    target  = _install_dir(tool, scope, dir)
+    target  = _install_dir(tool, scope, expanduser(String(dir)))
     stampfile = tool == :claude ? joinpath(target, "SKILL.md") : joinpath(target, "GUIDE.md")
     reader    = tool == :claude ? _frontmatter_field : _guide_field
 

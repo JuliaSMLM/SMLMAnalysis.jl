@@ -276,7 +276,7 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         Random.seed!(42)
 
         # Flat data: constant ~30 locs/frame with Poisson-like noise, 19k frames.
-        # Reproduces the @hstirf case that produced a=-42873, k≈0 with unbounded NelderMead.
+        # Reproduces a real-data case that produced a=-42873, k≈0 with unbounded NelderMead.
         # Expected: reject as degenerate, return nothing.
         flat = [max(0, round(Int, 30 + randn() * sqrt(30))) for _ in 1:19_000]
         @test SMLMAnalysis._estimate_bleaching_rate(flat) === nothing
@@ -489,6 +489,15 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
                 println(io, "s = $(SMLMAnalysis._toml_value(s))")
             end
             @test TOML.parsefile(joinpath(dir, "esc.toml"))["s"] == s
+
+            # info.toml: a `nothing` field is OMITTED (as in config.toml), never written
+            # as the string "nothing" — otherwise a key's TOML type flips between runs.
+            info = (; n_after = 3, p2_estimate = nothing, field_mode = :gaussian)
+            SMLMAnalysis._save_info!(dir, info)
+            parsed_info = TOML.parsefile(joinpath(dir, "info.toml"))
+            @test parsed_info["n_after"] == 3
+            @test parsed_info["field_mode"] == "gaussian"
+            @test !haskey(parsed_info, "p2_estimate")
         end
     end
 
@@ -626,6 +635,50 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             write(joinpath(skill, "SKILL.md"), "---\nname: smlma-ecosystem\n---\nnot ours\n")
             @test isempty(uninstall_agent_guide(dir = dir))
             @test isdir(skill)
+        end
+
+        # Regression (data loss): overwrite=true onto a hand-made dir stamps it as ours
+        # while preserving the user's own files — a later uninstall must remove ONLY
+        # what we wrote (SKILL.md + reference/) and leave the still-populated directory
+        # in place, never `rm -r` the user's notes.md / scripts/ along with it.
+        mktempdir() do dir
+            skill = joinpath(dir, ".claude", "skills", "smlma-ecosystem")
+            mkpath(joinpath(skill, "scripts"))
+            write(joinpath(skill, "SKILL.md"), "---\nname: smlma-ecosystem\n---\nhand-made\n")
+            write(joinpath(skill, "notes.md"), "my notes")
+            write(joinpath(skill, "scripts", "tool.py"), "print(1)")
+            @test install_agent_guide(dir = dir, overwrite = true) == skill
+            @test isfile(joinpath(skill, "notes.md"))                       # install preserved it
+            @test uninstall_agent_guide(dir = dir) == [skill]
+            @test isdir(skill)                                              # dir kept (non-empty)
+            @test isfile(joinpath(skill, "notes.md"))                       # user's files survive
+            @test isfile(joinpath(skill, "scripts", "tool.py"))
+            @test !isfile(joinpath(skill, "SKILL.md"))                      # ours removed
+            @test !isdir(joinpath(skill, "reference"))
+            @test !agent_guide_status(dir = dir).installed
+            @test isempty(uninstall_agent_guide(dir = dir))                 # nothing of ours left
+        end
+
+        # Same contract for the Codex bundle: user files inside smlm-agent-guide/ survive.
+        mktempdir() do dir
+            bundle = joinpath(dir, "smlm-agent-guide")
+            mkpath(bundle)
+            write(joinpath(bundle, "GUIDE.md"), "hand-made\n")
+            write(joinpath(bundle, "mine.txt"), "keep")
+            @test install_agent_guide(dir = dir, tool = :codex, overwrite = true) == bundle
+            removed = uninstall_agent_guide(dir = dir, tool = :codex)
+            @test bundle in removed
+            @test isdir(bundle) && isfile(joinpath(bundle, "mine.txt"))
+            @test !isfile(joinpath(bundle, "GUIDE.md")) && !isdir(joinpath(bundle, "reference"))
+        end
+
+        # `dir = "~/..."` is expanded; it must never create a literal "~" under the cwd.
+        mktempdir() do tmp
+            cd(tmp) do
+                @test isempty(uninstall_agent_guide(dir = "~/smlma-nonexistent-repo-for-test"))
+                @test !agent_guide_status(dir = "~/smlma-nonexistent-repo-for-test").installed
+                @test !ispath("~")
+            end
         end
 
         # Claude, track=true → committed (no .gitignore written).
