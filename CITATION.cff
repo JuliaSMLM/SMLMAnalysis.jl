@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: >-
+  If you use SMLMAnalysis.jl, please cite it as below, together with the primary
+  references for the specific methods your pipeline used (see the References page
+  of the documentation).
+type: software
+title: "SMLMAnalysis.jl"
+abstract: >-
+  SMLM analysis pipeline for the JuliaSMLM ecosystem: detection, fitting, filtering,
+  frame connection, drift correction, Bayesian grouping, clustering, and
+  super-resolution rendering with provenance tracking.
+authors:
+  - family-names: Lidke
+    given-names: Keith A.
+    email: klidke@unm.edu
+    affiliation: "University of New Mexico"
+version: 0.1.0
+license: MIT
+repository-code: "https://github.com/JuliaSMLM/SMLMAnalysis.jl"
+url: "https://JuliaSMLM.github.io/SMLMAnalysis.jl/"
+keywords:
+  - single-molecule localization microscopy
+  - super-resolution microscopy
+  - SMLM
+  - Julia

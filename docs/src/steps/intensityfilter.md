@@ -52,8 +52,15 @@ filter accounts for both:
    rejected as multi-emitter events.
 
 Optionally (`estimate_p2`), the filter also estimates **p₂**, the fraction of
-double-emitter events, by decomposing the bright tail of the photon distribution
-— a useful diagnostic of how crowded the data is.
+localizations that are really two overlapping emitters — a diagnostic of how
+crowded the data is (it does not change what is filtered). The default
+`p2_method = :mixture` fits the field-normalized photon distribution as a
+two-component mixture, ``h = (1-p)\,f_\text{single} + p\,f_\text{double}`` with
+``f_\text{double} = f_\text{single} \ast f_\text{single}``, and reads ``p`` off
+directly; because it uses the whole distribution rather than a threshold it is
+unbiased. The legacy `:tail` method takes the ratio of bright-tail mass above
+`p2_tail_threshold` and is biased high (it attributes the whole single-emitter
+tail to doubles); it is kept for comparison.
 
 ## Configuration
 
@@ -64,8 +71,9 @@ double-emitter events, by decomposing the bright tail of the photon distribution
 | `n_bins` | `10` | spatial grid bins per axis for field estimation |
 | `min_bin_count` | `30` | minimum localizations per bin to estimate its rate |
 | `rate_percentile` | `0.95` | per-bin percentile taken as the single-emitter rate; higher = more permissive |
-| `estimate_p2` | `true` | also estimate the double-emitter fraction p₂ |
-| `p2_tail_threshold`, `p2_n_bins` | `1.0`, `200` | p₂ tail-decomposition parameters |
+| `estimate_p2` | `true` | also estimate the double-emitter fraction p₂ (info only) |
+| `p2_method` | `:mixture` | p₂ estimator: `:mixture` (threshold-free mixture fit, default) or `:tail` (legacy tail ratio, biased high) |
+| `p2_tail_threshold`, `p2_n_bins` | `1.0`, `200` | tail threshold τ (units of λ) for `:tail` and the tail diagnostics; histogram bins for the estimators |
 
 ```julia
 (filtered, info) = analyze(smld,

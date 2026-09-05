@@ -68,8 +68,10 @@ automatically when left at their defaults:
 - **`normalize_each`** — whether each channel is normalized to its own dynamic
   range before mixing. Auto: `false` for `HistogramRender` (saturate mode),
   `true` for the others (clip + normalize).
-- **`clip_percentile`** — intensity clipping for the normalize/clip path. For
-  `HistogramRender` the default `0.99` is treated as "no clip" (saturate).
+- **`clip_percentile`** — intensity clipping for the normalize/clip path. The
+  default `:auto` picks per strategy: saturate (no clip) for `HistogramRender`,
+  `0.99` for the others. A `Float64` clips at that percentile; `nothing` forces
+  saturate mode.
 
 ## Configuration
 
@@ -81,7 +83,7 @@ fields that matter most:
 | `strategy` | `GaussianRender()` | rendering strategy: `GaussianRender`, `HistogramRender`, `CircleRender`, … |
 | `zoom` | `20.0` | output magnification (super-resolution pixels per camera pixel) |
 | `colors` | `nothing` | per-channel colors as `Vector{Symbol}`; `nothing` = inherit from `MultiTargetConfig.colors` |
-| `clip_percentile` | `0.99` | intensity clip for normalize mode; `nothing` = saturate |
+| `clip_percentile` | `:auto` | `:auto` = per strategy (saturate for histogram, `0.99` otherwise); a `Float64` clips at that percentile; `nothing` = saturate |
 | `normalize_each` | `nothing` | per-channel normalization; `nothing` = auto (false for histogram, true otherwise) |
 | `scalebar` | `true` | draw a scale bar on the composite |
 | `scalebar_length` | `nothing` | scale-bar length in µm; `nothing` = auto |

@@ -99,5 +99,5 @@ their step pages.
 
 If you use SMLMAnalysis in your research, please cite the package together with
 the primary references for the specific methods your pipeline used (the steps
-above). A package citation entry (`CITATION.bib`) will accompany the registered
-release.
+above). The repository's `CITATION.cff` carries the package metadata; GitHub's
+*Cite this repository* button renders it as BibTeX or APA.
