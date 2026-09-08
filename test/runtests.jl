@@ -24,6 +24,40 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test IdealCamera <: AbstractCamera
     end
 
+    @testset "docs cover every SMLMAnalysis-owned export" begin
+        # Every name DEFINED in SMLMAnalysis (not merely re-exported from an upstream
+        # package) must appear in a ```@docs block under docs/src, or the hosted manual
+        # silently omits it. `checkdocs=:none` in docs/make.jl cannot catch this because
+        # the upstream modules are in `modules=`; this is the scoped check.
+        docsdir = joinpath(dirname(@__DIR__), "docs", "src")
+        documented = Set{String}()
+        for (root, _, files) in walkdir(docsdir), f in files
+            endswith(f, ".md") || continue
+            inblock = false
+            for ln in eachline(joinpath(root, f))
+                s = strip(ln)
+                if startswith(s, "```@docs")
+                    inblock = true
+                elseif inblock && startswith(s, "```")
+                    inblock = false
+                elseif inblock && !isempty(s)
+                    push!(documented, s)
+                end
+            end
+        end
+        owned = String[]
+        for n in names(SMLMAnalysis)
+            n === :SMLMAnalysis && continue
+            obj = getfield(SMLMAnalysis, n)
+            obj isa Module && continue            # Verbosity / Checkpoint: documented as tables
+            parentmodule(obj) === SMLMAnalysis || continue
+            push!(owned, string(n))
+        end
+        @test !isempty(owned)
+        undocumented = sort!(setdiff(owned, documented))
+        @test isempty(undocumented)
+    end
+
     @testset "Types" begin
         # Test AnalysisInfo constructor
         info = AnalysisInfo()

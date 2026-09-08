@@ -37,8 +37,9 @@ computes a curve and writes it out, but the SMLDs pass through unmodified.
 
 - **Input:** the channel vector `smlds`. The two channels are picked by the
   1-based `channels` index tuple; they must be distinct and in range (the step
-  errors otherwise). The FOV area used for normalization is taken from channel
-  A's camera, which assumes both channels share a camera.
+  errors otherwise). The reference FOV (edge correction and the reported `area`)
+  comes from channel A's camera; channel B's density ``\rho_B`` uses B's **own**
+  camera FOV, and the step warns when the two FOVs differ.
 - **Returns:** `(smlds, StepInfo)` — `smlds` is returned unchanged. The computed
   curve lives on `StepInfo.info`, a [`CrossCorrInfo`](@ref) carrying `r`, `g`,
   `n_a`, `n_b`, `area`, and the channel labels.
@@ -69,8 +70,9 @@ contribute to that annulus. Reading the result:
 - **``g(r) < 1``** — exclusion / anti-correlation: the species avoid each other.
 
 Because this is a *cross*-correlation between distinct channels, there is no
-self-pair spike at ``r \to 0`` from repeated blinks of one molecule (zero-distance
-pairs are skipped); a small-``r`` rise is genuine co-localization blurred by
+self-pair artifact at ``r \to 0``: an exactly coincident A/B pair is the strongest
+co-localization signal, not a self-pair, so zero-distance pairs are **kept** (they
+land in the first bin). A small-``r`` rise is genuine co-localization blurred by
 localization precision.
 
 **Edge correction.** A localization near the FOV edge sees a clipped annulus, so
@@ -125,9 +127,10 @@ shrink `dr` only when both channels are dense.
 - **It does not relabel emitters.** This is an analysis-only step; downstream
   steps see the same SMLDs. Use it alongside [Composite Render](@ref) to *see*
   the overlap you are quantifying.
-- **Shared camera assumed.** The normalization area comes from channel A's
-  camera; mismatched cameras or cropped channels will bias ``\rho_B`` and hence
-  the baseline.
+- **FOV mismatch.** ``\rho_B`` is computed from channel B's own camera FOV, but
+  the Ripley edge correction uses channel A's FOV and assumes the two coincide;
+  the step warns when they differ. Cropped or mismatched channels bias the
+  edge-corrected tail.
 - **Asymmetry.** Pairs are counted from A to B; for well-sampled channels
   ``g_{AB}(r)`` and ``g_{BA}(r)`` agree, but with very different counts the
   finite-sampling noise differs — check both if in doubt by swapping `channels`.

@@ -14,7 +14,8 @@ pipeline on simulated data and shows the output of every step.
 | Understand how `analyze()` routes steps by dispatch | [The Pipeline Model](@ref) |
 | See where SMLMAnalysis sits in the JuliaSMLM ecosystem | [The JuliaSMLM Ecosystem](@ref) |
 | Know what an SMLD stores and how provenance is tracked | [Data Model & Provenance](@ref) |
-| Install the package and its unregistered dependencies | [Installation & Setup](@ref) |
+| Install the package | [Installation & Setup](@ref) |
+| Give an AI coding assistant the ecosystem's API | [AI Assistant Guide](@ref) |
 | Run a full pipeline from an `AnalysisConfig` | [Running a Pipeline](@ref) |
 | Set the output detail level (verbosity) | [Running a Pipeline](@ref) |
 | Process multiple files, or chunk one long movie | [Multi-Dataset Acquisitions](@ref) |
