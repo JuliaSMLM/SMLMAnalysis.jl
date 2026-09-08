@@ -457,7 +457,8 @@ end
 Write upstream Info struct fields to `info.toml` in TOML format.
 
 Writes scalar fields (numbers, bools, strings, symbols, tuples of scalars).
-Skips complex fields (arrays, dicts, structs like BasicSMLD, models).
+Skips complex fields (arrays, dicts, structs like BasicSMLD, models) and fields that
+are `nothing` (the key is absent, matching `config.toml`).
 
 When `section` is empty, writes a fresh file with type header.
 When `section` is provided, appends a `[section]` block.
@@ -490,8 +491,10 @@ end
 function _write_info_field!(io::IO, name::Symbol, v::Symbol)
     println(io, "$name = $(_toml_value(v))")
 end
-function _write_info_field!(io::IO, name::Symbol, v::Nothing)
-    println(io, "$name = \"nothing\"")
+function _write_info_field!(io::IO, ::Symbol, ::Nothing)
+    # Omit the key entirely, exactly as the config writer does for `nothing` fields.
+    # Emitting the string "nothing" made a key's TOML type flip between runs
+    # (`p2_estimate = "nothing"` vs `p2_estimate = 0.146`), breaking any batch parser.
 end
 function _write_info_field!(io::IO, name::Symbol, v::Tuple)
     # Only write tuples of scalars; _toml_value escapes/renders each element as valid TOML.
