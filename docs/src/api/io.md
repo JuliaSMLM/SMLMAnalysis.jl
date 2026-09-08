@@ -55,4 +55,5 @@ step_name
 step_outdir
 n_datasets
 n_frames_per_dataset
+get_images
 ```

@@ -77,7 +77,8 @@ Complete pipeline description.
 - `steps::Vector{AbstractSMLMConfig}` - Ordered pipeline steps
 - `roi::Union{NamedTuple, Nothing}` - Optional ROI as `(x=100:300, y=50:200)`
 - `outdir::Union{String, Nothing}` - Output directory
-- `verbose::Int` - Verbosity level (default: STANDARD)
+- `verbose::Int` - Verbosity level (default: `Verbosity.STANDARD`)
+- `checkpoint::Int` - Which steps persist their output SMLD as JLD2 (default: `Checkpoint.EXPENSIVE`; see Checkpoint Levels)
 
 ### AnalysisInfo
 
@@ -92,11 +93,14 @@ or `stepinfos(info, name)` (all matches, in order). Both take a `Symbol` or `Str
 return `StepInfo`; reach the upstream typed info via `.info`.
 
 **Step info types** (via `stepinfo(info, name).info`):
-- `:detectfit` -> `(boxes=BoxesInfo, fit=FitInfo)`
-- `:filter` -> `nothing`
-- `:frameconnect` -> `FrameConnectInfo`
+- `:detectfit` -> `DetectFitInfo` (its `boxes_info::Vector{BoxesInfo}` / `fit_info::Vector{GaussMLEFitInfo}` hold the per-dataset upstream infos)
+- `:filter` -> `FilterInfo`
+- `:intensityfilter` -> `IntensityFilterInfo`
+- `:frameconnect` -> `FrameConnectInfo` (calibration result, if any, on `.calibration`)
 - `:driftcorrect` -> `DriftInfo`
-- `:render` -> `Vector{RenderInfo}`
+- `:densityfilter` -> `DensityFilterInfo`
+- `:bagol` -> `BaGoLInfo`
+- `:render` -> `RenderInfo` (one `StepInfo` per render step; use `stepinfos` for repeats)
 
 ### StepInfo <: AbstractSMLMInfo
 
@@ -143,16 +147,23 @@ Configuration for multi-channel analysis.
 - `colors::Vector{Symbol}` - Colors per channel (default: cyan/magenta for 2, CMY for 3)
 - `steps::Vector{AbstractMultiTargetStep}` - Multi-target steps run after the
   per-channel pipelines (`CompositeRenderConfig`, `CrossAlignConfig`, `CrossCorrConfig`)
-- `outdir::String` - Output directory
+- `outdir::String` - Output directory (required)
+- `verbose::Int` - Verbosity level (default: `Verbosity.STANDARD`)
 
 ### MultiTargetResult
 
-Result of multi-channel analysis. Access per-channel results via `result[:label]`.
+Result of multi-channel analysis. Access per-channel results via `result[:label]`
+(`keys(result)` lists the labels in order).
 
 **Fields:**
 - `labels::Vector{Symbol}` - Channel labels
-- `smlds::Vector{BasicSMLD}` - Per-channel SMLDs
+- `smlds::Vector{BasicSMLD}` - Per-channel SMLDs (aligned if a `CrossAlignConfig` ran)
 - `channels::Dict{Symbol, AnalysisResult}` - Per-channel results
+- `step_infos::Vector{StepInfo}` - The cross-channel steps' infos
+- `outdir::String` - Root output directory
+
+`MultiTargetInfo` (the second return) has `elapsed_s`, `channels::Dict{Symbol,AnalysisInfo}`,
+and `step_infos::Vector{StepInfo}`; `stepinfo(info, :crossalign)` searches `step_infos`.
 
 ## Step Configs
 
@@ -167,8 +178,12 @@ DetectFitConfig(;
     camera=nothing,           # Required for analyze() dispatch; injected by AnalysisConfig pipeline
     path=nothing,             # File-based loading
     paths=nothing,            # Multiple files (one per dataset)
-    dataset_frames=nothing,   # Explicit frame ranges
+    dataset_frames=nothing,   # Explicit frame ranges splitting one file into datasets
+    datasets=nothing,         # Subset of resolved sources to run (e.g. [1, 2, 5]); reindexed 1:n
     h5_format=:auto,          # :auto, :smart, :mic
+    pixel_size=nothing,       # µm; with h5_format=:mic and camera=nothing, builds an SCMOSCamera from the file's calibration
+    qe=1.0,                   # quantum efficiency for that MIC-built camera
+    movie_fps=nothing,        # frame rate used for DEBUG-verbosity frame movies
 )
 ```
 
@@ -185,12 +200,17 @@ Dataset boundaries are inferred from data structure (not a user integer):
 
 Filter localizations by quality metrics.
 
+Every criterion is a `(min, max)` tuple and **defaults to `nothing` (disabled)**; an
+empty `FilterConfig()` passes everything through.
+
 ```julia
 FilterConfig(;
-    photons=(0.0, Inf),       # (min, max) photon range
-    precision=(0.0, Inf),     # (min, max) precision range (um)
-    pvalue=(0.0, 1.0),        # (min, max) pvalue range
-    psf_sigma=nothing,        # (min, max) PSF sigma range (um), or :auto
+    photons=nothing,          # (min, max) photon range, e.g. (500.0, Inf)
+    precision=nothing,        # (min, max) lateral precision max(σ_x, σ_y), µm, e.g. (0.0, 0.007)
+    pvalue=nothing,           # (min, max) goodness-of-fit p-value range, e.g. (1e-3, 1.0)
+    psf_sigma=nothing,        # (min, max) PSF sigma range (µm), or :auto for mode ± 10 %
+    z=nothing,                # (min, max) axial position, µm (3D only; no-op on 2D)
+    sigma_z=nothing,          # (min, max) axial precision, µm (3D only; no-op on 2D)
 )
 ```
 
@@ -232,7 +252,7 @@ DriftConfig(;
     dataset_mode=:registered,     # :registered or :continuous
     n_chunks=0,
     chunk_frames=0,
-    maxn=200,
+    maxn=100,
     quality=:singlepass,          # :singlepass, :iterative, or :fft
     auto_roi=false,
     max_iterations=10,
@@ -276,8 +296,13 @@ excitation field.
 IntensityFilterConfig(;
     cutoff=0.01,                # p-value cutoff
     field_mode=:gaussian,       # :uniform or :gaussian (2D beam fit for λ(x,y))
+    n_bins=10,                  # spatial grid bins per axis for the field estimate
+    min_bin_count=30,           # minimum localizations per bin to estimate its rate
     rate_percentile=0.95,       # percentile for single-emitter rate estimation
-    estimate_p2=true,           # estimate the double-emitter fraction
+    estimate_p2=true,           # estimate the double-emitter fraction p₂
+    p2_method=:mixture,         # :mixture (threshold-free two-component fit, default) or :tail (legacy tail ratio)
+    p2_tail_threshold=1.0,      # τ (units of λ) for the :tail method
+    p2_n_bins=200,              # histogram bins for the p₂ estimators
 )
 ```
 
@@ -291,11 +316,15 @@ BaGoLConfig(;
     μ=10.0,                     # expected locs per emitter
     shape=2.0,                  # NegBin shape (1=dSTORM, >1=DNA-PAINT)
     learn_distribution=true,    # true/false/:mu/:shape
-    n_iterations=10000, burn_in=2000,
+    n_iterations=4000, burn_in=2000,
     partition_sigma=3.0,        # DBSCAN threshold in sigma units
-    posterior_pixel_size=0.002, # 2 nm posterior image (0.0 disables)
+    se_adjust=:auto,            # :auto estimates excess uncertainty τ and adds it in quadrature; 0.0 = none; a number = manual τ (µm)
+    posterior_pixel_size=0.001, # 1 nm posterior image (0.0 disables)
 )
 ```
+
+Many more fields exist (model choices, split/merge tuning, partitioning); see the
+SMLMBaGoL documentation.
 
 ### Clustering & spatial statistics (from SMLMClustering)
 
@@ -327,17 +356,35 @@ Dispatch on `Vector{BasicSMLD}` inside a `MultiTargetConfig` pipeline:
   (state-modifying; returns aligned SMLDs).
 - `CrossCorrConfig(; r_max, dr)` — pairwise cross-correlation g(r).
 
-## Info Types (Re-exported)
+## Info Types
 
-### FitInfo (from GaussMLE)
+Every info struct in the ecosystem records wall time as **`elapsed_s::Float64`**
+(seconds). Field lists below are the live `fieldnames` of the resolved versions; see each
+upstream docstring for types and meaning.
+
+### Native to SMLMAnalysis
+
+- `DetectFitInfo`: `boxes_info`, `fit_info` (per-dataset upstream infos), `n_datasets`, `n_rois`, `n_fits`, `n_frames_per_dataset`, `elapsed_s`, `selected_source_indices`
+- `FilterInfo`: `n_before`, `n_after`, `elapsed_s`
+- `IntensityFilterInfo`: `n_before`, `n_after`, `field_mode`, `lambda_max_global`, `field_params`, `field_fit_r2`, `elapsed_s`, `p2_estimate` (or `nothing`), `p2_tail_threshold`, `p2_tail_obs`, `p2_tail_f2`
+- `DensityFilterInfo`: `n_before`, `n_after`, `threshold`, `elapsed_s`
+- `BaGoLInfo`: `n_locs_in`, `n_emitters`, `compression`, `final_μ`, `final_shape`, `n_partitions`, `tau_um`, `diagnostics` (`SMLMBaGoL.BaGoLDiagnostics`)
+- `CompositeRenderInfo`: `render_info`, `strategy`, `zoom`, `n_channels`, `elapsed_s`
+- `CrossAlignInfo`: `align_info` (upstream `AlignInfo`), `shifts` (per-channel `(x, y)` in µm), `max_shift_nm`, `elapsed_s`
+- `CrossCorrInfo`: `r`, `g`, `n_a`, `n_b`, `area`, `r_max`, `dr`, `channel_a`, `channel_b`, `elapsed_s`
+
+### GaussMLEFitInfo (from GaussMLE)
 
 ```julia
-struct FitInfo
-    elapsed_ns::UInt64
+struct GaussMLEFitInfo
+    elapsed_s::Float64
     backend::Symbol       # :cpu or :gpu
     device_id::Int        # GPU device, -1 for CPU
     n_fits::Int
     n_converged::Int
+    batch_size
+    n_batches
+    memory_per_batch
 end
 ```
 
@@ -346,8 +393,12 @@ end
 ```julia
 struct BoxesInfo
     backend::Symbol
-    elapsed_ns::UInt64
+    elapsed_s::Float64
     device_id::Int
+    n_rois::Int
+    batch_size
+    n_batches
+    memory_per_batch
 end
 ```
 
@@ -364,23 +415,31 @@ struct FrameConnectInfo{T}
     k_bleach::Float64
     p_miss::Float64
     initial_density::Vector{Float64}
-    elapsed_ns::UInt64
+    elapsed_s::Float64
     algorithm::Symbol
     n_preclusters::Int
+    n_filtered::Int                     # tracks dropped by FrameConnectConfig.track_length
+    calibration                         # CalibrationResult, or nothing when no CalibrationConfig was set
 end
 ```
+
+`CalibrationResult` fields: `sigma_motion_nm`, `k_scale`, `A`, `B`, `A_sigma`, `B_sigma`,
+`r_squared`, `mean_chi2`, `n_pairs`, `n_tracks_used`, `n_tracks_filtered`, `bin_centers`,
+`bin_observed`, `bin_counts`, `frame_shifts`, `calibration_applied`, `warning`.
 
 ### DriftInfo (from SMLMDriftCorrection)
 
 ```julia
 struct DriftInfo
     model::AbstractIntraInter
-    elapsed_ns::UInt64
+    elapsed_s::Float64
     backend::Symbol
     iterations::Int
     converged::Bool
     entropy::Float64
     history::Vector{Float64}
+    roi_indices
+    residual_correlation
 end
 ```
 
@@ -388,7 +447,7 @@ end
 
 ```julia
 struct RenderInfo
-    elapsed_ns::UInt64
+    elapsed_s::Float64
     backend::Symbol
     device_id::Int
     n_emitters_rendered::Int
@@ -397,6 +456,7 @@ struct RenderInfo
     strategy::Symbol
     color_mode::Symbol
     field_range::Union{Nothing, Tuple{Float64,Float64}}
+    scalebar_length_um
 end
 ```
 
@@ -404,7 +464,7 @@ end
 
 ```julia
 struct SimInfo
-    elapsed_ns::UInt64
+    elapsed_s::Float64
     backend::Symbol
     device_id::Int
     seed::Union{UInt64, Nothing}
@@ -421,7 +481,7 @@ end
 
 ```julia
 struct ImageInfo
-    elapsed_ns::UInt64
+    elapsed_s::Float64
     backend::Symbol
     device_id::Int
     frames_generated::Int
@@ -456,24 +516,32 @@ HDF5 serialization of SMLD data.
 ### save_pipeline_state / load_pipeline_state
 
 ```julia
-save_pipeline_state(path, result::AnalysisResult; smld_raw, step_records, camera)
-state = load_pipeline_state(path)  # Returns NamedTuple with smld, smld_raw, etc.
+save_pipeline_state(path, result::AnalysisResult; smld_raw=nothing, step_infos=nothing, camera=nothing)
+state = load_pipeline_state(path)  # NamedTuple: smld, smld_raw, smld_connected, drift_model, step_infos, …
 ```
 
-JLD2-based full pipeline state save/restore.
+JLD2-based full pipeline state save/restore. (`save_smld` also takes
+`source_file`, `drift_model`, and `compression` keywords.)
 
 ### H5 Loading
 
 ```julia
-# SMART microscope format
-data, info = load_smart_h5(path)
-info = load_smart_h5_info(path)
+# SMART microscope format (/Main/data)
+images = load_smart_h5(path; frame_range=nothing)     # ONE array (width, height, frames) — not a tuple
+info   = load_smart_h5_info(path)                     # width, height, nframes, dtype, file_size_gb
+frame  = load_smart_h5_frame(path, i)
+data, info = smart_h5_to_array(path; max_frames)      # the pair-returning form: (height, width, frames) + info
 
-# MIC (MATLAB Instrument Control) format
-images, metadata = load_mic_h5(path)
-info = load_mic_h5_info(path)
+# MIC (MATLAB Instrument Control) format — one or more blocks, each a dataset
+images, dataset_indices = load_mic_h5(path; max_frames, max_blocks)   # (h, w, frames) + block index per frame
+info  = load_mic_h5_info(path)                                        # n_frames, n_blocks, frames_per_block, has_calibration
 block = load_mic_h5_block(path, block_index)
+cam   = build_camera_from_mic_h5(path; pixel_size, qe=1.0)            # SCMOSCamera from the file's calibration
 ```
+
+`load_smart_h5` returns a single array: writing `data, info = load_smart_h5(path)` does
+**not** error — it iterates the 3-D stack and binds two pixel values. Use
+`smart_h5_to_array` for the `(data, info)` pair.
 
 ## AI Assistant Guide
 

@@ -38,6 +38,7 @@ makedocs(;
             "Multi-Channel"          => "workflows/multichannel.md",
             "I/O & Resume"           => "workflows/io_resume.md",
             "Extending the Pipeline" => "workflows/extending.md",
+            "AI Assistant Guide"     => "workflows/agent_guide.md",
             "Troubleshooting"        => "workflows/troubleshooting.md",
         ],
         "Pipeline Steps" => [
