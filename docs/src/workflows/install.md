@@ -6,7 +6,7 @@ CurrentModule = SMLMAnalysis
 
 ## Requirements
 
-- **Julia 1.12** or newer.
+- **Julia 1.10** or newer.
 - A **CUDA-capable GPU** is recommended. The [fitting](@ref "Detection & Fitting")
   step uses GaussMLE, which is GPU-accelerated via CUDA; see the GaussMLE
   documentation for GPU/CPU options.
