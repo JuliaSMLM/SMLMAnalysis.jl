@@ -279,7 +279,9 @@ end
 # ~1 min of JIT.
 #
 # Invariants that keep the workload safe to run during precompilation:
-#   - backend = :cpu      → no GPU kernels (uncacheable, and no device on CI)
+#   - backend = :cpu      → on BOTH the boxer and the fitter: no GPU kernels
+#                           (uncacheable, no device on CI, and the boxer's GPU
+#                           path polls NVML, which some GPUs do not support)
 #   - outdir  = nothing   → no disk writes
 #   - GaussianXYNBS       → Emitter2DFitSigma, the path the examples exercise
 #                           (GaussianXYNB/Emitter2DFitGaussMLE lacks a
@@ -307,7 +309,7 @@ using PrecompileTools: @setup_workload, @compile_workload
     @compile_workload begin
         # Cached: the detect/fit → filter → frame-connect → render pipeline.
         cfg = AnalysisConfig(
-            DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13),
+            DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
                             fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)),
             FilterConfig(photons = (100.0, Inf)),
             FrameConnectConfig(max_frame_gap = 2),
