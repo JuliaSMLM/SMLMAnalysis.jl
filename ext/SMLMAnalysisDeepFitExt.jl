@@ -84,13 +84,16 @@ end
 
 """detectfit-style overlay: inferred localizations BOXED on sample movie frames, via the shared
 `_save_box_overlay` core — so deepfit_inference reads as the same figure family as detectfit/filter
-(boxes on the raw data), not bare × marks. Box is centered on each localization (µm→px via camera)."""
+(boxes on the raw data), not bare × marks. Box is centered on each localization (µm→px via
+SMLMData.physical_to_pixel)."""
 function _deepfit_inference_overlay(dir, movie, smld, cam; box_size = 9)
     em = [e for e in smld.emitters if 1 <= e.frame <= size(movie, 3)]
     isempty(em) && return
     ps = _deepfit_pixelsize(cam)
-    xc = Float64[e.x / ps - box_size / 2 for e in em]   # box corner (px), centered on the localization
-    yc = Float64[e.y / ps - box_size / 2 for e in em]
+    # µm → px via SMLMData's convention (pixel k centred at (k-0.5)·ps); the heatmap draws cell k centred at k.
+    pxpy = [SMLMData.physical_to_pixel(e.x, e.y, ps) for e in em]
+    xc = Float64[px - box_size / 2 for (px, _) in pxpy]   # box corner (px), centred on the localization
+    yc = Float64[py - box_size / 2 for (_, py) in pxpy]
     fr = Int[e.frame for e in em]
     colors = fill(:red, length(em))
     _save_box_overlay(dir, "inference_overlay.png", movie, xc, yc, fr, Float64(box_size), colors;
