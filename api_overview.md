@@ -120,24 +120,6 @@ Logged after each step execution.
 StepInfo(number, cfg, elapsed_s, summary_dict; info=typed_info)
 ```
 
-### DataSource
-
-Lazy loading wrapper for image data.
-
-**Fields:**
-- `images::Union{AbstractArray{<:Real,3}, Nothing}` - Single dataset
-- `images_vec::Union{Vector{<:AbstractArray{<:Real,3}}, Nothing}` - Multiple datasets
-- `path::Union{String, Nothing}` - File path for deferred loading
-- `frame_range::Union{UnitRange{Int}, Nothing}` - Frame subset
-
-**Constructors:**
-```julia
-DataSource(images)           # Single 3D array (1 dataset)
-DataSource(image_stacks)     # Vector{Array} (N datasets)
-DataSource(path)             # File path (lazy loading)
-DataSource()                 # Empty (file-based DetectFitConfig)
-```
-
 ### MultiTargetConfig
 
 Configuration for multi-channel analysis.
