@@ -334,7 +334,7 @@ Dispatch on `Vector{BasicSMLD}` inside a `MultiTargetConfig` pipeline:
 
 - `CompositeRenderConfig(; strategy, zoom, colors, clip_percentile=:auto, scalebar)` —
   multi-channel composite render (pass-through).
-- `CrossAlignConfig(; align=AlignConfig(method=:entropy, maxn=100, histbinsize=0.05))` — cross-channel alignment; every parameter (incl. `verbose`) lives on the upstream `AlignConfig`
+- `CrossAlignConfig(; align=AlignConfig())` — cross-channel alignment; every parameter (incl. `verbose`) lives on the upstream `AlignConfig`
   (state-modifying; returns aligned SMLDs).
 - `CrossCorrConfig(; r_max, dr)` — pairwise cross-correlation g(r).
 
