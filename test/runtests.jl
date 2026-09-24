@@ -1444,7 +1444,10 @@ if SMLM_TEST_FULL
             )
             (result, info) = analyze(images, cfg)
 
-            step_dirs = filter(isdir, readdir(outdir; join=true))
+            # Numbered step directories only -- outdir also holds a top-level
+            # .cache/ (checkpoint cache, see common.jl cache_dir) that isn't a step.
+            step_dirs = filter(f -> isdir(f) && occursin(r"^\d\d_", basename(f)),
+                                readdir(outdir; join=true))
             @test length(step_dirs) == length(cfg.steps)
 
             tomls = String[]
