@@ -537,7 +537,7 @@ mt = MultiTargetConfig(
     labels = [:IgG, :C1q],
     steps = [
         CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
-        CrossAlignConfig(method=:entropy),
+        CrossAlignConfig(),
         CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
     ],
     outdir = "output/cell1/",
