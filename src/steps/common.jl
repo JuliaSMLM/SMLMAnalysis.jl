@@ -431,8 +431,18 @@ function _toml_value(v)::String
     end
 end
 
-"""Write config fields to TOML. Nested structs become [section] blocks."""
-function _write_config_fields!(io::IO, cfg; section::String="")
+"""
+Write config fields to TOML. Nested structs become `[section]` blocks.
+
+`table_prefix` is prepended to a nested section's table header (e.g.
+`"steps."` so `[strategy]` becomes `[steps.strategy]`), which in TOML attaches
+the table to the most recently opened `[[steps]]` array-of-tables element
+instead of floating at the document root. Callers writing a single config to
+its own file (the common case) leave it at the default `""`; only the
+multi-target writer, which packs several steps' `[[steps]]` entries into one
+file, needs it.
+"""
+function _write_config_fields!(io::IO, cfg; section::String="", table_prefix::String="")
     for f in fieldnames(typeof(cfg))
         v = getfield(cfg, f)
         v isa SMLMData.AbstractCamera && continue
@@ -440,9 +450,9 @@ function _write_config_fields!(io::IO, cfg; section::String="")
         key = section == "" ? string(f) : "$(section).$(f)"
         if _is_config_struct(v)
             # Nested config -> TOML section
-            println(io, "\n[$f]")
+            println(io, "\n[$(table_prefix)$f]")
             println(io, "type = \"$(nameof(typeof(v)))\"")
-            _write_config_fields!(io, v; section=string(f))
+            _write_config_fields!(io, v; section=string(f), table_prefix=table_prefix)
         else
             # Every scalar value goes through _toml_value for valid TOML
             # (escaped strings, tuple/range/vector arrays, inf/nan floats).
