@@ -90,7 +90,7 @@ function analyze(smld::BasicSMLD, cfg::FilterConfig;
 
     if checkpoint >= Checkpoint.ALL
         dir = step_outdir(outdir, step_number, cfg)
-        _save_step_smld(dir, filtered; filename="smld_filtered.jld2")
+        _save_step_smld(dir, filtered; filename="smld_filtered.h5")
     end
 
     (filtered, StepInfo(step_number, cfg, t, _step_summary(filter_info); info=filter_info))

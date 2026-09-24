@@ -10,7 +10,7 @@
 using HDF5
 using Dates
 
-const SMLD_FORMAT_VERSION = "1.2"  # v1.2: Added σ_xy position covariance (round-trips Emitter2DFit/Sigma/SigmaXY); v1.1: PSF width fields
+const SMLD_FORMAT_VERSION = "1.3"  # v1.3: polygon / CellPolygon user metadata (edge-classify geometry); v1.2: Added σ_xy position covariance (round-trips Emitter2DFit/Sigma/SigmaXY); v1.1: PSF width fields
 
 # Version stamped into saved files ("unknown" if the module has no project version)
 function _get_package_version()
@@ -44,6 +44,9 @@ Supports all emitter types including GaussMLE types with fitted PSF widths:
 /camera             - Camera type and calibration
 /drift_correction   - Drift model coefficients (if provided)
 /provenance         - Source file info
+/user_metadata      - smld.metadata values: strings, numbers, numeric/string arrays,
+                      polygons (Vector{NTuple{2,Float64}}) and Vector{CellPolygon}
+                      (edge-classify geometry); other types are skipped with a warning
 ```
 
 # Example
@@ -222,7 +225,11 @@ function save_smld(filepath::String, smld::BasicSMLD{T,E};
             if !isempty(smld.metadata)
                 user_meta = create_group(fid, "user_metadata")
                 for (key, value) in smld.metadata
-                    if value isa Union{String, Number, AbstractArray{<:Number}} ||
+                    if value isa AbstractVector{NTuple{2,Float64}}
+                        _write_polygon!(user_meta, key, value)
+                    elseif value isa AbstractVector{SMLMClustering.CellPolygon}
+                        _write_cellpolygons!(user_meta, key, value)
+                    elseif value isa Union{String, Number, AbstractArray{<:Number}} ||
                        value isa AbstractArray{<:String}
                         towrite = value isa AbstractArray{<:String} ? collect(value) : value
                         try
@@ -287,6 +294,55 @@ function _save_drift_model!(group, dm, compression::Int)
         end
         group["inter_shifts", compress=compression] = inter_shifts
     end
+end
+
+# ------------------------------------------------------------
+# Polygon user metadata (v1.3): edge-classify geometry. Each value is tagged with a
+# `kind` attribute so load_smld rebuilds the exact Julia type.
+#   "polygon"      — Vector{NTuple{2,Float64}} as an N×2 Float64 dataset
+#   "cellpolygons" — Vector{CellPolygon} as a group of flat arrays: `outer` (M×2) with
+#                    `outer_offsets` (n_cells+1, 0-based), `hole_vertices` (K×2) with
+#                    `hole_offsets` (n_holes+1, 0-based), and `hole_cell` (n_holes, 1-based)
+# ------------------------------------------------------------
+_polygon_matrix(p) = Float64[v[j] for v in p, j in 1:2]
+_matrix_polygon(m::AbstractMatrix) = NTuple{2,Float64}[(Float64(m[i, 1]), Float64(m[i, 2])) for i in axes(m, 1)]
+_offsets(lengths) = cumsum(vcat(0, collect(Int, lengths)))
+
+function _write_polygon!(parent, key::String, poly)
+    parent[key] = _polygon_matrix(poly)
+    HDF5.attributes(parent[key])["kind"] = "polygon"
+end
+
+function _write_cellpolygons!(parent, key::String, cells)
+    g = create_group(parent, key)
+    HDF5.attributes(g)["kind"] = "cellpolygons"
+    holes = [h for c in cells for h in c.holes]
+    g["outer"] = _polygon_matrix([v for c in cells for v in c.outer])
+    g["outer_offsets"] = _offsets(length(c.outer) for c in cells)
+    g["hole_vertices"] = _polygon_matrix([v for h in holes for v in h])
+    g["hole_offsets"] = _offsets(length(h) for h in holes)
+    g["hole_cell"] = Int[i for (i, c) in enumerate(cells) for _ in c.holes]
+end
+
+function _read_cellpolygons(g)
+    outer = _matrix_polygon(read(g["outer"]))
+    oo = read(g["outer_offsets"])
+    hv = _matrix_polygon(read(g["hole_vertices"]))
+    ho = read(g["hole_offsets"])
+    hc = read(g["hole_cell"])
+    cells = [SMLMClustering.CellPolygon(outer[oo[i]+1:oo[i+1]], Vector{NTuple{2,Float64}}[])
+             for i in 1:length(oo)-1]
+    for k in eachindex(hc)
+        push!(cells[hc[k]].holes, hv[ho[k]+1:ho[k+1]])
+    end
+    return cells
+end
+
+function _read_user_metadata(obj)
+    kind = haskey(HDF5.attributes(obj), "kind") ? read(HDF5.attributes(obj)["kind"]) : nothing
+    kind == "cellpolygons" && return _read_cellpolygons(obj)
+    kind == "polygon" && return _matrix_polygon(read(obj))
+    return read(obj)
 end
 
 function _parse_version_pair(v::AbstractString)
@@ -470,7 +526,7 @@ function load_smld(filepath::String)
         if haskey(fid, "user_metadata")
             user_meta = fid["user_metadata"]
             for key in keys(user_meta)
-                metadata[key] = read(user_meta[key])
+                metadata[key] = _read_user_metadata(user_meta[key])
             end
         end
 

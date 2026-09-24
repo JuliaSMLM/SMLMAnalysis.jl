@@ -57,7 +57,7 @@ function analyze(smld::BasicSMLD, cfg::SMLMClustering.AbstractClusterConfig;
         _save_info!(dir, info)
     end
     if dir !== nothing && checkpoint >= Checkpoint.ALL
-        _save_step_smld(dir, smld_out; filename="smld_clustered.jld2")
+        _save_step_smld(dir, smld_out; filename="smld_clustered.h5")
     end
 
     v >= Verbosity.PROGRESS && @info "  → $(info.n_clusters) clusters, $(info.n_clustered)/$(info.n_locs_in) clustered ($(info.n_noise) noise)"

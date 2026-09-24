@@ -41,7 +41,7 @@ analyze(smld, FrameConnectConfig(max_frame_gap = 5))   # → (combined_smld, Ste
 - **Artifacts** (when `outdir` is set): the config and `FrameConnectInfo` are
   written; at `STANDARD` verbosity `track_histogram.png` (localizations-per-track
   distribution with mean/median and an estimated `k_off`) and `stats.md` are
-  added. The combined SMLD is checkpointed to `smld_combined.jld2` at
+  added. The combined SMLD is checkpointed to `smld_combined.h5` at
   `Checkpoint.EXPENSIVE`. When calibration is enabled, `uncertainty_calibration.png`,
   `shift_histogram.png`, and `drift_jitter.png` are also written.
 

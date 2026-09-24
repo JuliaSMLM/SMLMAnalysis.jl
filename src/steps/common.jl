@@ -514,27 +514,27 @@ end
 """
     _save_step_smld(dir, smld; filename, kwargs...)
 
-Persist a step's output SMLD via JLD2 so downstream iteration (e.g., diagnostic
-plots, parameter sweeps, BaGoL re-runs) can resume without re-running the
-upstream pipeline. The SMLD is stored under the `smld` key:
+Persist a step's output SMLD as a versioned HDF5 file via `save_smld` so
+downstream iteration (e.g., diagnostic plots, parameter sweeps, BaGoL re-runs) can
+resume without re-running the upstream pipeline:
 
 ```julia
-data = JLD2.load("path/smld_corrected.jld2")
-smld = data["smld"]   # full BasicSMLD with camera, n_frames, n_datasets
+smld = load_smld("path/smld_corrected.h5")   # full BasicSMLD with camera, n_frames, n_datasets
 ```
 
-Extra named values are stored as additional top-level keys (e.g., pass
-`drift_model=drift_model` to embed the drift model alongside the SMLD).
+Keyword arguments are passed to `save_smld` (e.g., `drift_model=drift_model`). The
+drift model is stored as its coefficients and comes back from `load_smld` as a
+`Dict` in `metadata["drift_correction"]`, not as a model object.
 
 No-op if `dir` is nothing.
 """
 function _save_step_smld(dir::Union{String,Nothing}, smld::BasicSMLD;
-                          filename::String="smld.jld2",
+                          filename::String="smld.h5",
                           kwargs...)
     dir === nothing && return nothing
     mkpath(dir)   # ensure the step dir exists (some steps gate their own mkpath behind verbosity)
     path = joinpath(dir, filename)
-    JLD2.jldsave(path; smld=smld, kwargs...)
+    save_smld(path, smld; kwargs...)
     return path
 end
 

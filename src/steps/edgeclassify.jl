@@ -73,7 +73,7 @@ function analyze(smld::BasicSMLD, cfg::SMLMClustering.AbstractEdgeClassifyConfig
         SMLMClustering.plot_edge_report(report; output_dir=dir, prefix="edge")
     end
     if dir !== nothing && checkpoint >= Checkpoint.ALL
-        _save_step_smld(dir, smld_out; filename="smld_edgeclassified.jld2")
+        _save_step_smld(dir, smld_out; filename="smld_edgeclassified.h5")
     end
 
     v >= Verbosity.PROGRESS && @info "  → $(info.n_interior) interior / $(info.n_membrane) membrane / $(info.n_outside) outside, $(length(info.cells)) cell(s)"

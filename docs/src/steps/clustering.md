@@ -50,7 +50,7 @@ analyze(smld, HopkinsConfig())                              # → (smld, StepInf
 - **Artifacts** (when `outdir` is set, written into `{NN}_{backend}/` — e.g.
   `03_dbscan/`, `04_hopkins/`): at `STANDARD` verbosity, `config.toml` and
   `info.toml`. Labeling backends additionally checkpoint the labeled SMLD to
-  `smld_clustered.jld2`, but only at `Checkpoint.ALL` (clustering is not treated
+  `smld_clustered.h5`, but only at `Checkpoint.ALL` (clustering is not treated
   as an "expensive" step, so this is *not* written by the default
   `Checkpoint.EXPENSIVE`).
 

@@ -537,6 +537,54 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         end
     end
 
+    @testset "step checkpoint is versioned HDF5" begin
+        # _save_step_smld writes through save_smld; load_smld must read it back unchanged.
+        cam = IdealCamera(16, 16, 0.1)
+        em = [Emitter2DFit{Float64}(0.1i, 0.2i, 1000.0 + i, 5.0, 0.01, 0.012, 20.0, 0.5;
+                                    frame=i, dataset=1 + (i % 2)) for i in 1:6]
+        smld = BasicSMLD(em, cam, 6, 2, Dict{String,Any}())
+        dm = SMLMDriftCorrection.LegendrePolynomial(smld; degree=2)
+        mktempdir() do dir
+            p = SMLMAnalysis._save_step_smld(joinpath(dir, "03_driftcorrect"), smld;
+                                             filename="smld_corrected.h5", drift_model=dm)
+            @test p == joinpath(dir, "03_driftcorrect", "smld_corrected.h5") && isfile(p)
+            s2 = load_smld(p)
+            @test s2.emitters isa Vector{Emitter2DFit{Float64}}
+            @test all(getfield(a, f) == getfield(b, f) for (a, b) in zip(em, s2.emitters)
+                      for f in fieldnames(Emitter2DFit{Float64}))
+            @test (s2.n_frames, s2.n_datasets) == (6, 2)
+            @test s2.camera.pixel_edges_x == cam.pixel_edges_x
+            @test s2.metadata["drift_correction"]["model_type"] == "LegendrePolynomial"
+            @test SMLMAnalysis._save_step_smld(nothing, smld; filename="x.h5") === nothing
+        end
+    end
+
+    @testset "edge geometry metadata round-trip" begin
+        # Edge classification mirrors its cell mask into metadata; save_smld must keep it.
+        CP = SMLMAnalysis.SMLMClustering.CellPolygon
+        sq(x0, s) = NTuple{2,Float64}[(x0, x0), (x0 + s, x0), (x0 + s, x0 + s), (x0, x0 + s)]
+        cells = [CP(sq(0.0, 4.0), [sq(0.5, 1.0), sq(2.0, 0.5)]),   # two holes
+                 CP(sq(5.0, 1.0)),                                # no holes
+                 CP(sq(7.0, 2.0), [sq(7.5, 0.2)])]
+        outer = sq(0.0, 4.0)
+        cam = IdealCamera(16, 16, 0.1)
+        em = [Emitter2DFit{Float64}(0.1i, 0.1i, 1000.0, 5.0, 0.01, 0.01, 20.0, 0.5; frame=i) for i in 1:3]
+        cellkey(cs) = [(c.outer, c.holes) for c in cs]   # CellPolygon has no ==; compare its fields
+        mktempdir() do dir
+            md = Dict{String,Any}("edge_cells" => cells, "edge_outer_polygon" => outer,
+                                  "empty_cells" => CP[], "empty_polygon" => NTuple{2,Float64}[])
+            p = joinpath(dir, "geom.h5")
+            save_smld(p, BasicSMLD(em, cam, 3, 1, md))
+            m2 = load_smld(p).metadata
+            @test m2["edge_outer_polygon"] == outer
+            @test m2["edge_outer_polygon"] isa Vector{NTuple{2,Float64}}
+            @test m2["edge_cells"] isa Vector{CP}
+            @test cellkey(m2["edge_cells"]) == cellkey(cells)
+            @test m2["empty_cells"] isa Vector{CP} && isempty(m2["empty_cells"])
+            @test m2["empty_polygon"] isa Vector{NTuple{2,Float64}} && isempty(m2["empty_polygon"])
+        end
+    end
+
     @testset "TOML provenance is valid" begin
         # Provenance files are named .toml and must parse back. The hand-rolled
         # serializer used to emit invalid TOML for tuples ((500.0, Inf)), ranges
