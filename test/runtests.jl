@@ -358,6 +358,15 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test length(cc.pixel_edges_y) - 1 == length(roi_y)   # y pixel count = #rows
     end
 
+    @testset "roi refuses a step-level DetectFit camera" begin
+        # roi crops only the pipeline camera; a camera on DetectFitConfig would stay
+        # full-frame and offset every localization by the crop origin.
+        cam = IdealCamera(16, 16, 0.1)
+        cfg = AnalysisConfig(camera=cam, roi=(x=3:10, y=3:10),
+                             steps=[DetectFitConfig(camera=cam)], outdir=nothing)
+        @test_throws ArgumentError analyze(zeros(Float32, 16, 16, 2), cfg)
+    end
+
     @testset "SMLD HDF5 round-trip" begin
         # Locks the σ_xy regression: save_smld/load_smld must preserve every
         # emitter field, including the position covariance σ_xy that the
