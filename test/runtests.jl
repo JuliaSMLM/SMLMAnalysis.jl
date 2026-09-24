@@ -302,7 +302,7 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         ch2 = Dict{Symbol,AnalysisResult}(:A => AnalysisResult(a, nothing, nothing),
                                           :B => AnalysisResult(b, nothing, nothing))
         mktempdir() do dir
-            SMLMAnalysis._finalize_channels!(ch2, state[1:1], labels, dir; verbose=0)
+            @test_logs (:warn, r"not saved") SMLMAnalysis._finalize_channels!(ch2, state[1:1], labels, dir; verbose=0)
             @test ch2[:B].smld === b
             @test isempty(readdir(dir))
         end
@@ -433,7 +433,8 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         cam = IdealCamera(16, 16, 0.1)
         cfg = AnalysisConfig(camera=cam, roi=(x=3:10, y=3:10),
                              steps=[DetectFitConfig(camera=cam)], outdir=nothing)
-        @test_throws ArgumentError analyze(zeros(Float32, 16, 16, 2), cfg)
+        # Match the message: all-zero frames also throw an (unrelated) ArgumentError downstream.
+        @test_throws r"DetectFitConfig has its own camera" analyze(zeros(Float32, 16, 16, 2), cfg)
     end
 
     @testset "SMLD HDF5 round-trip" begin
@@ -614,6 +615,13 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
     end
 
     @testset "TOML provenance is valid" begin
+        # Upstream field names outside TOML's bare-key set (DriftConfig.σ_loc) must be
+        # written as quoted keys, or config.toml fails to parse.
+        let io = IOBuffer()
+            SMLMAnalysis._write_config_fields!(io, DriftConfig())
+            parsed = TOML.parse(String(take!(io)))
+            @test haskey(parsed, "σ_loc")
+        end
         # Provenance files are named .toml and must parse back. The hand-rolled
         # serializer used to emit invalid TOML for tuples ((500.0, Inf)), ranges
         # (1:19), symbol vectors ([:red, :blue]), and unescaped strings. _toml_value
