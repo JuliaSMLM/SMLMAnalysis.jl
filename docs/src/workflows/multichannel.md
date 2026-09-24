@@ -38,7 +38,7 @@ mt = MultiTargetConfig(
     colors = [:cyan, :magenta],
     steps = [
         CompositeRenderConfig(zoom = 20.0, strategy = GaussianRender()),
-        CrossAlignConfig(method = :entropy),
+        CrossAlignConfig(),
         CompositeRenderConfig(zoom = 20.0, strategy = GaussianRender()),  # post-alignment
         CrossCorrConfig(r_max = 0.5, dr = 0.005),
     ],

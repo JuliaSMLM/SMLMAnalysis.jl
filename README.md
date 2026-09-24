@@ -215,7 +215,7 @@ mt = MultiTargetConfig(
     colors = [:cyan, :magenta],
     steps = [
         CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
-        CrossAlignConfig(method=:entropy),
+        CrossAlignConfig(),
         CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
     ],
     outdir = "output/cell1/",

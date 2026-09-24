@@ -201,14 +201,16 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
 
         # CrossAlignConfig defaults
         ca = CrossAlignConfig()
-        @test ca.method == :entropy
-        @test ca.maxn == 100
-        @test ca.histbinsize == 0.05
+        @test ca.align isa AlignConfig
+        @test ca.align.method == :entropy
+        @test ca.align.maxn == 100
+        @test ca.align.histbinsize == 0.05
 
-        # CrossAlignConfig custom
-        ca2 = CrossAlignConfig(method=:fft, maxn=50)
-        @test ca2.method == :fft
-        @test ca2.maxn == 50
+        # CrossAlignConfig custom: upstream AlignConfig passed through as-is
+        ca2 = CrossAlignConfig(align=AlignConfig(method=:fft, maxn=50, verbose=1))
+        @test ca2.align.method == :fft
+        @test ca2.align.maxn == 50
+        @test ca2.align.verbose == 1
 
         # step_name dispatch
         @test SMLMAnalysis.step_name(cr) == "compositerender"
@@ -252,11 +254,11 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
                                cam, 10, 1, Dict{String,Any}())
         a, b = mk(0.0, 0.0), mk(0.08, -0.05)
         labels = [:A, :B]
-        (state, si) = analyze([a, b], CrossAlignConfig(method=:fft);
+        (state, si) = analyze([a, b], CrossAlignConfig();
             outdir=nothing, step_number=1, verbose=0, colors=[:cyan, :magenta], labels=labels)
         meanxy(s) = (sum(e.x for e in s.emitters) / N, sum(e.y for e in s.emitters) / N)
         off(s1, s2) = hypot((meanxy(s2) .- meanxy(s1))...)
-        @test off(state[1], state[2]) < off(a, b) / 2  # known ~94 nm offset mostly removed
+        @test off(state[1], state[2]) < 0.010          # known ~94 nm offset removed to < 10 nm
 
         channels = Dict{Symbol,AnalysisResult}(:A => AnalysisResult(a, a, nothing),
                                                :B => AnalysisResult(b, b, nothing))
@@ -267,7 +269,7 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test mtr[:B].smld_connected === b                # pre-alignment data kept
             saved = load_smld(joinpath(dir, "smld_B.h5"))
             @test [e.x for e in saved.emitters] == [e.x for e in state[2].emitters]
-            @test off(saved, b) > 0.02                        # file holds aligned, not raw, B
+            @test off(saved, b) > 0.05                        # file holds aligned, not raw, B
         end
 
         # A state that is not one SMLD per label leaves the channel results alone

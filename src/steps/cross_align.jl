@@ -10,18 +10,24 @@ Dispatches on `CrossAlignConfig <: AbstractMultiTargetStep` operating on
 
 Configuration for cross-channel alignment in the multi-target pipeline.
 
-Wraps `SMLMDriftCorrection.align_smld` which uses entropy-based or
-FFT cross-correlation alignment.
+Wraps `SMLMDriftCorrection.align_smld`, which uses entropy-based or FFT
+cross-correlation alignment. Every alignment parameter lives on the upstream
+`AlignConfig` (re-exported), which is passed through unchanged — including its
+`verbose` field.
 
 # Fields
-- `method`: Alignment method — `:entropy` (CC + entropy refinement) or `:fft` (CC only)
-- `maxn`: Maximum neighbors for entropy calculation (default: 100)
-- `histbinsize`: Histogram bin size in μm for cross-correlation (default: 0.05)
+- `align::AlignConfig`: upstream alignment config (default:
+  `AlignConfig(method=:entropy, maxn=100, histbinsize=0.05)`)
+
+# Example
+```julia
+CrossAlignConfig()                                        # entropy (CC + entropy refinement)
+CrossAlignConfig(align=AlignConfig(method=:fft))          # CC only
+```
 """
 @kwdef struct CrossAlignConfig <: AbstractMultiTargetStep
-    method::Symbol = :entropy
-    maxn::Int = 100
-    histbinsize::Float64 = 0.05
+    align::SMLMDriftCorrection.AlignConfig =
+        SMLMDriftCorrection.AlignConfig(method=:entropy, maxn=100, histbinsize=0.05)
 end
 
 step_name(::CrossAlignConfig) = "crossalign"
@@ -38,18 +44,11 @@ function crossalign_step(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossAlignCon
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
 
-    v >= Verbosity.PROGRESS && @info "[$step_number] crossalign: $(cfg.method), $(length(smlds)) channels"
-
-    align_cfg = SMLMDriftCorrection.AlignConfig(
-        method=cfg.method,
-        maxn=cfg.maxn,
-        histbinsize=cfg.histbinsize,
-        verbose=v >= Verbosity.DETAILED ? 1 : 0,
-    )
+    v >= Verbosity.PROGRESS && @info "[$step_number] crossalign: $(cfg.align.method), $(length(smlds)) channels"
 
     local aligned_smlds, align_info
     t = @elapsed begin
-        (aligned_smlds, align_info) = SMLMDriftCorrection.align_smld(smlds, align_cfg)
+        (aligned_smlds, align_info) = SMLMDriftCorrection.align_smld(smlds, cfg.align)
     end
 
     # Convert shifts to nm and compute max
@@ -94,7 +93,7 @@ function _write_crossalign_stats(dir, cfg::CrossAlignConfig, align_info, shifts_
     open(filepath, "w") do io
         println(io, "# Cross-Channel Alignment Statistics\n")
         println(io, "## Summary")
-        println(io, "- **Method**: $(cfg.method)")
+        println(io, "- **Method**: $(cfg.align.method)")
         println(io, "- **Channels**: $(length(align_info.shifts))")
         println(io, "- **Max shift**: $(round(max_shift_nm, digits=1)) nm")
         println(io, "- **Time**: $(round(t, digits=2))s")
