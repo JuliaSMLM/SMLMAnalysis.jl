@@ -9,27 +9,13 @@
 
 using HDF5
 using Dates
-import Pkg
 
 const SMLD_FORMAT_VERSION = "1.2"  # v1.2: Added σ_xy position covariance (round-trips Emitter2DFit/Sigma/SigmaXY); v1.1: PSF width fields
 
-# Get package version safely
+# Version stamped into saved files ("unknown" if the module has no project version)
 function _get_package_version()
-    try
-        # Try to get version from the SMLMAnalysis package directly
-        for (uuid, pkg) in Pkg.dependencies()
-            if pkg.name == "SMLMAnalysis"
-                return string(pkg.version)
-            end
-        end
-        # Fallback: try project version
-        proj = Pkg.project()
-        if proj.version !== nothing
-            return string(proj.version)
-        end
-    catch
-    end
-    return "unknown"
+    v = pkgversion(@__MODULE__)
+    return v === nothing ? "unknown" : string(v)
 end
 
 """
