@@ -1085,6 +1085,47 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test all(cam.offset .≈ 100.0f0)
         end
     end
+
+    @testset "atomic saves refuse a directory destination" begin
+        # mv(...; force=true) does rm(path; recursive=true) first, which would delete a
+        # directory (and everything inside it) sitting at the destination path. Both
+        # save_smld and save_pipeline_state must refuse rather than do that.
+        cam = IdealCamera(8, 8, 0.1)
+        T = Float64
+        es = [Emitter2DFit{T}(0.1i, 0.2i, 1000.0 + i, 5.0, 0.01, 0.012, 20.0, 0.5, 0.4, i, 1, 0, i)
+              for i in 1:3]
+        smld = BasicSMLD(es, cam, 10, 1, Dict{String,Any}())
+
+        mktempdir() do dir
+            # save_smld: destination is a directory, not a file.
+            target = joinpath(dir, "out.h5")
+            mkdir(target)
+            inner = joinpath(target, "keepme.txt")
+            write(inner, "do not delete me")
+
+            @test_throws ArgumentError save_smld(target, smld)
+            @test isdir(target)
+            @test isfile(inner)
+            @test read(inner, String) == "do not delete me"
+            @test isempty(filter(f -> f != "keepme.txt", readdir(target)))
+
+            # A normal save (no pre-existing directory) still works and leaves no
+            # stray temp files behind.
+            good = joinpath(dir, "good.h5")
+            save_smld(good, smld)
+            @test isfile(good)
+            @test isempty(filter(f -> f ∉ ("out.h5", "good.h5"), readdir(dir)))
+
+            # save_pipeline_state: same refusal guard, tested directly rather than via
+            # a full pipeline run (AnalysisResult is cheap to construct by hand; a full
+            # analyze() run is not).
+            result = AnalysisResult(smld, nothing, nothing)
+            target2 = joinpath(dir, "ckpt.jld2")
+            mkdir(target2)
+            @test_throws ArgumentError save_pipeline_state(target2, result)
+            @test isdir(target2)
+        end
+    end
 end
 
 if SMLM_TEST_FULL

@@ -86,8 +86,17 @@ function save_smld(filepath::String, smld::BasicSMLD{T,E};
 
     # Atomic write: build the file at a sibling temp path, then rename over the
     # target. A crash mid-write leaves the existing (resumable) file untouched
-    # instead of a half-truncated one. mv is atomic within a filesystem.
-    tmp = filepath * ".tmp"
+    # instead of a half-truncated one. mv is atomic within a filesystem. Refuse
+    # outright to write through a symlink, or onto any existing non-regular-file
+    # path (e.g. a directory): `mv(...; force=true)` does `rm(path; recursive=true)`
+    # first, which would delete a directory and everything inside it. tmp uses a
+    # unique name (not `filepath * ".tmp"`) so two concurrent saves to the same
+    # target don't clobber each other's temp file.
+    islink(filepath) && throw(ArgumentError("$filepath is a symlink; refusing to write through it"))
+    (ispath(filepath) && !isfile(filepath)) &&
+        throw(ArgumentError("$filepath exists and is not a regular file; refusing to replace it"))
+    tmp = tempname(dirname(abspath(filepath)); cleanup=false)
+    try
     h5open(tmp, "w") do fid
         # === /metadata group ===
         meta = create_group(fid, "metadata")
@@ -254,6 +263,10 @@ function save_smld(filepath::String, smld::BasicSMLD{T,E};
     end
 
     mv(tmp, filepath; force=true)
+    catch
+        rm(tmp; force=true)
+        rethrow()
+    end
     return filepath
 end
 
