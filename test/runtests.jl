@@ -239,6 +239,47 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test AlignInfo === SMLMDriftCorrection.AlignInfo
     end
 
+    @testset "multi-target saves and returns aligned channels" begin
+        # Phase-2 dispatch + result assembly on hand-made SMLDs (no detectfit): channel
+        # B is channel A shifted by a known offset; after CrossAlign the saved file,
+        # result[:B].smld and result.smlds[2] must all be the aligned data.
+        rng = MersenneTwister(3)
+        cam = IdealCamera(64, 64, 0.1)
+        N = 1500
+        xs = 1.0 .+ 4.4 .* rand(rng, N); ys = 1.0 .+ 4.4 .* rand(rng, N)
+        mk(dx, dy) = BasicSMLD([Emitter2DFit{Float64}(xs[i] + dx, ys[i] + dy, 1000.0, 10.0,
+                                    0.01, 0.01, 50.0, 2.0; frame=1 + (i % 10)) for i in 1:N],
+                               cam, 10, 1, Dict{String,Any}())
+        a, b = mk(0.0, 0.0), mk(0.08, -0.05)
+        labels = [:A, :B]
+        (state, si) = analyze([a, b], CrossAlignConfig(method=:fft);
+            outdir=nothing, step_number=1, verbose=0, colors=[:cyan, :magenta], labels=labels)
+        meanxy(s) = (sum(e.x for e in s.emitters) / N, sum(e.y for e in s.emitters) / N)
+        off(s1, s2) = hypot((meanxy(s2) .- meanxy(s1))...)
+        @test off(state[1], state[2]) < off(a, b) / 2  # known ~94 nm offset mostly removed
+
+        channels = Dict{Symbol,AnalysisResult}(:A => AnalysisResult(a, a, nothing),
+                                               :B => AnalysisResult(b, b, nothing))
+        mktempdir() do dir
+            SMLMAnalysis._finalize_channels!(channels, state, labels, dir; verbose=0)
+            mtr = MultiTargetResult(labels, state, channels, [si], dir)
+            @test mtr[:B].smld === mtr.smlds[2] === state[2]
+            @test mtr[:B].smld_connected === b                # pre-alignment data kept
+            saved = load_smld(joinpath(dir, "smld_B.h5"))
+            @test [e.x for e in saved.emitters] == [e.x for e in state[2].emitters]
+            @test off(saved, b) > 0.02                        # file holds aligned, not raw, B
+        end
+
+        # A state that is not one SMLD per label leaves the channel results alone
+        ch2 = Dict{Symbol,AnalysisResult}(:A => AnalysisResult(a, nothing, nothing),
+                                          :B => AnalysisResult(b, nothing, nothing))
+        mktempdir() do dir
+            SMLMAnalysis._finalize_channels!(ch2, state[1:1], labels, dir; verbose=0)
+            @test ch2[:B].smld === b
+            @test isempty(readdir(dir))
+        end
+    end
+
     @testset "crosscorr g(r)" begin
         # Exercises the internal _compute_crosscorr for the three fixed defects:
         # (a) bin-width consistency when r_max is NOT an integer multiple of dr,

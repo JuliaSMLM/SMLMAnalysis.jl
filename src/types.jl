@@ -560,14 +560,17 @@ the final SMLD vectors for composite rendering.
 
 # Fields
 - `labels::Vector{Symbol}`: Channel labels in order
-- `smlds::Vector{SMLMData.BasicSMLD}`: Per-channel SMLD results (may be aligned)
-- `channels::Dict{Symbol, AnalysisResult}`: Per-channel results
+- `smlds::Vector{SMLMData.BasicSMLD}`: Per-channel final SMLDs, after the multi-target
+  steps (aligned if an alignment step ran)
+- `channels::Dict{Symbol, AnalysisResult}`: Per-channel results. `.smld` is the same
+  final (aligned) data as `smlds`; `.smld_connected` is the channel's pre-alignment
+  connected data and `.drift_model` its drift model
 - `step_infos::Vector{StepInfo}`: Multi-target step history
 - `outdir::String`: Output directory
 
 # Indexing
 ```julia
-result[:IgG]         # Access per-channel AnalysisResult
+result[:IgG]         # Per-channel AnalysisResult (.smld == result.smlds[1])
 keys(result)         # Channel labels
 result.smlds         # Vector of all SMLDs
 ```

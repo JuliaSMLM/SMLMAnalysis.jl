@@ -140,7 +140,7 @@ Result of multi-channel analysis. Access per-channel results via `result[:label]
 **Fields:**
 - `labels::Vector{Symbol}` - Channel labels
 - `smlds::Vector{BasicSMLD}` - Per-channel SMLDs (aligned if a `CrossAlignConfig` ran)
-- `channels::Dict{Symbol, AnalysisResult}` - Per-channel results
+- `channels::Dict{Symbol, AnalysisResult}` - Per-channel results; `.smld` is the same final (aligned) data as `smlds`, `.smld_connected` the channel's pre-alignment connected data
 - `step_infos::Vector{StepInfo}` - The cross-channel steps' infos
 - `outdir::String` - Root output directory
 

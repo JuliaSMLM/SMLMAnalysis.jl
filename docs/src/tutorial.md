@@ -331,7 +331,7 @@ mt = MultiTargetConfig(
     (image_stacks_lines,    config_lines),
 ], mt)
 
-result[:clusters].smld     # per-channel SMLD
+result[:clusters].smld     # per-channel final SMLD (== result.smlds[1])
 result.smlds               # Vector{BasicSMLD} (all channels, possibly aligned)
 info.channels[:clusters]   # per-channel AnalysisInfo
 ```

@@ -1,9 +1,9 @@
 """
 Multi-target (multi-color) analysis orchestration.
 
-Loops over per-channel `analyze(data, config)` calls, saves per-channel SMLDs,
-then dispatches multi-target steps (composite renders, cross-channel alignment, etc.)
-on the resulting `Vector{BasicSMLD}`.
+Loops over per-channel `analyze(data, config)` calls, dispatches multi-target steps
+(composite renders, cross-channel alignment, etc.) on the resulting
+`Vector{BasicSMLD}`, then saves the final (aligned) per-channel SMLDs.
 """
 
 """
@@ -92,11 +92,6 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
         channel_results[label] = result
         channel_infos[label] = info
         push!(smlds, result.smld)
-
-        # Save per-channel SMLD
-        smld_path = joinpath(config.outdir, "smld_$(label).h5")
-        save_smld(smld_path, result.smld; drift_model=result.drift_model)
-        v >= Verbosity.PROGRESS && @info "  Saved $smld_path ($(length(result.smld.emitters)) localizations)"
     end
 
     # Phase 2: Multi-target step dispatch
@@ -112,6 +107,9 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
         push!(step_infos, step_info)
     end
 
+    # Phase 3: save the final (aligned) per-channel SMLDs and point the channel results at them
+    _finalize_channels!(channel_results, state, config.labels, config.outdir; verbose=v)
+
     # Write composite readme
     _write_composite_readme!(composite_dir, config, state, step_infos)
 
@@ -126,6 +124,31 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
     v >= Verbosity.PROGRESS && @info "Multi-target complete: $(sum(length(s.emitters) for s in state)) total localizations ($(round(elapsed_s, digits=1))s)"
 
     (result, info)
+end
+
+"""
+    _finalize_channels!(channel_results, state, labels, outdir; verbose) -> channel_results
+
+Save `smld_<label>.h5` from the post-multi-target-step `state` and rebuild each
+channel's `AnalysisResult` around it, so `result[label].smld` agrees with
+`result.smlds`. `smld_connected` and `drift_model` stay from the channel run.
+Only applies when `state` holds one entry per label (a custom multi-target step
+could return a different-length vector, which leaves the label mapping undefined).
+"""
+function _finalize_channels!(channel_results::Dict{Symbol,AnalysisResult}, state,
+                             labels::Vector{Symbol}, outdir::String;
+                             verbose::Int=Verbosity.STANDARD)
+    (state isa AbstractVector && length(state) == length(labels)) || return channel_results
+    for (i, label) in enumerate(labels)
+        smld = state[i]
+        smld isa SMLMData.BasicSMLD || continue
+        cr = channel_results[label]
+        smld_path = joinpath(outdir, "smld_$(label).h5")
+        save_smld(smld_path, smld; drift_model=cr.drift_model)
+        verbose >= Verbosity.PROGRESS && @info "  Saved $smld_path ($(length(smld.emitters)) localizations)"
+        channel_results[label] = AnalysisResult(smld, cr.smld_connected, cr.drift_model)
+    end
+    channel_results
 end
 
 """
