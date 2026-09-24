@@ -1056,6 +1056,35 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test uninstall_agent_guide(dir = dir) == [skill]
         end
     end
+
+    @testset "MIC H5 calibration units" begin
+        # SMITE convention: RawData = Gain_stored*photons + Offset (ADU); CCDVar is the
+        # dark variance in ADU². Regression coverage for the ADU→e⁻ readnoise conversion
+        # (load_mic_h5_calibration_for_scmos must divide by the stored ADU/e⁻ gain, not
+        # just take sqrt(variance)).
+        mktempdir() do dir
+            path = joinpath(dir, "cal.h5")
+            offset_adu = fill(100.0, 4, 4)
+            gain_stored = fill(2.0, 4, 4)  # ADU/e⁻
+            var_adu2 = fill(4.0, 4, 4)     # ADU² → readnoise = sqrt(4)/2 = 1.0 e⁻ rms
+            SMLMAnalysis.HDF5.h5open(path, "w") do f
+                g = SMLMAnalysis.HDF5.create_group(f, "Calibration")
+                g["CCDOffset"] = offset_adu
+                g["CCDVar"] = var_adu2
+                g["Gain"] = gain_stored
+            end
+
+            cal = load_mic_h5_calibration_for_scmos(path)
+            @test all(cal.readnoise .≈ 1.0f0)
+            @test all(cal.gain .≈ 0.5f0)     # e⁻/ADU = 1/gain_stored
+            @test all(cal.offset .≈ 100.0f0)
+
+            cam = build_camera_from_mic_h5(path; pixel_size=0.1)
+            @test all(cam.readnoise .≈ 1.0f0)
+            @test all(cam.gain .≈ 0.5f0)
+            @test all(cam.offset .≈ 100.0f0)
+        end
+    end
 end
 
 if SMLM_TEST_FULL
