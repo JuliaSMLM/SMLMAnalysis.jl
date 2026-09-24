@@ -206,7 +206,11 @@ function _save_multitarget_config!(config::MultiTargetConfig)
         for (i, s) in enumerate(config.steps)
             println(io, "[[steps]]")
             println(io, "type = \"$(nameof(typeof(s)))\"")
-            _write_config_fields!(io, s)
+            # table_prefix="steps." so a nested config field (e.g. CompositeRenderConfig's
+            # strategy, CrossAlignConfig's align) writes as `[steps.strategy]`, which TOML
+            # attaches to this array-of-tables element, not a document-root `[strategy]`
+            # that the next `[[steps]]` entry would collide with.
+            _write_config_fields!(io, s; table_prefix="steps.")
             println(io)
         end
     end

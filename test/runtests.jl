@@ -241,6 +241,32 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test AlignInfo === SMLMDriftCorrection.AlignInfo
     end
 
+    @testset "multi-target config.toml is valid with two nested-config steps" begin
+        # CompositeRenderConfig (strategy) and CrossAlignConfig (align) each carry a
+        # nested config field. Written into the same multi_target_config.toml under
+        # separate [[steps]] entries, a bare `[strategy]` / `[align]` table floats to
+        # the document root and collides across steps -- TOML.parsefile then fails
+        # with "key already defined". table_prefix="steps." scopes each nested table
+        # to its own [[steps]] array element instead.
+        mktempdir() do dir
+            mt = MultiTargetConfig(
+                labels=[:A, :B],
+                steps=[
+                    CompositeRenderConfig(),
+                    CrossAlignConfig(),
+                    CompositeRenderConfig(),
+                ],
+                outdir=dir,
+            )
+            SMLMAnalysis._save_multitarget_config!(mt)
+            parsed = TOML.parsefile(joinpath(dir, "multi_target_config.toml"))
+            @test length(parsed["steps"]) == 3
+            @test haskey(parsed["steps"][1], "strategy")
+            @test haskey(parsed["steps"][2], "align")
+            @test haskey(parsed["steps"][3], "strategy")
+        end
+    end
+
     @testset "multi-target saves and returns aligned channels" begin
         # Phase-2 dispatch + result assembly on hand-made SMLDs (no detectfit): channel
         # B is channel A shifted by a known offset; after CrossAlign the saved file,
