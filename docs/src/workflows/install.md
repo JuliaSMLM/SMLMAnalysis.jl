@@ -19,21 +19,20 @@ CurrentModule = SMLMAnalysis
 
 ## Installing
 
-Once SMLMAnalysis is registered in the Julia General registry, installation will
-be the usual one-liner:
-
 ```julia
 using Pkg
 Pkg.add("SMLMAnalysis")
 ```
 
-!!! note "Registration status"
-    SMLMAnalysis is being prepared for registration; every JuliaSMLM dependency
-    is already in the General registry. Until SMLMAnalysis itself is registered,
-    install from source as below. (This page will switch to `Pkg.add` once the
-    registration is live.)
+```julia
+using SMLMAnalysis
+```
 
-### From source (current)
+`using SMLMAnalysis` re-exports the key ecosystem types and verbs (cameras,
+emitter types, the step configs, `cluster`, `render`, `run_bagol`,
+`frameconnect`, …), so for most work no further imports are needed.
+
+### Development install (from source)
 
 Clone the repository and instantiate its environment:
 
@@ -43,15 +42,7 @@ cd SMLMAnalysis.jl
 julia -t auto --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
 
-Then:
-
-```julia
-using SMLMAnalysis
-```
-
-`using SMLMAnalysis` re-exports the key ecosystem types and verbs (cameras,
-emitter types, the step configs, `cluster`, `render`, `run_bagol`,
-`frameconnect`, …), so for most work no further imports are needed.
+Then `using SMLMAnalysis` as above.
 
 ## Verifying the install
 
