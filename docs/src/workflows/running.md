@@ -162,7 +162,7 @@ config = AnalysisConfig(camera = cam, steps = [...], verbose = Verbosity.DETAILE
 ## Checkpoint levels
 
 The `checkpoint` field (default `Checkpoint.EXPENSIVE`) controls which steps
-persist their output `smld` to disk as a JLD2 checkpoint, so you can resume
+persist their output `smld` to disk as an HDF5 checkpoint (`load_smld`), so you can resume
 downstream work without re-running upstream steps:
 
 | Level | Constant | Writes |

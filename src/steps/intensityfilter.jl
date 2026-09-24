@@ -161,7 +161,7 @@ function analyze(smld::BasicSMLD, cfg::IntensityFilterConfig;
 
     if checkpoint >= Checkpoint.ALL
         dir = step_outdir(outdir, step_number, cfg)
-        _save_step_smld(dir, filtered; filename="smld_intensity.jld2")
+        _save_step_smld(dir, filtered; filename="smld_intensity.h5")
     end
 
     (filtered, StepInfo(step_number, cfg, t, _step_summary(if_info); info=if_info))

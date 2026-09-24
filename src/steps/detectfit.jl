@@ -266,7 +266,7 @@ function _detectfit_core(image_stacks, camera::SMLMData.AbstractCamera, cfg::Det
         end
 
         if checkpoint >= Checkpoint.EXPENSIVE
-            _save_step_smld(dir, smld; filename="smld_raw.jld2")
+            _save_step_smld(dir, smld; filename="smld_raw.h5")
         end
     end
 

@@ -78,7 +78,7 @@ Complete pipeline description.
 - `roi::Union{NamedTuple, Nothing}` - Optional ROI as `(x=100:300, y=50:200)`
 - `outdir::Union{String, Nothing}` - Output directory
 - `verbose::Int` - Verbosity level (default: `Verbosity.STANDARD`)
-- `checkpoint::Int` - Which steps persist their output SMLD as JLD2 (default: `Checkpoint.EXPENSIVE`; see Checkpoint Levels)
+- `checkpoint::Int` - Which steps persist their output SMLD as HDF5 `smld_*.h5` (default: `Checkpoint.EXPENSIVE`; see Checkpoint Levels)
 
 ### AnalysisInfo
 

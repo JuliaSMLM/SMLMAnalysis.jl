@@ -65,7 +65,7 @@ state.step_infos       # Vector{StepInfo}
 ## Step checkpoints during a run
 
 When `AnalysisConfig.outdir` is set, the pipeline can drop each step's output
-`BasicSMLD` as a JLD2 file inside that step's subdirectory, so you can resume from
+`BasicSMLD` as an HDF5 file (`smld_*.h5`) inside that step's subdirectory, so you can resume from
 any step or sweep a later step's parameters without re-running the upstream work.
 What gets written is controlled by the `checkpoint` level (see
 [Running a Pipeline](@ref) for the level semantics and how to set it):
@@ -81,21 +81,21 @@ Each step uses a stable filename, so you always know where to look:
 
 | Step | Checkpoint file | Written at |
 |------|-----------------|------------|
-| Detection & Fitting | `smld_raw.jld2` | `EXPENSIVE` |
-| Frame Connection | `smld_combined.jld2` | `EXPENSIVE` |
-| Drift Correction | `smld_corrected.jld2` (drift model embedded) | `EXPENSIVE` |
-| BaGoL | `smld_bagol.jld2` | `EXPENSIVE` |
-| Filter | `smld_filtered.jld2` | `ALL` |
-| Intensity Filter | `smld_intensity.jld2` | `ALL` |
-| Density Filter | `smld_density.jld2` | `ALL` |
-| Clustering | `smld_clustered.jld2` | `ALL` |
+| Detection & Fitting | `smld_raw.h5` | `EXPENSIVE` |
+| Frame Connection | `smld_combined.h5` | `EXPENSIVE` |
+| Drift Correction | `smld_corrected.h5` (drift model coefficients in `metadata["drift_correction"]`) | `EXPENSIVE` |
+| BaGoL | `smld_bagol.h5` | `EXPENSIVE` |
+| Filter | `smld_filtered.h5` | `ALL` |
+| Intensity Filter | `smld_intensity.h5` | `ALL` |
+| Density Filter | `smld_density.h5` | `ALL` |
+| Clustering | `smld_clustered.h5` | `ALL` |
+| Edge Classification | `smld_edgeclassified.h5` (cell-mask geometry in metadata) | `ALL` |
 
-The SMLD is stored under the `smld` key, so reload it with JLD2 and pick up the
-pipeline from there:
+Checkpoints are versioned HDF5 files written by `save_smld`, so reload one with
+`load_smld` and pick up the pipeline from there:
 
 ```julia
-using JLD2
-smld = JLD2.load("output/01_detectfit/smld_raw.jld2")["smld"]   # full BasicSMLD
+smld = load_smld("output/01_detectfit/smld_raw.h5")   # full BasicSMLD
 (smld, _) = analyze(smld, FilterConfig(photons = (500.0, Inf)))
 ```
 

@@ -36,7 +36,7 @@ analyze(smld, DensityFilterConfig())   # → (filtered_smld, StepInfo)
 - **Artifacts** (when `outdir` is set): `stats.md` (input/output/rejected counts
   and the chosen threshold) and `neighbor_histogram.png` (the neighbor-count
   distribution with the threshold marked) at `STANDARD` verbosity, plus the saved
-  config and info. A filtered SMLD is checkpointed to `smld_density.jld2` at
+  config and info. A filtered SMLD is checkpointed to `smld_density.h5` at
   `Checkpoint.ALL`.
 
 ## Concept

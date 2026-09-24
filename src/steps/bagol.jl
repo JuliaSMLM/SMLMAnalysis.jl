@@ -69,7 +69,7 @@ function bagol_step(smld::BasicSMLD, cfg::BaGoLConfig;
     end
 
     if dir !== nothing && checkpoint >= Checkpoint.EXPENSIVE
-        _save_step_smld(dir, bagol_smld; filename="smld_bagol.jld2")
+        _save_step_smld(dir, bagol_smld; filename="smld_bagol.h5")
     end
 
     v >= Verbosity.PROGRESS && @info "  → $n_emitters emitters from $n_locs_in locs ($(compression)x compression, $(round(diagnostics.final_μ, digits=1)) locs/emitter)"

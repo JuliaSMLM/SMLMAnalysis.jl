@@ -50,7 +50,7 @@ BaGoL makes two assumptions, both of which dictate preprocessing:
   `render_report` — `render_mapn`, `render_sr`, `render_circles`, and
   `render_partitions` (at `zoom = 50`); and, when `se_adjust = :auto`, a finder
   diagnostic plot (`plot_se_adjust`). The grouped SMLD is checkpointed to
-  `smld_bagol.jld2` at `Checkpoint.EXPENSIVE`.
+  `smld_bagol.h5` at `Checkpoint.EXPENSIVE`.
 
 ## Concept
 

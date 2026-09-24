@@ -41,7 +41,7 @@ analyze(smld, FilterConfig(photons = (500.0, Inf)))   # → (filtered_smld, Step
   is present; gracefully skipped for a standalone filter), and a post-filter
   `localizations_per_frame.png`. At `DETAILED` verbosity a `detailed_stats.md`
   gives per-criterion pass/fail counts. A filtered SMLD is checkpointed to
-  `smld_filtered.jld2` at `Checkpoint.ALL`.
+  `smld_filtered.h5` at `Checkpoint.ALL`.
 
 ## Concept
 
