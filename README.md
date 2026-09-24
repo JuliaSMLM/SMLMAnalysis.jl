@@ -15,7 +15,7 @@ Every step is a `…Config` you drop into an `AnalysisConfig` (or call standalon
 |---|---|---|
 | **Detection** (`DetectFitConfig`→`BoxerConfig`) | Finds candidate emitters / ROIs in the raw frames | Huang 2013 [¹](#references) |
 | **Fitting** (`DetectFitConfig`→`GaussMLEConfig`) | Maximum-likelihood localization reaching the Cramér–Rao bound; 2D/3D-astigmatic PSF models | Smith 2010 [²](#references); Huang 2013 [¹](#references) |
-| **Filter** (`FilterConfig`) | Quality cuts on photons, background, precision, track length, and the χ²/LLR goodness-of-fit **p-value** | Huang 2011 [³](#references) |
+| **Filter** (`FilterConfig`) | Quality cuts on photons, localization precision, PSF sigma, the χ²/LLR goodness-of-fit **p-value**, and (3D) axial position/precision | Huang 2011 [³](#references) |
 | **Intensity filter** (`IntensityFilterConfig`) | Rejects multi-emitter events via a Poisson upper-tail test against a fitted excitation-field model | *(native to this package)* |
 | **Density filter** (`DensityFilterConfig`) | Removes isolated localizations by local k-nearest-neighbor density | *(standard practice)* |
 | **Frame connection** (`FrameConnectConfig`) | Links repeated blinks of one fluorophore across frames (spatiotemporal LAP) | Schodt 2021 [⁴](#references) |
@@ -24,7 +24,7 @@ Every step is a `…Config` you drop into an `AnalysisConfig` (or call standalon
 | **Clustering** (`DBSCANConfig`, `HDBSCANConfig`, `HierarchicalConfig`, `VoronoiConfig`) | Groups localizations into clusters | DBSCAN: Ester 1996 [⁸](#references); HDBSCAN: Campello 2013 [⁹](#references); Voronoi/SR-Tesseler: Levet 2015 [¹⁰](#references) |
 | **Spatial statistics** (`HopkinsConfig`, `VoronoiDensityConfig`) | Clustering-tendency and local-density statistics | Hopkins 1954 [¹¹](#references); Levet 2015 [¹⁰](#references) |
 | **Cross-correlation** (`CrossCorrConfig`) | Pair-correlation *g(r)* between two channels (co-localization) | Sengupta 2011 [¹²](#references); Veatch 2012 [¹³](#references) |
-| **Edge classification** (`edgeclassify`) | Labels localizations as cell interior / membrane / outside | *(native to this package)* |
+| **Edge classification** (`KdeValleyConfig`, `OuterPolygonConfig`) | Labels localizations as cell interior / membrane / outside | Backed by [SMLMClustering](https://github.com/JuliaSMLM/SMLMClustering.jl) |
 | **Render / Composite** (`RenderConfig`, `CompositeRenderConfig`) | Super-resolution image; multi-color composite of aligned channels | *(visualization)* |
 | **Cross-channel align** (`CrossAlignConfig`) | Registers color channels (entropy / FFT cross-correlation) | Wester 2021 [⁶](#references) |
 
