@@ -8,7 +8,7 @@
 # isdir pre-check only gives a clearer message; rename's own failure is the guarantee.
 # The temp is removed on any failure, including InterruptException.
 function _replace_atomically(write!::Function, path::AbstractString)
-    (ispath(path) && isdir(path)) && throw(ArgumentError("$path is a directory; refusing to replace it"))
+    isdir(path) && throw(ArgumentError("$path is a directory; refusing to replace it"))
     tmp = tempname(dirname(abspath(path)); cleanup = false)
     try
         write!(tmp)
