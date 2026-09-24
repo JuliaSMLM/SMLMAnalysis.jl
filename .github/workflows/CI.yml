@@ -30,11 +30,8 @@ jobs:
           - ubuntu-latest
         arch:
           - x64
-        include:
-          # Run the end-to-end analyze() tier (SMLM_TEST_FULL) on the stable job so the
-          # full pipeline path is exercised in CI, not only the fast unit tier.
-          - version: '1'
-            full_tests: '1'
+    # The thorough tier (SMLM_TEST_FULL=1) runs locally, not in CI; CI runs the fast
+    # tier only, on this matrix plus the downgrade-compat job below.
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
@@ -44,8 +41,6 @@ jobs:
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
-        env:
-          SMLM_TEST_FULL: ${{ matrix.full_tests || '0' }}
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v5
         with:
