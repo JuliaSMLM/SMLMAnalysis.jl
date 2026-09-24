@@ -224,6 +224,7 @@ include("steps/edgeclassify.jl")
 # ============================================================
 # I/O
 # ============================================================
+include("io/atomic.jl")
 include("io/smld_io.jl")
 export save_smld, load_smld, smld_info
 

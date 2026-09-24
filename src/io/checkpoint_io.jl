@@ -124,15 +124,8 @@ function save_pipeline_state(path::String, result::AnalysisResult;
 
     # Atomic write: a checkpoint exists precisely to survive a crash, so it must not
     # be the thing corrupted by one. Write to a unique temp path in the same
-    # directory, then rename over the target. Refuse outright to write through a
-    # symlink, or onto any existing non-regular-file path (e.g. a directory):
-    # `mv(...; force=true)` does `rm(path; recursive=true)` first, which would
-    # delete a directory and everything inside it.
-    islink(path) && throw(ArgumentError("$path is a symlink; refusing to write through it"))
-    (ispath(path) && !isfile(path)) &&
-        throw(ArgumentError("$path exists and is not a regular file; refusing to replace it"))
-    tmp = tempname(dirname(abspath(path)); cleanup=false)
-    try
+    # directory, then rename(2) it over the target (see _replace_atomically).
+    _replace_atomically(path) do tmp
         jldsave(tmp;
             smld_cols = smld_cols,
             smld_raw_cols = smld_raw_cols,
@@ -142,10 +135,6 @@ function save_pipeline_state(path::String, result::AnalysisResult;
             camera = camera,
             checkpoint_version = 8
         )
-        mv(tmp, path; force=true)
-    catch
-        rm(tmp; force=true)
-        rethrow()
     end
 
     path
