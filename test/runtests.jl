@@ -1087,9 +1087,10 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
     end
 
     @testset "atomic saves refuse a directory destination" begin
-        # mv(...; force=true) does rm(path; recursive=true) first, which would delete a
-        # directory (and everything inside it) sitting at the destination path. Both
-        # save_smld and save_pipeline_state must refuse rather than do that.
+        # Saves go through _replace_atomically: temp file + rename(2). rename fails on a
+        # directory destination rather than deleting it (and everything inside it), so
+        # save_smld and save_pipeline_state must throw and leave the directory intact.
+        # The exception type differs by Julia version, so only a throw is asserted.
         cam = IdealCamera(8, 8, 0.1)
         T = Float64
         es = [Emitter2DFit{T}(0.1i, 0.2i, 1000.0 + i, 5.0, 0.01, 0.012, 20.0, 0.5, 0.4, i, 1, 0, i)
@@ -1103,7 +1104,7 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             inner = joinpath(target, "keepme.txt")
             write(inner, "do not delete me")
 
-            @test_throws ArgumentError save_smld(target, smld)
+            @test_throws Exception save_smld(target, smld)
             @test isdir(target)
             @test isfile(inner)
             @test read(inner, String) == "do not delete me"
@@ -1122,8 +1123,57 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             result = AnalysisResult(smld, nothing, nothing)
             target2 = joinpath(dir, "ckpt.jld2")
             mkdir(target2)
-            @test_throws ArgumentError save_pipeline_state(target2, result)
+            inner2 = joinpath(target2, "keepme.txt")
+            write(inner2, "do not delete me")
+            @test_throws Exception save_pipeline_state(target2, result)
             @test isdir(target2)
+            @test read(inner2, String) == "do not delete me"
+            @test isempty(filter(f -> f != "keepme.txt", readdir(target2)))
+        end
+
+        # A failing writer leaves no temp behind and never touches the destination.
+        mktempdir() do dir
+            p = joinpath(dir, "out.h5")
+            @test_throws ErrorException SMLMAnalysis._replace_atomically(tmp -> error("boom"), p)
+            @test !ispath(p)
+            @test isempty(readdir(dir))
+
+            write(p, "old content")
+            @test_throws ErrorException SMLMAnalysis._replace_atomically(p) do tmp
+                write(tmp, "partial")
+                error("boom")
+            end
+            @test read(p, String) == "old content"
+            @test readdir(dir) == ["out.h5"]
+        end
+
+        if !Sys.iswindows()
+            # A symlink destination is replaced as a directory entry, not written through.
+            mktempdir() do dir
+                target = joinpath(dir, "target.h5")
+                write(target, "target content")
+                link = joinpath(dir, "link.h5")
+                symlink(target, link)
+                save_smld(link, smld)
+                @test !islink(link)
+                @test isfile(link)
+                @test length(load_smld(link).emitters) == 3
+                @test read(target, String) == "target content"
+            end
+
+            # The saved file's mode follows the umask, as a direct create would
+            # (not the 0600 a mktemp-created temp would carry over).
+            mktempdir() do dir
+                p = joinpath(dir, "mode.h5")
+                mask = UInt32(0o022)
+                old = ccall(:umask, UInt32, (UInt32,), mask)
+                try
+                    save_smld(p, smld)
+                finally
+                    ccall(:umask, UInt32, (UInt32,), old)
+                end
+                @test filemode(p) & 0o777 == 0o666 & ~mask
+            end
         end
     end
 end

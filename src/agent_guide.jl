@@ -356,9 +356,9 @@ end
 # attacker could pre-place a symlink/hardlink at) + rename, so an existing hardlink at
 # `path` is replaced as a directory entry rather than truncated in place (which would
 # overwrite whatever inode the user's link points at). Refuses outright to write
-# through a symlink, or onto any existing non-regular-file path (e.g. a directory):
-# `mv(...; force = true)` does `rm(path; recursive = true)` first, which would delete a
-# directory and everything inside it. On any failure the temp file is removed so a
+# through a symlink, or onto any existing non-regular-file path (e.g. a directory).
+# The swap is a bare rename(2), never a recursive delete: it fails on a directory
+# destination rather than removing it. On any failure the temp file is removed so a
 # failed write never leaves stray temp files behind.
 function _write_atomic(path::AbstractString, content::AbstractString)
     islink(path) && throw(ArgumentError("$path is a symlink; refusing to write through it"))
@@ -368,7 +368,7 @@ function _write_atomic(path::AbstractString, content::AbstractString)
     try
         write(io, content)
         close(io)
-        mv(tmp, path; force = true)
+        Base.Filesystem.rename(tmp, path)
     catch
         close(io)
         rm(tmp; force = true)
