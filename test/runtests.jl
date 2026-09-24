@@ -1131,6 +1131,20 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test isempty(filter(f -> f != "keepme.txt", readdir(target2)))
         end
 
+        # Race: a directory appears at the destination after the isdir pre-check.
+        # rename(2) itself must refuse it (never a recursive delete), and the temp
+        # must be cleaned up. This is the property the pre-check cannot prove.
+        mktempdir() do dir
+            p = joinpath(dir, "out.h5")
+            @test_throws Exception SMLMAnalysis._replace_atomically(p) do tmp
+                write(tmp, "x")
+                mkdir(p)
+                write(joinpath(p, "keep"), "k")
+            end
+            @test read(joinpath(p, "keep"), String) == "k"
+            @test readdir(dir) == ["out.h5"]
+        end
+
         # A failing writer leaves no temp behind and never touches the destination.
         mktempdir() do dir
             p = joinpath(dir, "out.h5")
