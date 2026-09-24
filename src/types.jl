@@ -28,7 +28,7 @@ module Verbosity
 end
 
 # ============================================================
-# Checkpoint Levels (SMLD JLD2 persistence per step)
+# Checkpoint Levels (per-step SMLD persistence as HDF5 via save_smld)
 # ============================================================
 """
     Checkpoint

@@ -138,10 +138,16 @@ could return a different-length vector, which leaves the label mapping undefined
 function _finalize_channels!(channel_results::Dict{Symbol,AnalysisResult}, state,
                              labels::Vector{Symbol}, outdir::String;
                              verbose::Int=Verbosity.STANDARD)
-    (state isa AbstractVector && length(state) == length(labels)) || return channel_results
+    if !(state isa AbstractVector && length(state) == length(labels))
+        @warn "Multi-target: final state is not one SMLD per channel; per-channel smld_<label>.h5 not saved and results left pre-alignment" labels typeof(state)
+        return channel_results
+    end
     for (i, label) in enumerate(labels)
         smld = state[i]
-        smld isa SMLMData.BasicSMLD || continue
+        if !(smld isa SMLMData.BasicSMLD)
+            @warn "Multi-target: final state for channel $label is a $(typeof(smld)), not an SMLD; smld_$(label).h5 not saved"
+            continue
+        end
         cr = channel_results[label]
         smld_path = joinpath(outdir, "smld_$(label).h5")
         save_smld(smld_path, smld; drift_model=cr.drift_model)

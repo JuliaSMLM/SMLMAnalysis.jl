@@ -17,7 +17,7 @@ cross-correlation alignment. Every alignment parameter lives on the upstream
 
 # Fields
 - `align::AlignConfig`: upstream alignment config (default:
-  `AlignConfig(method=:entropy, maxn=100, histbinsize=0.05)`)
+  `AlignConfig()`, i.e. upstream's defaults)
 
 # Example
 ```julia
@@ -27,7 +27,7 @@ CrossAlignConfig(align=AlignConfig(method=:fft))          # CC only
 """
 @kwdef struct CrossAlignConfig <: AbstractMultiTargetStep
     align::SMLMDriftCorrection.AlignConfig =
-        SMLMDriftCorrection.AlignConfig(method=:entropy, maxn=100, histbinsize=0.05)
+        SMLMDriftCorrection.AlignConfig()
 end
 
 step_name(::CrossAlignConfig) = "crossalign"
