@@ -91,14 +91,14 @@ end
 """
     load_mic_h5_calibration(filepath) -> NamedTuple
 
-Load calibration data from MIC H5 file.
+Load raw calibration data from a MIC H5 file, in SMITE's stored units (unconverted).
 
-Returns NamedTuple with (offset, variance, gain) as 2D arrays.
+Returns NamedTuple with (offset, variance, gain) as 2D arrays:
+- `offset`: per-pixel dark offset, ADU
+- `variance`: per-pixel dark variance, ADU² (`Calibration/CCDVar`)
+- `gain`: per-pixel gain as STORED, ADU/e⁻ (SMITE convention: RawData = gain*photons + offset)
 
-NOTE: The gain in MIC H5 files is INVERTED compared to our convention.
-Our convention: ADU = photons * gain, so gain ≈ 0.24 e-/ADU
-MIC H5: gain stored as ~4, which is 1/gain in our convention
-Use load_mic_h5_calibration_for_scmos() to get corrected values.
+Use `load_mic_h5_calibration_for_scmos()` to convert these to SCMOSCamera's units.
 """
 function load_mic_h5_calibration(filepath::String)
     h5open(filepath, "r") do f
@@ -112,18 +112,19 @@ end
 """
     load_mic_h5_calibration_for_scmos(filepath) -> NamedTuple
 
-Load calibration data and convert to SCMOSCamera convention.
+Load calibration data and convert from SMITE's stored units to SCMOSCamera's convention.
 
 Returns NamedTuple with:
-- offset: per-pixel offset (unchanged)
-- readnoise: per-pixel readnoise (sqrt of variance)
-- gain: per-pixel gain (INVERTED from stored value)
+- `offset`: per-pixel offset, ADU (unchanged)
+- `readnoise`: per-pixel readnoise, e⁻ rms = `sqrt(variance) / gain_stored` (SMITE converts
+  read noise variance from ADU² to e⁻² via `CCDVar ./ Gain.^2`; this is the rms of that)
+- `gain`: per-pixel gain, e⁻/ADU = `1 / gain_stored` (inverted from the stored ADU/e⁻ value)
 """
 function load_mic_h5_calibration_for_scmos(filepath::String)
     cal = load_mic_h5_calibration(filepath)
     return (
         offset = Float32.(cal.offset),
-        readnoise = Float32.(sqrt.(cal.variance)),
+        readnoise = Float32.(sqrt.(cal.variance) ./ cal.gain),
         gain = Float32.(1.0 ./ cal.gain)  # Invert gain to our convention
     )
 end
@@ -131,7 +132,9 @@ end
 """
     build_camera_from_mic_h5(filepath; pixel_size, qe=1.0) -> SCMOSCamera
 
-Build an SCMOSCamera from MIC H5 per-pixel calibration data (offset, readnoise, gain).
+Build an SCMOSCamera from MIC H5 per-pixel calibration data: offset (ADU), readnoise
+(e⁻ rms), and gain (e⁻/ADU), converted from the file's stored units by
+`load_mic_h5_calibration_for_scmos`.
 
 Pixel size and QE are not stored in MIC H5 files and must be provided.
 

@@ -1056,6 +1056,140 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test uninstall_agent_guide(dir = dir) == [skill]
         end
     end
+
+    @testset "MIC H5 calibration units" begin
+        # SMITE convention: RawData = Gain_stored*photons + Offset (ADU); CCDVar is the
+        # dark variance in ADU². Regression coverage for the ADU→e⁻ readnoise conversion
+        # (load_mic_h5_calibration_for_scmos must divide by the stored ADU/e⁻ gain, not
+        # just take sqrt(variance)).
+        mktempdir() do dir
+            path = joinpath(dir, "cal.h5")
+            offset_adu = fill(100.0, 4, 4)
+            gain_stored = fill(2.0, 4, 4)  # ADU/e⁻
+            var_adu2 = fill(4.0, 4, 4)     # ADU² → readnoise = sqrt(4)/2 = 1.0 e⁻ rms
+            SMLMAnalysis.HDF5.h5open(path, "w") do f
+                g = SMLMAnalysis.HDF5.create_group(f, "Calibration")
+                g["CCDOffset"] = offset_adu
+                g["CCDVar"] = var_adu2
+                g["Gain"] = gain_stored
+            end
+
+            cal = load_mic_h5_calibration_for_scmos(path)
+            @test all(cal.readnoise .≈ 1.0f0)
+            @test all(cal.gain .≈ 0.5f0)     # e⁻/ADU = 1/gain_stored
+            @test all(cal.offset .≈ 100.0f0)
+
+            cam = build_camera_from_mic_h5(path; pixel_size=0.1)
+            @test all(cam.readnoise .≈ 1.0f0)
+            @test all(cam.gain .≈ 0.5f0)
+            @test all(cam.offset .≈ 100.0f0)
+        end
+    end
+
+    @testset "atomic saves refuse a directory destination" begin
+        # Saves go through _replace_atomically: temp file + rename(2). rename fails on a
+        # directory destination rather than deleting it (and everything inside it), so
+        # save_smld and save_pipeline_state must throw and leave the directory intact.
+        # The exception type differs by Julia version, so only a throw is asserted.
+        cam = IdealCamera(8, 8, 0.1)
+        T = Float64
+        es = [Emitter2DFit{T}(0.1i, 0.2i, 1000.0 + i, 5.0, 0.01, 0.012, 20.0, 0.5, 0.4, i, 1, 0, i)
+              for i in 1:3]
+        smld = BasicSMLD(es, cam, 10, 1, Dict{String,Any}())
+
+        mktempdir() do dir
+            # save_smld: destination is a directory, not a file.
+            target = joinpath(dir, "out.h5")
+            mkdir(target)
+            inner = joinpath(target, "keepme.txt")
+            write(inner, "do not delete me")
+
+            @test_throws Exception save_smld(target, smld)
+            @test isdir(target)
+            @test isfile(inner)
+            @test read(inner, String) == "do not delete me"
+            @test isempty(filter(f -> f != "keepme.txt", readdir(target)))
+
+            # A normal save (no pre-existing directory) still works and leaves no
+            # stray temp files behind.
+            good = joinpath(dir, "good.h5")
+            save_smld(good, smld)
+            @test isfile(good)
+            @test isempty(filter(f -> f ∉ ("out.h5", "good.h5"), readdir(dir)))
+
+            # save_pipeline_state: same refusal guard, tested directly rather than via
+            # a full pipeline run (AnalysisResult is cheap to construct by hand; a full
+            # analyze() run is not).
+            result = AnalysisResult(smld, nothing, nothing)
+            target2 = joinpath(dir, "ckpt.jld2")
+            mkdir(target2)
+            inner2 = joinpath(target2, "keepme.txt")
+            write(inner2, "do not delete me")
+            @test_throws Exception save_pipeline_state(target2, result)
+            @test isdir(target2)
+            @test read(inner2, String) == "do not delete me"
+            @test isempty(filter(f -> f != "keepme.txt", readdir(target2)))
+        end
+
+        # Race: a directory appears at the destination after the isdir pre-check.
+        # rename(2) itself must refuse it (never a recursive delete), and the temp
+        # must be cleaned up. This is the property the pre-check cannot prove.
+        mktempdir() do dir
+            p = joinpath(dir, "out.h5")
+            @test_throws Exception SMLMAnalysis._replace_atomically(p) do tmp
+                write(tmp, "x")
+                mkdir(p)
+                write(joinpath(p, "keep"), "k")
+            end
+            @test read(joinpath(p, "keep"), String) == "k"
+            @test readdir(dir) == ["out.h5"]
+        end
+
+        # A failing writer leaves no temp behind and never touches the destination.
+        mktempdir() do dir
+            p = joinpath(dir, "out.h5")
+            @test_throws ErrorException SMLMAnalysis._replace_atomically(tmp -> error("boom"), p)
+            @test !ispath(p)
+            @test isempty(readdir(dir))
+
+            write(p, "old content")
+            @test_throws ErrorException SMLMAnalysis._replace_atomically(p) do tmp
+                write(tmp, "partial")
+                error("boom")
+            end
+            @test read(p, String) == "old content"
+            @test readdir(dir) == ["out.h5"]
+        end
+
+        if !Sys.iswindows()
+            # A symlink destination is replaced as a directory entry, not written through.
+            mktempdir() do dir
+                target = joinpath(dir, "target.h5")
+                write(target, "target content")
+                link = joinpath(dir, "link.h5")
+                symlink(target, link)
+                save_smld(link, smld)
+                @test !islink(link)
+                @test isfile(link)
+                @test length(load_smld(link).emitters) == 3
+                @test read(target, String) == "target content"
+            end
+
+            # The saved file's mode follows the umask, as a direct create would
+            # (not the 0600 a mktemp-created temp would carry over).
+            mktempdir() do dir
+                p = joinpath(dir, "mode.h5")
+                mask = UInt32(0o022)
+                old = ccall(:umask, UInt32, (UInt32,), mask)
+                try
+                    save_smld(p, smld)
+                finally
+                    ccall(:umask, UInt32, (UInt32,), old)
+                end
+                @test filemode(p) & 0o777 == 0o666 & ~mask
+            end
+        end
+    end
 end
 
 if SMLM_TEST_FULL

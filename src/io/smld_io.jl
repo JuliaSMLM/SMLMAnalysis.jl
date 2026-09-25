@@ -84,176 +84,175 @@ function save_smld(filepath::String, smld::BasicSMLD{T,E};
     has_sigma_xy = n > 0 && hasproperty(smld.emitters[1], :σx)  # Emitter2DFitSigmaXY
     has_pvalue = n > 0 && hasproperty(smld.emitters[1], :pvalue)
 
-    # Atomic write: build the file at a sibling temp path, then rename over the
-    # target. A crash mid-write leaves the existing (resumable) file untouched
-    # instead of a half-truncated one. mv is atomic within a filesystem.
-    tmp = filepath * ".tmp"
-    h5open(tmp, "w") do fid
-        # === /metadata group ===
-        meta = create_group(fid, "metadata")
-        meta["format_version"] = SMLD_FORMAT_VERSION
-        meta["package_name"] = "SMLMAnalysis"
-        meta["package_version"] = _get_package_version()
-        meta["emitter_type"] = emitter_type_name
-        meta["element_type"] = string(T)
-        meta["is_3d"] = is_3d
-        meta["has_psf_sigma"] = has_sigma
-        meta["has_psf_sigma_xy"] = has_sigma_xy
-        meta["has_pvalue"] = has_pvalue
-        meta["save_timestamp"] = Dates.format(now(), "yyyy-mm-ddTHH:MM:SS")
-        meta["n_frames"] = smld.n_frames
-        meta["n_datasets"] = smld.n_datasets
-        meta["n_emitters"] = n
+    # Atomic write: build the file at a unique sibling temp path, then rename(2) it
+    # over the target (see _replace_atomically). A crash mid-write leaves the existing
+    # (resumable) file untouched instead of a half-truncated one.
+    _replace_atomically(filepath) do tmp
+        h5open(tmp, "w") do fid
+            # === /metadata group ===
+            meta = create_group(fid, "metadata")
+            meta["format_version"] = SMLD_FORMAT_VERSION
+            meta["package_name"] = "SMLMAnalysis"
+            meta["package_version"] = _get_package_version()
+            meta["emitter_type"] = emitter_type_name
+            meta["element_type"] = string(T)
+            meta["is_3d"] = is_3d
+            meta["has_psf_sigma"] = has_sigma
+            meta["has_psf_sigma_xy"] = has_sigma_xy
+            meta["has_pvalue"] = has_pvalue
+            meta["save_timestamp"] = Dates.format(now(), "yyyy-mm-ddTHH:MM:SS")
+            meta["n_frames"] = smld.n_frames
+            meta["n_datasets"] = smld.n_datasets
+            meta["n_emitters"] = n
 
-        # === /emitters group ===
-        em = create_group(fid, "emitters")
+            # === /emitters group ===
+            em = create_group(fid, "emitters")
 
-        if n > 0
-            # Core fields (all emitter types)
-            x = [e.x for e in smld.emitters]
-            y = [e.y for e in smld.emitters]
-            photons = [e.photons for e in smld.emitters]
-            bg = [e.bg for e in smld.emitters]
-            σ_x = [e.σ_x for e in smld.emitters]
-            σ_y = [e.σ_y for e in smld.emitters]
-            σ_photons = [e.σ_photons for e in smld.emitters]
-            σ_bg = [e.σ_bg for e in smld.emitters]
-            frame = Int32[e.frame for e in smld.emitters]
-            dataset = Int32[e.dataset for e in smld.emitters]
-            track_id = Int32[e.track_id for e in smld.emitters]
-            id = Int32[e.id for e in smld.emitters]
+            if n > 0
+                # Core fields (all emitter types)
+                x = [e.x for e in smld.emitters]
+                y = [e.y for e in smld.emitters]
+                photons = [e.photons for e in smld.emitters]
+                bg = [e.bg for e in smld.emitters]
+                σ_x = [e.σ_x for e in smld.emitters]
+                σ_y = [e.σ_y for e in smld.emitters]
+                σ_photons = [e.σ_photons for e in smld.emitters]
+                σ_bg = [e.σ_bg for e in smld.emitters]
+                frame = Int32[e.frame for e in smld.emitters]
+                dataset = Int32[e.dataset for e in smld.emitters]
+                track_id = Int32[e.track_id for e in smld.emitters]
+                id = Int32[e.id for e in smld.emitters]
 
-            # Write core fields
-            em["x", compress=compression] = x
-            em["y", compress=compression] = y
-            em["photons", compress=compression] = photons
-            em["bg", compress=compression] = bg
-            em["sigma_x", compress=compression] = σ_x
-            em["sigma_y", compress=compression] = σ_y
-            em["sigma_photons", compress=compression] = σ_photons
-            em["sigma_bg", compress=compression] = σ_bg
-            em["frame", compress=compression] = frame
-            em["dataset", compress=compression] = dataset
-            em["track_id", compress=compression] = track_id
-            em["id", compress=compression] = id
+                # Write core fields
+                em["x", compress=compression] = x
+                em["y", compress=compression] = y
+                em["photons", compress=compression] = photons
+                em["bg", compress=compression] = bg
+                em["sigma_x", compress=compression] = σ_x
+                em["sigma_y", compress=compression] = σ_y
+                em["sigma_photons", compress=compression] = σ_photons
+                em["sigma_bg", compress=compression] = σ_bg
+                em["frame", compress=compression] = frame
+                em["dataset", compress=compression] = dataset
+                em["track_id", compress=compression] = track_id
+                em["id", compress=compression] = id
 
-            # Position covariance σ_xy (present on Emitter2DFit / Emitter2DFitSigma / SigmaXY)
-            if hasproperty(smld.emitters[1], :σ_xy)
-                em["sigma_xy", compress=compression] = [e.σ_xy for e in smld.emitters]
-            end
-
-            # 3D fields
-            if is_3d
-                z = [e.z for e in smld.emitters]
-                σ_z = [e.σ_z for e in smld.emitters]
-                em["z", compress=compression] = z
-                em["sigma_z", compress=compression] = σ_z
-                # Off-diagonal position covariances (present on 3D fit types)
-                if hasproperty(smld.emitters[1], :σ_xz)
-                    em["sigma_xz", compress=compression] = [e.σ_xz for e in smld.emitters]
-                    em["sigma_yz", compress=compression] = [e.σ_yz for e in smld.emitters]
+                # Position covariance σ_xy (present on Emitter2DFit / Emitter2DFitSigma / SigmaXY)
+                if hasproperty(smld.emitters[1], :σ_xy)
+                    em["sigma_xy", compress=compression] = [e.σ_xy for e in smld.emitters]
                 end
-            end
 
-            # GaussMLE Emitter2DFitSigma fields (isotropic PSF)
-            if has_sigma
-                psf_sigma = [e.σ for e in smld.emitters]
-                em["psf_sigma", compress=compression] = psf_sigma
-
-                if hasproperty(smld.emitters[1], :σ_σ)
-                    σ_sigma = [e.σ_σ for e in smld.emitters]
-                    em["sigma_psf_sigma", compress=compression] = σ_sigma
-                end
-            end
-
-            # GaussMLE Emitter2DFitSigmaXY fields (anisotropic PSF)
-            if has_sigma_xy
-                psf_sigma_x = [e.σx for e in smld.emitters]
-                psf_sigma_y = [e.σy for e in smld.emitters]
-                em["psf_sigma_x", compress=compression] = psf_sigma_x
-                em["psf_sigma_y", compress=compression] = psf_sigma_y
-
-                if hasproperty(smld.emitters[1], :σ_σx)
-                    σ_sigma_x = [e.σ_σx for e in smld.emitters]
-                    σ_sigma_y = [e.σ_σy for e in smld.emitters]
-                    em["sigma_psf_sigma_x", compress=compression] = σ_sigma_x
-                    em["sigma_psf_sigma_y", compress=compression] = σ_sigma_y
-                end
-            end
-
-            # p-value (GaussMLE emitters)
-            if has_pvalue
-                pvalue = [e.pvalue for e in smld.emitters]
-                em["pvalue", compress=compression] = pvalue
-            end
-        end
-
-        # === /camera group ===
-        cam = create_group(fid, "camera")
-        camera = smld.camera
-
-        cam["type"] = camera isa IdealCamera ? "IdealCamera" : "SCMOSCamera"
-        cam["pixel_edges_x", compress=compression] = collect(camera.pixel_edges_x)
-        cam["pixel_edges_y", compress=compression] = collect(camera.pixel_edges_y)
-
-        if camera isa SCMOSCamera
-            # Store calibration data (handle scalars vs arrays)
-            if camera.offset isa AbstractArray
-                cam["offset", compress=compression] = collect(camera.offset)
-            else
-                cam["offset"] = camera.offset
-            end
-            if camera.gain isa AbstractArray
-                cam["gain", compress=compression] = collect(camera.gain)
-            else
-                cam["gain"] = camera.gain
-            end
-            if camera.readnoise isa AbstractArray
-                cam["readnoise", compress=compression] = collect(camera.readnoise)
-            else
-                cam["readnoise"] = camera.readnoise
-            end
-            if camera.qe isa AbstractArray
-                cam["qe", compress=compression] = collect(camera.qe)
-            else
-                cam["qe"] = camera.qe
-            end
-        end
-
-        # === /provenance group ===
-        prov = create_group(fid, "provenance")
-        if source_file !== nothing
-            prov["source_file"] = source_file
-        end
-
-        # === /drift_correction group (optional) ===
-        if drift_model !== nothing
-            dc = create_group(fid, "drift_correction")
-            _save_drift_model!(dc, drift_model, compression)
-        end
-
-        # === /user_metadata group ===
-        if !isempty(smld.metadata)
-            user_meta = create_group(fid, "user_metadata")
-            for (key, value) in smld.metadata
-                if value isa Union{String, Number, AbstractArray{<:Number}} ||
-                   value isa AbstractArray{<:String}
-                    towrite = value isa AbstractArray{<:String} ? collect(value) : value
-                    try
-                        user_meta[key] = towrite
-                    catch err
-                        err isa InterruptException && rethrow()
-                        @warn "save_smld: dropping user metadata key \"$key\" — HDF5 write failed" exception=err
+                # 3D fields
+                if is_3d
+                    z = [e.z for e in smld.emitters]
+                    σ_z = [e.σ_z for e in smld.emitters]
+                    em["z", compress=compression] = z
+                    em["sigma_z", compress=compression] = σ_z
+                    # Off-diagonal position covariances (present on 3D fit types)
+                    if hasproperty(smld.emitters[1], :σ_xz)
+                        em["sigma_xz", compress=compression] = [e.σ_xz for e in smld.emitters]
+                        em["sigma_yz", compress=compression] = [e.σ_yz for e in smld.emitters]
                     end
+                end
+
+                # GaussMLE Emitter2DFitSigma fields (isotropic PSF)
+                if has_sigma
+                    psf_sigma = [e.σ for e in smld.emitters]
+                    em["psf_sigma", compress=compression] = psf_sigma
+
+                    if hasproperty(smld.emitters[1], :σ_σ)
+                        σ_sigma = [e.σ_σ for e in smld.emitters]
+                        em["sigma_psf_sigma", compress=compression] = σ_sigma
+                    end
+                end
+
+                # GaussMLE Emitter2DFitSigmaXY fields (anisotropic PSF)
+                if has_sigma_xy
+                    psf_sigma_x = [e.σx for e in smld.emitters]
+                    psf_sigma_y = [e.σy for e in smld.emitters]
+                    em["psf_sigma_x", compress=compression] = psf_sigma_x
+                    em["psf_sigma_y", compress=compression] = psf_sigma_y
+
+                    if hasproperty(smld.emitters[1], :σ_σx)
+                        σ_sigma_x = [e.σ_σx for e in smld.emitters]
+                        σ_sigma_y = [e.σ_σy for e in smld.emitters]
+                        em["sigma_psf_sigma_x", compress=compression] = σ_sigma_x
+                        em["sigma_psf_sigma_y", compress=compression] = σ_sigma_y
+                    end
+                end
+
+                # p-value (GaussMLE emitters)
+                if has_pvalue
+                    pvalue = [e.pvalue for e in smld.emitters]
+                    em["pvalue", compress=compression] = pvalue
+                end
+            end
+
+            # === /camera group ===
+            cam = create_group(fid, "camera")
+            camera = smld.camera
+
+            cam["type"] = camera isa IdealCamera ? "IdealCamera" : "SCMOSCamera"
+            cam["pixel_edges_x", compress=compression] = collect(camera.pixel_edges_x)
+            cam["pixel_edges_y", compress=compression] = collect(camera.pixel_edges_y)
+
+            if camera isa SCMOSCamera
+                # Store calibration data (handle scalars vs arrays)
+                if camera.offset isa AbstractArray
+                    cam["offset", compress=compression] = collect(camera.offset)
                 else
-                    # Unsupported type: warn rather than silently drop, so the loss is visible.
-                    @warn "save_smld: skipping user metadata key \"$key\"::$(typeof(value)) — not an HDF5-serializable type"
+                    cam["offset"] = camera.offset
+                end
+                if camera.gain isa AbstractArray
+                    cam["gain", compress=compression] = collect(camera.gain)
+                else
+                    cam["gain"] = camera.gain
+                end
+                if camera.readnoise isa AbstractArray
+                    cam["readnoise", compress=compression] = collect(camera.readnoise)
+                else
+                    cam["readnoise"] = camera.readnoise
+                end
+                if camera.qe isa AbstractArray
+                    cam["qe", compress=compression] = collect(camera.qe)
+                else
+                    cam["qe"] = camera.qe
+                end
+            end
+
+            # === /provenance group ===
+            prov = create_group(fid, "provenance")
+            if source_file !== nothing
+                prov["source_file"] = source_file
+            end
+
+            # === /drift_correction group (optional) ===
+            if drift_model !== nothing
+                dc = create_group(fid, "drift_correction")
+                _save_drift_model!(dc, drift_model, compression)
+            end
+
+            # === /user_metadata group ===
+            if !isempty(smld.metadata)
+                user_meta = create_group(fid, "user_metadata")
+                for (key, value) in smld.metadata
+                    if value isa Union{String, Number, AbstractArray{<:Number}} ||
+                       value isa AbstractArray{<:String}
+                        towrite = value isa AbstractArray{<:String} ? collect(value) : value
+                        try
+                            user_meta[key] = towrite
+                        catch err
+                            err isa InterruptException && rethrow()
+                            @warn "save_smld: dropping user metadata key \"$key\" — HDF5 write failed" exception=err
+                        end
+                    else
+                        # Unsupported type: warn rather than silently drop, so the loss is visible.
+                        @warn "save_smld: skipping user metadata key \"$key\"::$(typeof(value)) — not an HDF5-serializable type"
+                    end
                 end
             end
         end
     end
-
-    mv(tmp, filepath; force=true)
     return filepath
 end
 

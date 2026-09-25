@@ -123,18 +123,19 @@ function save_pipeline_state(path::String, result::AnalysisResult;
     smld_connected_cols = _smld_to_columnar(result.smld_connected)
 
     # Atomic write: a checkpoint exists precisely to survive a crash, so it must not
-    # be the thing corrupted by one. Write to a temp path, then rename over the target.
-    tmp = path * ".tmp"
-    jldsave(tmp;
-        smld_cols = smld_cols,
-        smld_raw_cols = smld_raw_cols,
-        smld_connected_cols = smld_connected_cols,
-        drift_model = result.drift_model,
-        step_infos = step_infos,
-        camera = camera,
-        checkpoint_version = 8
-    )
-    mv(tmp, path; force=true)
+    # be the thing corrupted by one. Write to a unique temp path in the same
+    # directory, then rename(2) it over the target (see _replace_atomically).
+    _replace_atomically(path) do tmp
+        jldsave(tmp;
+            smld_cols = smld_cols,
+            smld_raw_cols = smld_raw_cols,
+            smld_connected_cols = smld_connected_cols,
+            drift_model = result.drift_model,
+            step_infos = step_infos,
+            camera = camera,
+            checkpoint_version = 8
+        )
+    end
 
     path
 end
