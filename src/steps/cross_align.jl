@@ -49,7 +49,7 @@ function crossalign_step(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossAlignCon
     local aligned_smlds, align_info
     t = @elapsed begin
         (aligned_smlds, align_info) = SMLMDriftCorrection.align_smld(smlds, cfg.align)
-        _align_edge_geometry!(aligned_smlds, align_info)
+        _align_edge_geometry!(aligned_smlds, smlds, align_info)
     end
 
     # Convert shifts to nm and compute max
@@ -72,24 +72,35 @@ function crossalign_step(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossAlignCon
 end
 
 """
-    _align_edge_geometry!(aligned, info) -> aligned
+    _align_edge_geometry!(aligned, smlds, info) -> aligned
 
 `SMLMDriftCorrection.align_smld` only moves emitters — it never touches
 `smld.metadata`. Edge classification (`steps/edgeclassify.jl`) stores cell-mask
 geometry there (`"edge_outer_polygon"`, `"edge_cells"`) in the same μm frame as
 the emitters, so saving a post-alignment SMLD would otherwise pair aligned
 emitters with an unaligned mask. For every non-reference channel whose
-metadata carries either key, replace it with a copy run through the same
-point transform `align_smld` applied to that channel's emitters. `aligned[1]`
-is the caller's own object (`smlds[1]`, untouched by `align_smld`) and is
-never mutated here — its correction is the identity anyway.
+metadata carries either key, replace it with a copy run through the exact
+point transform `align_smld` applied to that channel's emitters — recovered
+from the original (`smlds[i]`) and aligned (`aligned[i]`) emitter positions
+themselves, not replayed from `info`'s diagnostic coefficients (for `:affine`,
+those describe two sequential passes, and summing them is not the same as
+composing them). `aligned[1]` is the caller's own object (`smlds[1]`,
+untouched by `align_smld`) and is never mutated here — its correction is the
+identity anyway.
 """
 function _align_edge_geometry!(aligned::Vector{<:SMLMData.BasicSMLD},
+                                smlds::Vector{<:SMLMData.BasicSMLD},
                                 info::SMLMDriftCorrection.AlignInfo)
     for i in 2:length(aligned)
         md = aligned[i].metadata
         (haskey(md, "edge_outer_polygon") || haskey(md, "edge_cells")) || continue
-        tf = _edge_point_transform(info, i)
+        tf = _edge_point_transform(smlds[i], aligned[i], info, i)
+        if tf === nothing
+            @warn "Cross-align: dropping edge geometry for channel $i -- the aligned emitters could not be reproduced as an exact map of the original emitters, so the mask cannot be aligned with them" i
+            delete!(md, "edge_outer_polygon")
+            delete!(md, "edge_cells")
+            continue
+        end
         if haskey(md, "edge_outer_polygon")
             md["edge_outer_polygon"] = tf.(md["edge_outer_polygon"])
         end
@@ -105,26 +116,38 @@ function _align_edge_geometry!(aligned::Vector{<:SMLMData.BasicSMLD},
 end
 
 # Point transform matching the emitter correction `align_smld` applied to
-# channel `i` (see SMLMDriftCorrection `align.jl`, `_align_shift` /
-# `_align_affine_fft`, and `correctdrift!` in `intrainter.jl`).
-function _edge_point_transform(info::SMLMDriftCorrection.AlignInfo, i::Int)
+# channel `i`, exactly. For `:shift` this is just the recorded translation
+# (see `correctdrift!` in SMLMDriftCorrection `intrainter.jl`). For `:affine`,
+# `align_smld` composes two sequential affine passes (global shift, then
+# affine — twice; see `_align_affine_fft` in `align.jl`) but its `diagnostic`
+# only records each pass's own coefficients summed together, which is NOT the
+# same map as composing the two passes. Rather than replay that (inexact)
+# sum, recover the exact composed affine map by least-squares fit against the
+# actual before/after emitter positions -- `aligned[i]` is a deepcopy of
+# `smld` with the same emitter order, so this fit is exact up to floating-point
+# roundoff whenever the true correction is affine. Returns `nothing` if it
+# isn't (mismatched emitter counts, or a residual too large to be roundoff).
+function _edge_point_transform(smld::SMLMData.BasicSMLD, aligned_smld::SMLMData.BasicSMLD,
+                                info::SMLMDriftCorrection.AlignInfo, i::Int)
     if info.transform == :shift
         dx, dy = info.shifts[i][1], info.shifts[i][2]
         return p -> (p[1] - dx, p[2] - dy)
     else  # :affine
-        # align_smld applies the correction in two passes (global shift, then
-        # affine — twice), but `diagnostic` records only the summed totals.
-        # Applying the totals once, in the same shift-then-affine order, matches
-        # pass 1 exactly; pass 2's coefficients are a residual-of-a-residual
-        # (already tiny after pass 1), so replaying the totals as a single pass
-        # instead of two is a second-order approximation, negligible for mask
-        # geometry.
-        gx, gy = info.diagnostic.global_shifts[i]
-        a, b, c, d, e, f = info.diagnostic.affine_coeffs[i]
-        return function (p)
-            x, y = p[1] - gx, p[2] - gy
-            (x - (a * x + b * y + c), y - (d * x + e * y + f))
+        n = length(smld.emitters)
+        n == length(aligned_smld.emitters) || return nothing
+        X = Matrix{Float64}(undef, n, 3)
+        T = Matrix{Float64}(undef, n, 2)
+        for (k, (e0, e1)) in enumerate(zip(smld.emitters, aligned_smld.emitters))
+            X[k, 1] = e0.x
+            X[k, 2] = e0.y
+            X[k, 3] = 1.0
+            T[k, 1] = e1.x
+            T[k, 2] = e1.y
         end
+        M = X \ T   # least-squares affine map: [x y 1] * M ≈ [x' y']
+        maximum(abs, X * M .- T) <= 1e-6 || return nothing
+        return p -> (p[1] * M[1, 1] + p[2] * M[2, 1] + M[3, 1],
+                     p[1] * M[1, 2] + p[2] * M[2, 2] + M[3, 2])
     end
 end
 
