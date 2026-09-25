@@ -73,15 +73,13 @@ the catalog of everything `analyze()` can do.
 
 ## Installation
 
-Once SMLMAnalysis is registered in the Julia General registry:
-
 ```julia
 using Pkg
 Pkg.add("SMLMAnalysis")
 ```
 
-Until then (and for development against the local ecosystem), see
-**[Installation & Setup](@ref)** for the current install path.
+For development installs against a local checkout, see
+**[Installation & Setup](@ref)**.
 
 ## The ecosystem
 
