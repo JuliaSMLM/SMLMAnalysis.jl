@@ -65,7 +65,7 @@ jobs:
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-downgrade-compat@v2
         with:
-          skip: Dates,LinearAlgebra,Logging,Random,Statistics,TOML
+          skip: Dates,Logging,Random,Statistics,TOML
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
   docs:

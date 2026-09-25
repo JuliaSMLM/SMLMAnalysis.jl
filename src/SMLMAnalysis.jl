@@ -48,7 +48,6 @@ Key types from ecosystem packages are re-exported for convenience:
 module SMLMAnalysis
 
 using Dates
-using LinearAlgebra
 using Logging
 using Random
 using Statistics
