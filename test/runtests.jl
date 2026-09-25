@@ -1647,19 +1647,25 @@ if SMLM_TEST_FULL
             @test [e.y for e in loaded_b.emitters] == [e.y for e in result.smlds[2].emitters]
             @test result.smlds[2] === result[:B].smld
 
-            # And the aligned B must actually differ from B's pre-alignment
-            # (frame-connected) data -- catches a regression where the "aligned"
-            # save silently falls back to writing unaligned data. smld_connected
-            # is FrameConnectInfo's pre-COMBINE linked data (SMLMFrameConnection
-            # frameconnect.jl), so it doesn't share an emitter count with the
-            # combined-then-aligned result; compare mean position instead of a
-            # per-emitter zip.
-            pre = result[:B].smld_connected
-            @test pre !== nothing
-            meanxy(s) = (sum(e.x for e in s.emitters) / length(s.emitters),
-                         sum(e.y for e in s.emitters) / length(s.emitters))
-            mean_shift = hypot((meanxy(result[:B].smld) .- meanxy(pre))...)
-            @test mean_shift > 0.05
+            # And the aligned B must actually differ from B's pre-alignment data
+            # -- catches a regression where the "aligned" save silently falls
+            # back to writing unaligned data. `result[:B].smld_connected` is
+            # NOT a safe baseline for this: it's FrameConnectInfo's pre-COMBINE
+            # linked data, and combining alone (independent of cross-align)
+            # shifts the mean by its own ~0.2 μm, which would make this
+            # assertion pass even with a broken cross-align. Instead, compare
+            # against the channel's own last-saved pre-alignment SMLD -- the
+            # frame-connect step's `smld_combined.h5`, i.e. B's phase-1 result
+            # exactly as it entered CrossAlignConfig. Found by directory pattern
+            # (not a hard-coded step number), since the channel's own step
+            # numbering is an implementation detail of chan_cfg() above.
+            b_dir = joinpath(outdir, "B")
+            fc_dirs = filter(d -> occursin(r"^\d+_frameconnect$", d), readdir(b_dir))
+            @test length(fc_dirs) == 1
+            pre = load_smld(joinpath(b_dir, only(fc_dirs), "smld_combined.h5"))
+            mean_x(s) = sum(e.x for e in s.emitters) / length(s.emitters)
+            # dx_true = 0.1 μm was removed by alignment; require most of it back.
+            @test abs(mean_x(result[:B].smld) - mean_x(pre)) >= 0.05
         end
     end
 else
