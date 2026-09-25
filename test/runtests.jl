@@ -313,6 +313,11 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             # requires Vector{<:BasicSMLD}, so this would otherwise MethodError
             # there instead of failing loudly here.
             @test_throws ArgumentError SMLMAnalysis._finalize_channels!(ch2, Any[state[1], state[2]], labels, dir; verbose=0)
+
+            # A view is an AbstractVector{<:BasicSMLD} but not a Vector -- same
+            # rejection, for the same reason (_write_composite_readme! requires
+            # exactly Vector{<:BasicSMLD}).
+            @test_throws ArgumentError SMLMAnalysis._finalize_channels!(ch2, view(state, 1:2), labels, dir; verbose=0)
         end
     end
 
