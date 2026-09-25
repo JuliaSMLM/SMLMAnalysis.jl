@@ -307,6 +307,12 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test_throws ArgumentError SMLMAnalysis._finalize_channels!(ch2, state[1:1], labels, dir; verbose=0)
             @test ch2[:B].smld === b
             @test isempty(readdir(dir))
+
+            # Right length, but an untyped Vector{Any} container: rejected even
+            # though its actual elements are BasicSMLDs -- _write_composite_readme!
+            # requires Vector{<:BasicSMLD}, so this would otherwise MethodError
+            # there instead of failing loudly here.
+            @test_throws ArgumentError SMLMAnalysis._finalize_channels!(ch2, Any[state[1], state[2]], labels, dir; verbose=0)
         end
     end
 
