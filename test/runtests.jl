@@ -298,11 +298,13 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test off(saved, b) > 0.05                        # file holds aligned, not raw, B
         end
 
-        # A state that is not one SMLD per label leaves the channel results alone
+        # A state that is not one SMLD per label is a contract violation: throw
+        # rather than silently leave the channel results alone (a caller that
+        # continued on to _write_composite_readme! would otherwise BoundsError).
         ch2 = Dict{Symbol,AnalysisResult}(:A => AnalysisResult(a, nothing, nothing),
                                           :B => AnalysisResult(b, nothing, nothing))
         mktempdir() do dir
-            @test_logs (:warn, r"not saved") SMLMAnalysis._finalize_channels!(ch2, state[1:1], labels, dir; verbose=0)
+            @test_throws ArgumentError SMLMAnalysis._finalize_channels!(ch2, state[1:1], labels, dir; verbose=0)
             @test ch2[:B].smld === b
             @test isempty(readdir(dir))
         end
@@ -1574,6 +1576,55 @@ if SMLM_TEST_FULL
             @test length(result.smld.emitters) == last_n
 
             @test !isempty(pngs)
+        end
+
+        @testset "multi-target orchestrator writes smld_<label>.h5 through _finalize_channels!" begin
+            # A multi-target channel is always raw images (or a file path) that goes
+            # through its own DetectFitConfig -- analyze(channels, MultiTargetConfig)
+            # has no path for already-localized data (steps=[] leaves _run_pipeline's
+            # state a raw image Vector, never a BasicSMLD, so it errors "Pipeline
+            # produced no SMLD"). So this drives a tiny simulated 2-channel run
+            # end-to-end -- the multi-target analogue of "upstream API smoke" above --
+            # to catch a regression where the orchestrator stops calling
+            # _finalize_channels! after the phase-2 multi-target steps (Codex #51).
+            cam = IdealCamera(32, 32, 0.1)
+            gen_channel(seed) = begin
+                Random.seed!(seed)
+                sim = StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 1)
+                (_, si) = simulate(sim;
+                    pattern  = Nmer2D(n = 8, d = 0.05),
+                    molecule = GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
+                    camera   = cam)
+                (imgs, _) = gen_images(si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
+                    dataset = 1, bg = 20.0, poisson_noise = true)
+                [imgs]
+            end
+            images_a = gen_channel(11)
+            images_b = gen_channel(12)
+
+            chan_cfg() = AnalysisConfig(
+                DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
+                                fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)),
+                FilterConfig(photons = (100.0, Inf));
+                camera = cam,
+            )
+
+            outdir = mktempdir()
+            mt = MultiTargetConfig(
+                labels = [:A, :B],
+                steps  = [CrossAlignConfig(align = AlignConfig(method = :fft))],
+                outdir = outdir,
+            )
+            (result, info) = analyze([(images_a, chan_cfg()), (images_b, chan_cfg())], mt)
+
+            @test result isa MultiTargetResult
+            for label in (:A, :B)
+                p = joinpath(outdir, "smld_$(label).h5")
+                @test isfile(p)
+                loaded = load_smld(p)
+                @test [e.x for e in loaded.emitters] == [e.x for e in result[label].smld.emitters]
+                @test [e.y for e in loaded.emitters] == [e.y for e in result[label].smld.emitters]
+            end
         end
     end
 else

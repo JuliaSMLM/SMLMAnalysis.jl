@@ -132,21 +132,22 @@ end
 Save `smld_<label>.h5` from the post-multi-target-step `state` and rebuild each
 channel's `AnalysisResult` around it, so `result[label].smld` agrees with
 `result.smlds`. `smld_connected` and `drift_model` stay from the channel run.
-Only applies when `state` holds one entry per label (a custom multi-target step
-could return a different-length vector, which leaves the label mapping undefined).
+Requires that `state` holds one `BasicSMLD` per label, in label order — a
+custom multi-target step that returns anything else leaves the label mapping
+undefined and is a contract violation, so this throws `ArgumentError` rather
+than silently skipping the save (a caller relying on `_write_composite_readme!`
+right after this would otherwise hit a `BoundsError` instead of a clear error).
 """
 function _finalize_channels!(channel_results::Dict{Symbol,AnalysisResult}, state,
                              labels::Vector{Symbol}, outdir::String;
                              verbose::Int=Verbosity.STANDARD)
     if !(state isa AbstractVector && length(state) == length(labels))
-        @warn "Multi-target: final state is not one SMLD per channel; per-channel smld_<label>.h5 not saved and results left pre-alignment" labels typeof(state)
-        return channel_results
+        throw(ArgumentError("Multi-target steps must return a Vector with one BasicSMLD per channel, in label order; got $(typeof(state)) for labels $labels"))
     end
     for (i, label) in enumerate(labels)
         smld = state[i]
         if !(smld isa SMLMData.BasicSMLD)
-            @warn "Multi-target: final state for channel $label is a $(typeof(smld)), not an SMLD; smld_$(label).h5 not saved"
-            continue
+            throw(ArgumentError("Multi-target steps must return a Vector with one BasicSMLD per channel, in label order; entry $i (channel $label) is a $(typeof(smld)), not a BasicSMLD"))
         end
         cr = channel_results[label]
         smld_path = joinpath(outdir, "smld_$(label).h5")
