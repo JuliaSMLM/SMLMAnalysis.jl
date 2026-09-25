@@ -33,7 +33,7 @@ jobs:
     # The thorough tier (SMLM_TEST_FULL=1) runs locally, not in CI; CI runs the fast
     # tier only, on this matrix plus the downgrade-compat job below.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
@@ -76,7 +76,7 @@ jobs:
       contents: write
       statuses: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1'
