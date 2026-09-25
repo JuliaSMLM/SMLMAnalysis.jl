@@ -15,7 +15,7 @@ built on [SMLMDriftCorrection](https://github.com/JuliaSMLM/SMLMDriftCorrection.
 `align_smld`.
 
 ```julia
-analyze(smlds, CrossAlignConfig(method = :entropy))   # → (aligned_smlds, StepInfo)
+analyze(smlds, CrossAlignConfig())   # → (aligned_smlds, StepInfo)
 ```
 
 ## When to use / prerequisites
@@ -60,14 +60,18 @@ see the SMLMDriftCorrection documentation.
 
 ## Configuration
 
-`CrossAlignConfig` is an SMLMAnalysis multi-target config whose fields map onto
-the upstream `AlignConfig`:
+`CrossAlignConfig` is an SMLMAnalysis multi-target config with a single field,
+`align::AlignConfig`, which is passed to the upstream `align_smld` unchanged.
+Every parameter lives on `AlignConfig` (re-exported), including its `verbose`
+field — the pipeline verbosity does not override it:
 
-| field | typical/default | meaning |
+| `AlignConfig` field | typical/default | meaning |
 |---|---|---|
 | `method` | `:entropy` | `:entropy` (cross-correlation seed + entropy refinement) or `:fft` (cross-correlation only) |
 | `maxn` | `100` | maximum neighbors used in the entropy calculation |
 | `histbinsize` | `0.05` | histogram bin size (µm) for the cross-correlation seed |
+| `transform` | `:shift` | transform model fitted between channels (see SMLMDriftCorrection) |
+| `verbose` | `0` | upstream logging level |
 
 ```julia
 # Two-channel overlay: render, align, render again
@@ -75,14 +79,14 @@ mt = MultiTargetConfig(
     labels = [:ch1, :ch2],
     steps = [
         CompositeRenderConfig(zoom = 20.0, strategy = GaussianRender()),
-        CrossAlignConfig(method = :entropy, histbinsize = 0.05),
+        CrossAlignConfig(align = AlignConfig(method = :entropy, histbinsize = 0.05)),
         CompositeRenderConfig(zoom = 20.0, strategy = GaussianRender()),  # post-alignment
     ],
     outdir = "output/cell1/",
 )
 
 # Or call the step directly on a channel vector
-(aligned, info) = analyze(smlds, CrossAlignConfig(method = :entropy))
+(aligned, info) = analyze(smlds, CrossAlignConfig(align = AlignConfig(method = :fft)))
 shifts = info.info.shifts          # Vector{Vector{Float64}}, one (x, y) per channel, in µm
 ```
 
@@ -108,9 +112,15 @@ register against.
 
 ## Notes & caveats
 
-- **Translation only.** Cross-alignment removes a global X/Y shift per channel;
-  it does not correct rotation, scaling, or field-dependent chromatic
-  distortion. For those, apply an upstream geometric transform first.
+- **Translation by default.** With the default `AlignConfig(transform=:shift)`,
+  cross-alignment removes a global X/Y shift per channel. `transform=:affine`
+  also corrects rotation, scale and shear from a field of local shifts; see
+  the SMLMDriftCorrection docs for its limits.
+- **Edge-classification geometry.** Cell masks stored by edge classification
+  (`edge_outer_polygon`, `edge_cells`) are translated together with the
+  emitters under `:shift`. Under `:affine` they are removed from the aligned
+  channel with a warning, because the exact correction cannot be recovered for
+  the mask; re-run edge classification on the aligned data if you need it.
 - **Shared structure is required.** Channels with no co-localized or overlapping
   features give an ill-defined offset; the cross-correlation seed will lock onto
   noise.

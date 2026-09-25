@@ -72,7 +72,7 @@ function driftcorrect_step(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig
 
         if checkpoint >= Checkpoint.EXPENSIVE
             _save_step_smld(dir, corrected_smld;
-                            filename="smld_corrected.jld2",
+                            filename="smld_corrected.h5",
                             drift_model=drift_model)
         end
     end

@@ -149,7 +149,7 @@ When `AnalysisConfig.outdir` is set, each step writes a numbered subdirectory �
 - `info.toml` — the scalar fields of the upstream info struct;
 - `stats.md` — a human-readable summary;
 - diagnostic figures (gated by [verbosity](@ref "Running a Pipeline"));
-- optionally a checkpointed SMLD (`*.jld2`), gated by the checkpoint level.
+- optionally a checkpointed SMLD (`smld_*.h5`, read back with `load_smld`), gated by the checkpoint level.
 
 The pipeline also writes a top-level `outdir/config.toml` capturing the camera,
 ROI, verbosity, and the full ordered step list. For persisting and reloading

@@ -139,6 +139,10 @@ function analyze(data, config::AnalysisConfig)
 
     # Apply ROI if specified
     if config.roi !== nothing
+        # Only the pipeline camera is cropped; a step-level camera would keep full-frame
+        # pixel edges (offset localizations, sCMOS maps read from the wrong pixels).
+        any(s -> s isa DetectFitConfig && s.camera !== nothing, config.steps) &&
+            throw(ArgumentError("roi crops the pipeline camera, but DetectFitConfig has its own camera that would not be cropped; set camera on AnalysisConfig instead"))
         data = _apply_roi(data, config.roi)
         camera = crop_camera(camera, config.roi.x, config.roi.y)
     end

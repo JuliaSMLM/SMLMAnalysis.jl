@@ -14,7 +14,7 @@ cfg)` and dispatch finds your method.
 
 This is the same mechanism the built-in steps use. The only requirements are:
 
-1. Your config subtypes `SMLMData.AbstractSMLMConfig` (so it is a valid element
+1. Your config subtypes `AbstractSMLMConfig` (so it is a valid element
    of the `steps` vector).
 2. You add a method `analyze(smld::BasicSMLD, cfg::YourConfig; kwargs...)` that
    returns a `(result, StepInfo)` tuple.
@@ -29,10 +29,9 @@ nothing here lives inside SMLMAnalysis:
 ```julia
 using SMLMAnalysis
 using SMLMAnalysis: analyze, StepInfo, Verbosity   # extend `analyze`, build a StepInfo
-using SMLMData
 
 # 1. A config type — parameters only, no logic.
-struct SpatialFilterConfig <: SMLMData.AbstractSMLMConfig
+struct SpatialFilterConfig <: AbstractSMLMConfig
     x_range::Tuple{Float64,Float64}   # microns
     y_range::Tuple{Float64,Float64}
 end
@@ -83,12 +82,12 @@ independently of the pipeline.
 ### 1. Config and info types
 
 ```julia
-@kwdef struct SpatialFilterConfig <: SMLMData.AbstractSMLMConfig
+@kwdef struct SpatialFilterConfig <: AbstractSMLMConfig
     x_range::Tuple{Float64,Float64}
     y_range::Tuple{Float64,Float64}
 end
 
-struct SpatialFilterInfo <: SMLMData.AbstractSMLMInfo
+struct SpatialFilterInfo <: AbstractSMLMInfo
     n_before::Int
     n_after::Int
 end

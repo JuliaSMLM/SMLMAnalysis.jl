@@ -33,7 +33,7 @@ analyze(smld, DriftConfig(degree = 2))   # → (corrected_smld, StepInfo)
 - **Artifacts** (when `outdir` is set): `drift_trajectory.png` (X/Y drift vs.
   frame and the XY path), `stats.md` (max drift, inter-dataset shifts, entropy,
   convergence), and at `DETAILED` verbosity a `per_dataset.md` breakdown. A
-  corrected SMLD is checkpointed to `smld_corrected.jld2` at `Checkpoint.EXPENSIVE`.
+  corrected SMLD is checkpointed to `smld_corrected.h5` at `Checkpoint.EXPENSIVE`.
 
 ## Concept
 

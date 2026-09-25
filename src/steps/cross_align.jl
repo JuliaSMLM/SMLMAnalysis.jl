@@ -10,18 +10,24 @@ Dispatches on `CrossAlignConfig <: AbstractMultiTargetStep` operating on
 
 Configuration for cross-channel alignment in the multi-target pipeline.
 
-Wraps `SMLMDriftCorrection.align_smld` which uses entropy-based or
-FFT cross-correlation alignment.
+Wraps `SMLMDriftCorrection.align_smld`, which uses entropy-based or FFT
+cross-correlation alignment. Every alignment parameter lives on the upstream
+`AlignConfig` (re-exported), which is passed through unchanged — including its
+`verbose` field.
 
 # Fields
-- `method`: Alignment method — `:entropy` (CC + entropy refinement) or `:fft` (CC only)
-- `maxn`: Maximum neighbors for entropy calculation (default: 100)
-- `histbinsize`: Histogram bin size in μm for cross-correlation (default: 0.05)
+- `align::AlignConfig`: upstream alignment config (default:
+  `AlignConfig()`, i.e. upstream's defaults)
+
+# Example
+```julia
+CrossAlignConfig()                                        # entropy (CC + entropy refinement)
+CrossAlignConfig(align=AlignConfig(method=:fft))          # CC only
+```
 """
 @kwdef struct CrossAlignConfig <: AbstractMultiTargetStep
-    method::Symbol = :entropy
-    maxn::Int = 100
-    histbinsize::Float64 = 0.05
+    align::SMLMDriftCorrection.AlignConfig =
+        SMLMDriftCorrection.AlignConfig()
 end
 
 step_name(::CrossAlignConfig) = "crossalign"
@@ -38,18 +44,12 @@ function crossalign_step(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossAlignCon
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
 
-    v >= Verbosity.PROGRESS && @info "[$step_number] crossalign: $(cfg.method), $(length(smlds)) channels"
-
-    align_cfg = SMLMDriftCorrection.AlignConfig(
-        method=cfg.method,
-        maxn=cfg.maxn,
-        histbinsize=cfg.histbinsize,
-        verbose=v >= Verbosity.DETAILED ? 1 : 0,
-    )
+    v >= Verbosity.PROGRESS && @info "[$step_number] crossalign: $(cfg.align.method), $(length(smlds)) channels"
 
     local aligned_smlds, align_info
     t = @elapsed begin
-        (aligned_smlds, align_info) = SMLMDriftCorrection.align_smld(smlds, align_cfg)
+        (aligned_smlds, align_info) = SMLMDriftCorrection.align_smld(smlds, cfg.align)
+        _align_edge_geometry!(aligned_smlds, align_info)
     end
 
     # Convert shifts to nm and compute max
@@ -69,6 +69,61 @@ function crossalign_step(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossAlignCon
 
     info = CrossAlignInfo(align_info, align_info.shifts, max_shift_nm, t)
     (aligned_smlds, info)
+end
+
+"""
+    _align_edge_geometry!(aligned, info) -> aligned
+
+`SMLMDriftCorrection.align_smld` only moves emitters — it never touches
+`smld.metadata`. Edge classification (`steps/edgeclassify.jl`) stores cell-mask
+geometry there (`"edge_outer_polygon"`, `"edge_cells"`) in the same μm frame as
+the emitters, so saving a post-alignment SMLD would otherwise pair aligned
+emitters with an unaligned mask.
+
+For `transform=:shift`, every vertex of a non-reference channel's geometry is
+moved through the same translation as its emitters (`info.shifts[i]`) —
+exact, since a shift is uniform.
+
+For `transform=:affine`, `align_smld` composes two sequential affine passes
+(global shift, then affine — twice; see `_align_affine_fft` in
+SMLMDriftCorrection `align.jl`), but `info.diagnostic` only records each
+pass's own coefficients summed together, which is NOT the composed map, so
+replaying it would silently misplace the geometry. The composed map could in
+principle be recovered from the actual before/after emitter positions, but
+that recovery is unsound in general — e.g. collinear emitters give a
+zero-residual fit for the wrong map — so instead both geometry keys are
+simply dropped, with one `@warn` per channel; re-run edge classification on
+the aligned data if you need the mask there.
+
+`aligned[1]` is the caller's own object (`smlds[1]`, untouched by
+`align_smld`) and is never mutated here — its correction is the identity
+anyway.
+"""
+function _align_edge_geometry!(aligned::Vector{<:SMLMData.BasicSMLD},
+                                info::SMLMDriftCorrection.AlignInfo)
+    for i in 2:length(aligned)
+        md = aligned[i].metadata
+        (haskey(md, "edge_outer_polygon") || haskey(md, "edge_cells")) || continue
+        if info.transform == :affine
+            @warn "Cross-align: edge geometry is not carried through :affine alignment (channel $i) -- re-run edge classification on the aligned data if you need it" i
+            delete!(md, "edge_outer_polygon")
+            delete!(md, "edge_cells")
+            continue
+        end
+        dx, dy = info.shifts[i][1], info.shifts[i][2]
+        tf = p -> (p[1] - dx, p[2] - dy)
+        if haskey(md, "edge_outer_polygon")
+            md["edge_outer_polygon"] = tf.(md["edge_outer_polygon"])
+        end
+        if haskey(md, "edge_cells")
+            md["edge_cells"] = SMLMClustering.CellPolygon[
+                SMLMClustering.CellPolygon(tf.(c.outer),
+                    Vector{NTuple{2,Float64}}[tf.(h) for h in c.holes])
+                for c in md["edge_cells"]
+            ]
+        end
+    end
+    aligned
 end
 
 _step_summary(info::CrossAlignInfo) = Dict{Symbol,Any}(
@@ -94,7 +149,7 @@ function _write_crossalign_stats(dir, cfg::CrossAlignConfig, align_info, shifts_
     open(filepath, "w") do io
         println(io, "# Cross-Channel Alignment Statistics\n")
         println(io, "## Summary")
-        println(io, "- **Method**: $(cfg.method)")
+        println(io, "- **Method**: $(cfg.align.method)")
         println(io, "- **Channels**: $(length(align_info.shifts))")
         println(io, "- **Max shift**: $(round(max_shift_nm, digits=1)) nm")
         println(io, "- **Time**: $(round(t, digits=2))s")

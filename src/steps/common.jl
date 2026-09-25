@@ -431,8 +431,22 @@ function _toml_value(v)::String
     end
 end
 
-"""Write config fields to TOML. Nested structs become [section] blocks."""
-function _write_config_fields!(io::IO, cfg; section::String="")
+"""
+Write config fields to TOML. Nested structs become `[section]` blocks.
+
+`table_prefix` is prepended to a nested section's table header (e.g.
+`"steps."` so `[strategy]` becomes `[steps.strategy]`), which in TOML attaches
+the table to the most recently opened `[[steps]]` array-of-tables element
+instead of floating at the document root. Callers writing a single config to
+its own file (the common case) leave it at the default `""`; only the
+multi-target writer, which packs several steps' `[[steps]]` entries into one
+file, needs it.
+"""
+# TOML bare keys are limited to A-Z a-z 0-9 _ -; anything else (e.g. upstream
+# field names like `σ_loc`) must be written as a quoted key or the file won't parse.
+_toml_key(k) = (s = string(k); occursin(r"^[A-Za-z0-9_-]+$", s) ? s : "\"" * escape_string(s) * "\"")
+
+function _write_config_fields!(io::IO, cfg; section::String="", table_prefix::String="")
     for f in fieldnames(typeof(cfg))
         v = getfield(cfg, f)
         v isa SMLMData.AbstractCamera && continue
@@ -440,13 +454,16 @@ function _write_config_fields!(io::IO, cfg; section::String="")
         key = section == "" ? string(f) : "$(section).$(f)"
         if _is_config_struct(v)
             # Nested config -> TOML section
-            println(io, "\n[$f]")
+            # Header carries the full key path so a config nested two deep lands
+            # under its parent table, not at the root.
+            path = section == "" ? [string(f)] : [split(section, '.')..., string(f)]
+            println(io, "\n[$(table_prefix)$(join(_toml_key.(path), '.'))]")
             println(io, "type = \"$(nameof(typeof(v)))\"")
-            _write_config_fields!(io, v; section=string(f))
+            _write_config_fields!(io, v; section=key, table_prefix=table_prefix)
         else
             # Every scalar value goes through _toml_value for valid TOML
             # (escaped strings, tuple/range/vector arrays, inf/nan floats).
-            println(io, "$f = $(_toml_value(v))")
+            println(io, "$(_toml_key(f)) = $(_toml_value(v))")
         end
     end
 end
@@ -470,7 +487,7 @@ function _save_info!(dir::String, info; section::String="")
             println(io, "# Upstream package info")
             println(io, "type = \"$(nameof(typeof(info)))\"")
         else
-            println(io, "\n[$section]")
+            println(io, "\n[$(_toml_key(section))]")
         end
         for f in fieldnames(typeof(info))
             v = getfield(info, f)
@@ -483,13 +500,13 @@ end
 function _write_info_field!(io::IO, name::Symbol, v::Number)
     # Bool <: Number, so this method also handles true/false. _toml_value maps
     # Inf/NaN floats to TOML inf/nan (a raw `Inf` would otherwise be invalid TOML).
-    println(io, "$name = $(_toml_value(v))")
+    println(io, "$(_toml_key(name)) = $(_toml_value(v))")
 end
 function _write_info_field!(io::IO, name::Symbol, v::String)
-    println(io, "$name = $(_toml_value(v))")
+    println(io, "$(_toml_key(name)) = $(_toml_value(v))")
 end
 function _write_info_field!(io::IO, name::Symbol, v::Symbol)
-    println(io, "$name = $(_toml_value(v))")
+    println(io, "$(_toml_key(name)) = $(_toml_value(v))")
 end
 function _write_info_field!(io::IO, ::Symbol, ::Nothing)
     # Omit the key entirely, exactly as the config writer does for `nothing` fields.
@@ -499,7 +516,7 @@ end
 function _write_info_field!(io::IO, name::Symbol, v::Tuple)
     # Only write tuples of scalars; _toml_value escapes/renders each element as valid TOML.
     if all(x -> x isa Union{Number, Bool, String, Symbol}, v)
-        println(io, "$name = $(_toml_value(v))")
+        println(io, "$(_toml_key(name)) = $(_toml_value(v))")
     end
     # Skip tuples containing complex types
 end
@@ -514,27 +531,27 @@ end
 """
     _save_step_smld(dir, smld; filename, kwargs...)
 
-Persist a step's output SMLD via JLD2 so downstream iteration (e.g., diagnostic
-plots, parameter sweeps, BaGoL re-runs) can resume without re-running the
-upstream pipeline. The SMLD is stored under the `smld` key:
+Persist a step's output SMLD as a versioned HDF5 file via `save_smld` so
+downstream iteration (e.g., diagnostic plots, parameter sweeps, BaGoL re-runs) can
+resume without re-running the upstream pipeline:
 
 ```julia
-data = JLD2.load("path/smld_corrected.jld2")
-smld = data["smld"]   # full BasicSMLD with camera, n_frames, n_datasets
+smld = load_smld("path/smld_corrected.h5")   # full BasicSMLD with camera, n_frames, n_datasets
 ```
 
-Extra named values are stored as additional top-level keys (e.g., pass
-`drift_model=drift_model` to embed the drift model alongside the SMLD).
+Keyword arguments are passed to `save_smld` (e.g., `drift_model=drift_model`). The
+drift model is stored as its coefficients and comes back from `load_smld` as a
+`Dict` in `metadata["drift_correction"]`, not as a model object.
 
 No-op if `dir` is nothing.
 """
 function _save_step_smld(dir::Union{String,Nothing}, smld::BasicSMLD;
-                          filename::String="smld.jld2",
+                          filename::String="smld.h5",
                           kwargs...)
     dir === nothing && return nothing
     mkpath(dir)   # ensure the step dir exists (some steps gate their own mkpath behind verbosity)
     path = joinpath(dir, filename)
-    JLD2.jldsave(path; smld=smld, kwargs...)
+    save_smld(path, smld; kwargs...)
     return path
 end
 
