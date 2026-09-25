@@ -364,37 +364,98 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test aligned[1].metadata["edge_cells"][1].outer == cells_a[1].outer
     end
 
-    @testset "cross-align applies the :affine geometry transform" begin
-        # Direct check of the :affine branch of _align_edge_geometry! against a
-        # hand-built AlignInfo with known coefficients — CrossAlignConfig()'s
-        # default (transform=:shift) never exercises this path.
+    @testset "cross-align applies the :affine geometry transform exactly" begin
+        # Direct check of the :affine branch of _align_edge_geometry! against the
+        # ACTUAL two-pass sequential affine correction align_smld applies
+        # (SMLMDriftCorrection align.jl _align_affine_fft): each pass is a global
+        # shift then x -> x - (a*x+b*y+c), y -> y - (d*x+e*y+f), with pre-update
+        # x/y. Summing the two passes' coefficients is NOT the same as composing
+        # them (Codex measured a 50nm mismatch at x=50μm with a=0.1, a2=0.01), so
+        # _edge_point_transform must recover the exact composed map from the
+        # actual before/after emitter positions, not replay the summed
+        # diagnostic coefficients — this test never even builds those sums into
+        # `info`; only `info.transform` is read by the :affine branch now.
         CP = SMLMAnalysis.SMLMClustering.CellPolygon
-        cam = IdealCamera(16, 16, 0.1)
-        em = [Emitter2DFit{Float64}(0.1i, 0.1i, 1000.0, 5.0, 0.01, 0.01, 20.0, 0.5; frame=i) for i in 1:3]
-        outer = NTuple{2,Float64}[(1.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0)]
-        hole = NTuple{2,Float64}[(1.5, 1.5), (2.0, 1.5), (2.0, 2.0)]
-        md = Dict{String,Any}("edge_outer_polygon" => outer, "edge_cells" => [CP(outer, [hole])])
-        ref = BasicSMLD(em, cam, 3, 1, Dict{String,Any}())
-        chan = BasicSMLD(em, cam, 3, 1, deepcopy(md))
-        aligned = [ref, chan]
+        cam = IdealCamera(64, 64, 0.1)
+        xs = [5.0, 12.0, 30.0, 45.0, 8.0, 50.0]
+        ys = [4.0, 15.0, 10.0, 25.0, 30.0, 5.0]
+        n = length(xs)
+        em = [Emitter2DFit{Float64}(xs[k], ys[k], 1000.0, 5.0, 0.01, 0.01, 20.0, 0.5; frame=k) for k in 1:n]
+        outer = NTuple{2,Float64}[(xs[1], ys[1]), (xs[2], ys[2]), (xs[3], ys[3])]
+        md = Dict{String,Any}("edge_outer_polygon" => outer, "edge_cells" => [CP(outer)])
+        orig_ref  = BasicSMLD(em, cam, n, 1, Dict{String,Any}())
+        orig_chan = BasicSMLD(em, cam, n, 1, deepcopy(md))
 
-        gx, gy = 0.02, -0.01
-        a, b, c, d, e, f = 0.01, 0.0, 0.0, 0.0, -0.005, 0.0
-        diag = (affine_coeffs = [(0.0, 0.0, 0.0, 0.0, 0.0, 0.0), (a, b, c, d, e, f)],
-                global_shifts = [zeros(2), [gx, gy]])
+        # Upstream's exact per-pass loop form (align.jl _align_affine_fft).
+        function apply_pass!(smld, gshift, a, b, c, d, e, f)
+            for nn in eachindex(smld.emitters)
+                smld.emitters[nn].x -= gshift[1]
+                smld.emitters[nn].y -= gshift[2]
+            end
+            for nn in eachindex(smld.emitters)
+                x = smld.emitters[nn].x; y = smld.emitters[nn].y
+                smld.emitters[nn].x = x - (a * x + b * y + c)
+                smld.emitters[nn].y = y - (d * x + e * y + f)
+            end
+            smld
+        end
+        aligned_chan = deepcopy(orig_chan)
+        apply_pass!(aligned_chan, [0.02, -0.01], 0.1, 0.02, 0.05, -0.03, 0.15, -0.02)     # pass 1 (Codex's a=0.1)
+        apply_pass!(aligned_chan, [0.005, 0.002], 0.01, -0.004, 0.01, 0.006, -0.02, 0.003) # pass 2 (Codex's a2=0.01)
+        aligned_ref = deepcopy(orig_ref)   # reference channel: align_smld never touches it
+
         info = SMLMDriftCorrection.AlignInfo(
             [zeros(2), zeros(2)],
             SMLMDriftCorrection.AbstractAlignTransform[SMLMDriftCorrection.AffineTransform2D(0.0, 1.0, 0.0, 0.0),
                                                         SMLMDriftCorrection.AffineTransform2D(0.0, 1.0, 0.0, 0.0)],
-            0.01, :entropy, :affine, :cpu, diag)
+            0.01, :entropy, :affine, :cpu, nothing)
 
-        SMLMAnalysis._align_edge_geometry!(aligned, info)
+        aligned = [aligned_ref, aligned_chan]
+        smlds   = [orig_ref, orig_chan]
+        SMLMAnalysis._align_edge_geometry!(aligned, smlds, info)
 
-        x, y = outer[1]
-        xg, yg = x - gx, y - gy
-        expected = (xg - (a * xg + b * yg + c), yg - (d * xg + e * yg + f))
-        @test all(isapprox.(aligned[2].metadata["edge_outer_polygon"][1], expected; atol=1e-12))
+        # A polygon vertex placed at an emitter's original position must land on
+        # that same emitter's aligned position -- exactly, not to a few nm.
+        for k in 1:3
+            got = aligned[2].metadata["edge_outer_polygon"][k]
+            @test isapprox(got[1], aligned_chan.emitters[k].x; atol=1e-9)
+            @test isapprox(got[2], aligned_chan.emitters[k].y; atol=1e-9)
+        end
+        @test aligned[2].metadata["edge_cells"][1].outer == aligned[2].metadata["edge_outer_polygon"]
         @test aligned[1].metadata == Dict{String,Any}()   # reference untouched
+    end
+
+    @testset "cross-align drops edge geometry it cannot align exactly" begin
+        # A non-affine emitter correction (e.g. from a bug or a future transform
+        # kind) must never be papered over with mismatched geometry: the guard in
+        # _edge_point_transform rejects a residual above 1e-6 μm and
+        # _align_edge_geometry! deletes both metadata keys rather than save them.
+        CP = SMLMAnalysis.SMLMClustering.CellPolygon
+        cam = IdealCamera(64, 64, 0.1)
+        xs = [5.0, 12.0, 30.0, 45.0, 8.0, 50.0]
+        ys = [4.0, 15.0, 10.0, 25.0, 30.0, 5.0]
+        n = length(xs)
+        em = [Emitter2DFit{Float64}(xs[k], ys[k], 1000.0, 5.0, 0.01, 0.01, 20.0, 0.5; frame=k) for k in 1:n]
+        outer = NTuple{2,Float64}[(xs[1], ys[1]), (xs[2], ys[2]), (xs[3], ys[3])]
+        md = Dict{String,Any}("edge_outer_polygon" => outer, "edge_cells" => [CP(outer)])
+        orig_chan = BasicSMLD(em, cam, n, 1, deepcopy(md))
+        aligned_chan = deepcopy(orig_chan)
+        for e in aligned_chan.emitters   # non-linear (quadratic) displacement -- not affine
+            e.x += 0.001 * e.x^2
+        end
+        aligned_ref = BasicSMLD(em, cam, n, 1, Dict{String,Any}())
+
+        info = SMLMDriftCorrection.AlignInfo(
+            [zeros(2), zeros(2)],
+            SMLMDriftCorrection.AbstractAlignTransform[SMLMDriftCorrection.AffineTransform2D(0.0, 1.0, 0.0, 0.0),
+                                                        SMLMDriftCorrection.AffineTransform2D(0.0, 1.0, 0.0, 0.0)],
+            0.01, :entropy, :affine, :cpu, nothing)
+
+        aligned = [aligned_ref, aligned_chan]
+        smlds   = [BasicSMLD(em, cam, n, 1, Dict{String,Any}()), orig_chan]
+        @test_logs (:warn, r"dropping edge geometry") SMLMAnalysis._align_edge_geometry!(aligned, smlds, info)
+        @test !haskey(aligned[2].metadata, "edge_outer_polygon")
+        @test !haskey(aligned[2].metadata, "edge_cells")
     end
 
     @testset "crosscorr g(r)" begin
