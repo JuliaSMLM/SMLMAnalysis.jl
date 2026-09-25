@@ -1,9 +1,9 @@
 """
 Multi-target (multi-color) analysis orchestration.
 
-Loops over per-channel `analyze(data, config)` calls, saves per-channel SMLDs,
-then dispatches multi-target steps (composite renders, cross-channel alignment, etc.)
-on the resulting `Vector{BasicSMLD}`.
+Loops over per-channel `analyze(data, config)` calls, dispatches multi-target steps
+(composite renders, cross-channel alignment, etc.) on the resulting
+`Vector{BasicSMLD}`, then saves the final (aligned) per-channel SMLDs.
 """
 
 """
@@ -37,7 +37,7 @@ mt = MultiTargetConfig(
     labels = [:IgG, :C1q],
     steps = [
         CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
-        CrossAlignConfig(method=:entropy),
+        CrossAlignConfig(),   # entropy alignment (upstream AlignConfig defaults)
         CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
     ],
     outdir = "output/cell1/",
@@ -92,11 +92,6 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
         channel_results[label] = result
         channel_infos[label] = info
         push!(smlds, result.smld)
-
-        # Save per-channel SMLD
-        smld_path = joinpath(config.outdir, "smld_$(label).h5")
-        save_smld(smld_path, result.smld; drift_model=result.drift_model)
-        v >= Verbosity.PROGRESS && @info "  Saved $smld_path ($(length(result.smld.emitters)) localizations)"
     end
 
     # Phase 2: Multi-target step dispatch
@@ -112,6 +107,9 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
         push!(step_infos, step_info)
     end
 
+    # Phase 3: save the final (aligned) per-channel SMLDs and point the channel results at them
+    _finalize_channels!(channel_results, state, config.labels, config.outdir; verbose=v)
+
     # Write composite readme
     _write_composite_readme!(composite_dir, config, state, step_infos)
 
@@ -126,6 +124,40 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
     v >= Verbosity.PROGRESS && @info "Multi-target complete: $(sum(length(s.emitters) for s in state)) total localizations ($(round(elapsed_s, digits=1))s)"
 
     (result, info)
+end
+
+"""
+    _finalize_channels!(channel_results, state, labels, outdir; verbose) -> channel_results
+
+Save `smld_<label>.h5` from the post-multi-target-step `state` and rebuild each
+channel's `AnalysisResult` around it, so `result[label].smld` agrees with
+`result.smlds`. `smld_connected` and `drift_model` stay from the channel run.
+Requires that `state` is a `Vector{<:SMLMData.BasicSMLD}` with one entry per
+label, in label order — the exact type `_write_composite_readme!` requires of
+it right after this call. A custom multi-target step that returns anything
+else (wrong length; an untyped container like `Any[...]` even if its actual
+elements happen to be `BasicSMLD`s; a `view`/`SubArray` rather than a
+`Vector`) leaves the label mapping undefined or breaks that type contract,
+and is a contract violation either way, so this throws `ArgumentError` rather
+than silently skipping the save (a caller relying on `_write_composite_readme!`
+right after this would otherwise hit a `BoundsError` or `MethodError` instead
+of a clear error).
+"""
+function _finalize_channels!(channel_results::Dict{Symbol,AnalysisResult}, state,
+                             labels::Vector{Symbol}, outdir::String;
+                             verbose::Int=Verbosity.STANDARD)
+    if !(state isa Vector{<:SMLMData.BasicSMLD} && length(state) == length(labels))
+        throw(ArgumentError("Multi-target steps must return a Vector with one BasicSMLD per channel, in label order; got $(typeof(state)) for labels $labels"))
+    end
+    for (i, label) in enumerate(labels)
+        smld = state[i]
+        cr = channel_results[label]
+        smld_path = joinpath(outdir, "smld_$(label).h5")
+        save_smld(smld_path, smld; drift_model=cr.drift_model)
+        verbose >= Verbosity.PROGRESS && @info "  Saved $smld_path ($(length(smld.emitters)) localizations)"
+        channel_results[label] = AnalysisResult(smld, cr.smld_connected, cr.drift_model)
+    end
+    channel_results
 end
 
 """
@@ -183,7 +215,11 @@ function _save_multitarget_config!(config::MultiTargetConfig)
         for (i, s) in enumerate(config.steps)
             println(io, "[[steps]]")
             println(io, "type = \"$(nameof(typeof(s)))\"")
-            _write_config_fields!(io, s)
+            # table_prefix="steps." so a nested config field (e.g. CompositeRenderConfig's
+            # strategy, CrossAlignConfig's align) writes as `[steps.strategy]`, which TOML
+            # attaches to this array-of-tables element, not a document-root `[strategy]`
+            # that the next `[[steps]]` entry would collide with.
+            _write_config_fields!(io, s; table_prefix="steps.")
             println(io)
         end
     end

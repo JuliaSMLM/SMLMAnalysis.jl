@@ -38,7 +38,7 @@ mt = MultiTargetConfig(
     colors = [:cyan, :magenta],
     steps = [
         CompositeRenderConfig(zoom = 20.0, strategy = GaussianRender()),
-        CrossAlignConfig(method = :entropy),
+        CrossAlignConfig(),
         CompositeRenderConfig(zoom = 20.0, strategy = GaussianRender()),  # post-alignment
         CrossCorrConfig(r_max = 0.5, dr = 0.005),
     ],
@@ -91,7 +91,8 @@ result.channels     # Dict{Symbol, AnalysisResult}
 result.step_infos   # Vector{StepInfo} for the cross-channel steps
 result.outdir       # root output directory
 result[:IgG]        # AnalysisResult for one channel (indexing == result.channels[:IgG])
-result[:IgG].smld   # that channel's final SMLD
+result[:IgG].smld   # that channel's final SMLD (aligned; same data as result.smlds[1])
+result[:IgG].smld_connected  # the channel's pre-alignment connected SMLD
 keys(result)        # the channel labels, in order
 ```
 
@@ -139,7 +140,7 @@ output/cell1/
 │   ├── 03_compositerender/
 │   ├── 04_crosscorr/
 │   └── README.md           # color scheme, per-channel counts, step summary
-├── smld_IgG.h5             # per-channel saved SMLDs (with drift model)
+├── smld_IgG.h5             # per-channel final (aligned) SMLDs (with drift model)
 ├── smld_C1q.h5
 └── multi_target_config.toml
 ```

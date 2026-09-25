@@ -201,14 +201,16 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
 
         # CrossAlignConfig defaults
         ca = CrossAlignConfig()
-        @test ca.method == :entropy
-        @test ca.maxn == 100
-        @test ca.histbinsize == 0.05
+        @test ca.align isa AlignConfig
+        @test ca.align.method == :entropy
+        @test ca.align.maxn == 100
+        @test ca.align.histbinsize == 0.05
 
-        # CrossAlignConfig custom
-        ca2 = CrossAlignConfig(method=:fft, maxn=50)
-        @test ca2.method == :fft
-        @test ca2.maxn == 50
+        # CrossAlignConfig custom: upstream AlignConfig passed through as-is
+        ca2 = CrossAlignConfig(align=AlignConfig(method=:fft, maxn=50, verbose=1))
+        @test ca2.align.method == :fft
+        @test ca2.align.maxn == 50
+        @test ca2.align.verbose == 1
 
         # step_name dispatch
         @test SMLMAnalysis.step_name(cr) == "compositerender"
@@ -237,6 +239,172 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         # AlignConfig/AlignInfo re-exports
         @test AlignConfig === SMLMDriftCorrection.AlignConfig
         @test AlignInfo === SMLMDriftCorrection.AlignInfo
+    end
+
+    @testset "multi-target config.toml is valid with two nested-config steps" begin
+        # CompositeRenderConfig (strategy) and CrossAlignConfig (align) each carry a
+        # nested config field. Written into the same multi_target_config.toml under
+        # separate [[steps]] entries, a bare `[strategy]` / `[align]` table floats to
+        # the document root and collides across steps -- TOML.parsefile then fails
+        # with "key already defined". table_prefix="steps." scopes each nested table
+        # to its own [[steps]] array element instead.
+        mktempdir() do dir
+            mt = MultiTargetConfig(
+                labels=[:A, :B],
+                steps=[
+                    CompositeRenderConfig(),
+                    CrossAlignConfig(),
+                    CompositeRenderConfig(),
+                ],
+                outdir=dir,
+            )
+            SMLMAnalysis._save_multitarget_config!(mt)
+            parsed = TOML.parsefile(joinpath(dir, "multi_target_config.toml"))
+            @test length(parsed["steps"]) == 3
+            @test haskey(parsed["steps"][1], "strategy")
+            @test haskey(parsed["steps"][2], "align")
+            @test haskey(parsed["steps"][3], "strategy")
+        end
+    end
+
+    @testset "multi-target saves and returns aligned channels" begin
+        # Phase-2 dispatch + result assembly on hand-made SMLDs (no detectfit): channel
+        # B is channel A shifted by a known offset; after CrossAlign the saved file,
+        # result[:B].smld and result.smlds[2] must all be the aligned data.
+        rng = MersenneTwister(3)
+        cam = IdealCamera(64, 64, 0.1)
+        N = 1500
+        xs = 1.0 .+ 4.4 .* rand(rng, N); ys = 1.0 .+ 4.4 .* rand(rng, N)
+        mk(dx, dy) = BasicSMLD([Emitter2DFit{Float64}(xs[i] + dx, ys[i] + dy, 1000.0, 10.0,
+                                    0.01, 0.01, 50.0, 2.0; frame=1 + (i % 10)) for i in 1:N],
+                               cam, 10, 1, Dict{String,Any}())
+        a, b = mk(0.0, 0.0), mk(0.08, -0.05)
+        labels = [:A, :B]
+        (state, si) = analyze([a, b], CrossAlignConfig();
+            outdir=nothing, step_number=1, verbose=0, colors=[:cyan, :magenta], labels=labels)
+        meanxy(s) = (sum(e.x for e in s.emitters) / N, sum(e.y for e in s.emitters) / N)
+        off(s1, s2) = hypot((meanxy(s2) .- meanxy(s1))...)
+        @test off(state[1], state[2]) < 0.010          # known ~94 nm offset removed to < 10 nm
+
+        channels = Dict{Symbol,AnalysisResult}(:A => AnalysisResult(a, a, nothing),
+                                               :B => AnalysisResult(b, b, nothing))
+        mktempdir() do dir
+            SMLMAnalysis._finalize_channels!(channels, state, labels, dir; verbose=0)
+            mtr = MultiTargetResult(labels, state, channels, [si], dir)
+            @test mtr[:B].smld === mtr.smlds[2] === state[2]
+            @test mtr[:B].smld_connected === b                # pre-alignment data kept
+            saved = load_smld(joinpath(dir, "smld_B.h5"))
+            @test [e.x for e in saved.emitters] == [e.x for e in state[2].emitters]
+            @test off(saved, b) > 0.05                        # file holds aligned, not raw, B
+        end
+
+        # A state that is not one SMLD per label is a contract violation: throw
+        # rather than silently leave the channel results alone (a caller that
+        # continued on to _write_composite_readme! would otherwise BoundsError).
+        ch2 = Dict{Symbol,AnalysisResult}(:A => AnalysisResult(a, nothing, nothing),
+                                          :B => AnalysisResult(b, nothing, nothing))
+        mktempdir() do dir
+            @test_throws ArgumentError SMLMAnalysis._finalize_channels!(ch2, state[1:1], labels, dir; verbose=0)
+            @test ch2[:B].smld === b
+            @test isempty(readdir(dir))
+
+            # Right length, but an untyped Vector{Any} container: rejected even
+            # though its actual elements are BasicSMLDs -- _write_composite_readme!
+            # requires Vector{<:BasicSMLD}, so this would otherwise MethodError
+            # there instead of failing loudly here.
+            @test_throws ArgumentError SMLMAnalysis._finalize_channels!(ch2, Any[state[1], state[2]], labels, dir; verbose=0)
+
+            # A view is an AbstractVector{<:BasicSMLD} but not a Vector -- same
+            # rejection, for the same reason (_write_composite_readme! requires
+            # exactly Vector{<:BasicSMLD}).
+            @test_throws ArgumentError SMLMAnalysis._finalize_channels!(ch2, view(state, 1:2), labels, dir; verbose=0)
+        end
+    end
+
+    @testset "cross-align carries edge geometry with the emitters" begin
+        # align_smld only moves emitters; edge-classification metadata
+        # (edge_outer_polygon / edge_cells) must move with them or a saved
+        # post-alignment SMLD pairs aligned emitters with a stale mask (Codex #51).
+        CP = SMLMAnalysis.SMLMClustering.CellPolygon
+        rng = MersenneTwister(11)
+        cam = IdealCamera(64, 64, 0.1)
+        N = 1500
+        xs = 1.0 .+ 4.4 .* rand(rng, N); ys = 1.0 .+ 4.4 .* rand(rng, N)
+        sq(x0, s) = NTuple{2,Float64}[(x0, x0), (x0 + s, x0), (x0 + s, x0 + s), (x0, x0 + s)]
+        shiftpts(pts, dx, dy) = NTuple{2,Float64}[(p[1] + dx, p[2] + dy) for p in pts]
+
+        outer_a = sq(1.0, 4.0)
+        cells_a = [CP(sq(1.0, 4.0), [sq(1.5, 1.0)])]
+        dx, dy = 0.094, 0.0
+        outer_b = shiftpts(outer_a, dx, dy)
+        cells_b = [CP(shiftpts(cells_a[1].outer, dx, dy),
+                      [shiftpts(h, dx, dy) for h in cells_a[1].holes])]
+
+        mkgeom(ddx, ddy, md) = BasicSMLD([Emitter2DFit{Float64}(xs[i] + ddx, ys[i] + ddy, 1000.0,
+                                    10.0, 0.01, 0.01, 50.0, 2.0; frame=1 + (i % 10)) for i in 1:N],
+                               cam, 10, 1, md)
+        a = mkgeom(0.0, 0.0, Dict{String,Any}("edge_outer_polygon" => outer_a, "edge_cells" => cells_a))
+        b = mkgeom(dx, dy, Dict{String,Any}("edge_outer_polygon" => outer_b, "edge_cells" => cells_b))
+
+        # Default CrossAlignConfig() uses AlignConfig's default transform=:shift, so
+        # every vertex and every emitter is offset by the exact same [dx, dy] —
+        # emitter shift and polygon-vertex shift must agree exactly (not just close).
+        (aligned, si) = analyze([a, b], CrossAlignConfig(); verbose=0)
+        @test si.info isa SMLMAnalysis.CrossAlignInfo
+
+        mean_x(s) = sum(e.x for e in s.emitters) / length(s.emitters)
+        mean_y(s) = sum(e.y for e in s.emitters) / length(s.emitters)
+        emitter_dx = mean_x(b) - mean_x(aligned[2])
+        emitter_dy = mean_y(b) - mean_y(aligned[2])
+
+        # Every vertex (outer ring, cell outer ring, and the cell's hole) must have
+        # moved by the same [dx, dy] the emitters did, not merely a nearby amount.
+        vertex_shift_matches(before, after) = all(
+            isapprox(pb[1] - pa[1], emitter_dx; atol=1e-9) &&
+            isapprox(pb[2] - pa[2], emitter_dy; atol=1e-9)
+            for (pb, pa) in zip(before, after))
+
+        @test vertex_shift_matches(outer_b, aligned[2].metadata["edge_outer_polygon"])
+        aligned_cell = aligned[2].metadata["edge_cells"][1]
+        @test vertex_shift_matches(cells_b[1].outer, aligned_cell.outer)
+        @test vertex_shift_matches(cells_b[1].holes[1], aligned_cell.holes[1])
+
+        # The reference channel (aligned[1] === a) is never touched.
+        @test aligned[1] === a
+        @test aligned[1].metadata["edge_outer_polygon"] == outer_a
+        @test aligned[1].metadata["edge_cells"][1].outer == cells_a[1].outer
+    end
+
+    @testset "cross-align drops edge geometry under :affine alignment" begin
+        # align_smld's :affine transform composes two sequential affine passes,
+        # but info.diagnostic only records each pass's own coefficients summed
+        # together, which is NOT the composed map (Codex measured a 50nm
+        # mismatch at x=50μm with a=0.1, a2=0.01). Recovering the exact composed
+        # map from the aligned emitter positions is unsound in general
+        # (degenerate/collinear layouts give a spurious exact fit) and Float32
+        # data can legitimately fail a tight residual tolerance, so the ruling is
+        # to not carry geometry through :affine at all: both metadata keys are
+        # dropped, with one @warn per channel.
+        CP = SMLMAnalysis.SMLMClustering.CellPolygon
+        cam = IdealCamera(16, 16, 0.1)
+        em = [Emitter2DFit{Float64}(0.1i, 0.1i, 1000.0, 5.0, 0.01, 0.01, 20.0, 0.5; frame=i) for i in 1:3]
+        outer = NTuple{2,Float64}[(1.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0)]
+        hole = NTuple{2,Float64}[(1.5, 1.5), (2.0, 1.5), (2.0, 2.0)]
+        md = Dict{String,Any}("edge_outer_polygon" => outer, "edge_cells" => [CP(outer, [hole])])
+        ref = BasicSMLD(em, cam, 3, 1, Dict{String,Any}())
+        chan = BasicSMLD(em, cam, 3, 1, deepcopy(md))
+        aligned = [ref, chan]
+
+        info = SMLMDriftCorrection.AlignInfo(
+            [zeros(2), zeros(2)],
+            SMLMDriftCorrection.AbstractAlignTransform[SMLMDriftCorrection.AffineTransform2D(0.0, 1.0, 0.0, 0.0),
+                                                        SMLMDriftCorrection.AffineTransform2D(0.0, 1.0, 0.0, 0.0)],
+            0.01, :entropy, :affine, :cpu, nothing)
+
+        @test_logs (:warn, r"not carried through :affine") SMLMAnalysis._align_edge_geometry!(aligned, info)
+        @test !haskey(aligned[2].metadata, "edge_outer_polygon")
+        @test !haskey(aligned[2].metadata, "edge_cells")
+        @test aligned[1].metadata == Dict{String,Any}()   # reference untouched
     end
 
     @testset "crosscorr g(r)" begin
@@ -356,6 +524,16 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test cc.pixel_edges_y == cam.pixel_edges_y[first(roi_y):last(roi_y)+1]
         @test length(cc.pixel_edges_x) - 1 == length(roi_x)   # x pixel count = #cols
         @test length(cc.pixel_edges_y) - 1 == length(roi_y)   # y pixel count = #rows
+    end
+
+    @testset "roi refuses a step-level DetectFit camera" begin
+        # roi crops only the pipeline camera; a camera on DetectFitConfig would stay
+        # full-frame and offset every localization by the crop origin.
+        cam = IdealCamera(16, 16, 0.1)
+        cfg = AnalysisConfig(camera=cam, roi=(x=3:10, y=3:10),
+                             steps=[DetectFitConfig(camera=cam)], outdir=nothing)
+        # Match the message: all-zero frames also throw an (unrelated) ArgumentError downstream.
+        @test_throws r"DetectFitConfig has its own camera" analyze(zeros(Float32, 16, 16, 2), cfg)
     end
 
     @testset "SMLD HDF5 round-trip" begin
@@ -487,7 +665,62 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         end
     end
 
+    @testset "step checkpoint is versioned HDF5" begin
+        # _save_step_smld writes through save_smld; load_smld must read it back unchanged.
+        cam = IdealCamera(16, 16, 0.1)
+        em = [Emitter2DFit{Float64}(0.1i, 0.2i, 1000.0 + i, 5.0, 0.01, 0.012, 20.0, 0.5;
+                                    frame=i, dataset=1 + (i % 2)) for i in 1:6]
+        smld = BasicSMLD(em, cam, 6, 2, Dict{String,Any}())
+        dm = SMLMDriftCorrection.LegendrePolynomial(smld; degree=2)
+        mktempdir() do dir
+            p = SMLMAnalysis._save_step_smld(joinpath(dir, "03_driftcorrect"), smld;
+                                             filename="smld_corrected.h5", drift_model=dm)
+            @test p == joinpath(dir, "03_driftcorrect", "smld_corrected.h5") && isfile(p)
+            s2 = load_smld(p)
+            @test s2.emitters isa Vector{Emitter2DFit{Float64}}
+            @test all(getfield(a, f) == getfield(b, f) for (a, b) in zip(em, s2.emitters)
+                      for f in fieldnames(Emitter2DFit{Float64}))
+            @test (s2.n_frames, s2.n_datasets) == (6, 2)
+            @test s2.camera.pixel_edges_x == cam.pixel_edges_x
+            @test s2.metadata["drift_correction"]["model_type"] == "LegendrePolynomial"
+            @test SMLMAnalysis._save_step_smld(nothing, smld; filename="x.h5") === nothing
+        end
+    end
+
+    @testset "edge geometry metadata round-trip" begin
+        # Edge classification mirrors its cell mask into metadata; save_smld must keep it.
+        CP = SMLMAnalysis.SMLMClustering.CellPolygon
+        sq(x0, s) = NTuple{2,Float64}[(x0, x0), (x0 + s, x0), (x0 + s, x0 + s), (x0, x0 + s)]
+        cells = [CP(sq(0.0, 4.0), [sq(0.5, 1.0), sq(2.0, 0.5)]),   # two holes
+                 CP(sq(5.0, 1.0)),                                # no holes
+                 CP(sq(7.0, 2.0), [sq(7.5, 0.2)])]
+        outer = sq(0.0, 4.0)
+        cam = IdealCamera(16, 16, 0.1)
+        em = [Emitter2DFit{Float64}(0.1i, 0.1i, 1000.0, 5.0, 0.01, 0.01, 20.0, 0.5; frame=i) for i in 1:3]
+        cellkey(cs) = [(c.outer, c.holes) for c in cs]   # CellPolygon has no ==; compare its fields
+        mktempdir() do dir
+            md = Dict{String,Any}("edge_cells" => cells, "edge_outer_polygon" => outer,
+                                  "empty_cells" => CP[], "empty_polygon" => NTuple{2,Float64}[])
+            p = joinpath(dir, "geom.h5")
+            save_smld(p, BasicSMLD(em, cam, 3, 1, md))
+            m2 = load_smld(p).metadata
+            @test m2["edge_outer_polygon"] == outer
+            @test m2["edge_outer_polygon"] isa Vector{NTuple{2,Float64}}
+            @test m2["edge_cells"] isa Vector{CP}
+            @test cellkey(m2["edge_cells"]) == cellkey(cells)
+            @test m2["empty_cells"] isa Vector{CP} && isempty(m2["empty_cells"])
+            @test m2["empty_polygon"] isa Vector{NTuple{2,Float64}} && isempty(m2["empty_polygon"])
+        end
+    end
+
     @testset "TOML provenance is valid" begin
+        # Upstream field names outside TOML's bare-key set (DriftConfig.σ_loc) must be
+        # written as quoted keys, or config.toml fails to parse.
+        let io = IOBuffer()
+            SMLMAnalysis._write_config_fields!(io, DriftConfig())
+            parsed = TOML.parse(String(take!(io)))
+            @test haskey(parsed, "σ_loc")
+        end
         # Provenance files are named .toml and must parse back. The hand-rolled
         # serializer used to emit invalid TOML for tuples ((500.0, Inf)), ranges
         # (1:19), symbol vectors ([:red, :blue]), and unescaped strings. _toml_value
@@ -1190,6 +1423,39 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             end
         end
     end
+
+    @testset "upstream API smoke (tiny data)" begin
+        # Runs the full detect/fit -> filter -> frame-connect -> drift -> render
+        # pipeline through analyze(), at default verbosity so the figure/stats
+        # writers (CairoMakie) run too, on data tiny enough to stay in the fast
+        # tier. Its purpose is compat detection: each upstream API gets exercised
+        # cheaply on every CI run, not just in the local thorough tier.
+        Random.seed!(1)
+        cam = IdealCamera(32, 32, 0.1)
+        sim = StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 2)
+        (_, si) = simulate(sim;
+            pattern  = Nmer2D(n = 8, d = 0.05),
+            molecule = GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
+            camera   = cam)
+        images = [gen_images(si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
+                              dataset = d, bg = 20.0, poisson_noise = true)[1] for d in 1:2]
+
+        cfg = AnalysisConfig(
+            DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
+                            fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)),
+            FilterConfig(photons = (100.0, Inf)),
+            FrameConnectConfig(max_frame_gap = 2),
+            DriftConfig(degree = 1),
+            RenderConfig(zoom = 5);
+            camera = cam,
+            outdir = mktempdir(),
+        )
+        t = @elapsed (result, info) = analyze(images, cfg)
+        @info "upstream API smoke (tiny data) wall time" seconds=t
+
+        @test result isa AnalysisResult
+        @test length(result.smld.emitters) >= 1
+    end
 end
 
 if SMLM_TEST_FULL
@@ -1210,7 +1476,7 @@ if SMLM_TEST_FULL
                 dataset = 1, bg = 20.0, poisson_noise = true)
 
             cfg = AnalysisConfig(
-                DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13),
+                DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
                                 fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)),
                 FilterConfig(photons = (100.0, Inf)),
                 RenderConfig(zoom = 10);
@@ -1248,7 +1514,7 @@ if SMLM_TEST_FULL
             # file-based paths share. Reuse the same stack as two datasets.
             (smld2, si2) = analyze([imgs, imgs],
                 DetectFitConfig(camera = cam,
-                                boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13),
+                                boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
                                 fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu));
                 verbose = Verbosity.SILENT)
             @test si2.info.n_datasets == 2
@@ -1256,6 +1522,155 @@ if SMLM_TEST_FULL
             @test smld2.n_frames == size(imgs, 3)          # equal-length → per-dataset count
             @test Set(e.dataset for e in smld2.emitters) == Set([1, 2])
             @test all(1 <= e.frame <= size(imgs, 3) for e in smld2.emitters)  # frames are per-dataset
+        end
+
+        @testset "end-to-end with outdir" begin
+            # Moderate simulated data through the full pipeline with disk output,
+            # checking the on-disk contract: numbered step directories, valid TOML
+            # provenance, every saved SMLD loadable and non-empty, and a render PNG.
+            Random.seed!(1)
+            cam = IdealCamera(64, 64, 0.1)
+            sim = StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 500, ndatasets = 2)
+            (_, si) = simulate(sim;
+                pattern  = Nmer2D(n = 8, d = 0.05),
+                molecule = GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
+                camera   = cam)
+            images = [gen_images(si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
+                                  dataset = d, bg = 20.0, poisson_noise = true)[1] for d in 1:2]
+
+            outdir = mktempdir()
+            cfg = AnalysisConfig(
+                DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
+                                fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)),
+                FilterConfig(photons = (100.0, Inf)),
+                FrameConnectConfig(max_frame_gap = 2),
+                DriftConfig(degree = 1),
+                RenderConfig(zoom = 5);
+                camera = cam,
+                outdir = outdir,
+            )
+            (result, info) = analyze(images, cfg)
+
+            # Numbered step directories only -- outdir also holds a top-level
+            # .cache/ (checkpoint cache, see common.jl cache_dir) that isn't a step.
+            step_dirs = filter(f -> isdir(f) && occursin(r"^\d\d_", basename(f)),
+                                readdir(outdir; join=true))
+            @test length(step_dirs) == length(cfg.steps)
+
+            tomls = String[]
+            h5s = String[]
+            pngs = String[]
+            for (root, _, files) in walkdir(outdir)
+                for f in files
+                    endswith(f, ".toml") && push!(tomls, joinpath(root, f))
+                    endswith(f, ".h5")   && push!(h5s, joinpath(root, f))
+                    endswith(f, ".png")  && push!(pngs, joinpath(root, f))
+                end
+            end
+            @test !isempty(tomls)
+            for p in tomls
+                @test TOML.parsefile(p) isa Dict
+            end
+
+            smld_h5s = filter(p -> occursin("smld_", basename(p)), h5s)
+            @test !isempty(smld_h5s)
+            last_n = 0
+            for p in smld_h5s
+                loaded = load_smld(p)
+                @test length(loaded.emitters) > 0
+                if occursin("smld_corrected.h5", p)
+                    last_n = length(loaded.emitters)
+                end
+            end
+            @test last_n > 0
+            @test length(result.smld.emitters) == last_n
+
+            @test !isempty(pngs)
+        end
+
+        @testset "multi-target orchestrator writes smld_<label>.h5 through _finalize_channels!" begin
+            # A multi-target channel is always raw images (or a file path) that goes
+            # through its own DetectFitConfig -- analyze(channels, MultiTargetConfig)
+            # has no path for already-localized data (steps=[] leaves _run_pipeline's
+            # state a raw image Vector, never a BasicSMLD, so it errors "Pipeline
+            # produced no SMLD"). So this drives a tiny simulated 2-channel run
+            # end-to-end -- the multi-target analogue of "upstream API smoke" above --
+            # to catch a regression where the orchestrator stops calling
+            # _finalize_channels! after the phase-2 multi-target steps (Codex #51).
+            # Channel B is channel A's own pattern (same seed) offset by a known
+            # 0.1 μm, so the saved file must show the *aligned* B, not raw B.
+            cam = IdealCamera(32, 32, 0.1)
+            dx_true = 0.1
+            gen_channel(seed, dx, dy) = begin
+                Random.seed!(seed)
+                sim = StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 1)
+                (_, si) = simulate(sim;
+                    pattern  = Nmer2D(n = 8, d = 0.05),
+                    molecule = GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
+                    camera   = cam)
+                model = deepcopy(si.smld_model)
+                for e in model.emitters
+                    e.x += dx
+                    e.y += dy
+                end
+                (imgs, _) = gen_images(model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
+                    dataset = 1, bg = 20.0, poisson_noise = true)
+                [imgs]
+            end
+            images_a = gen_channel(11, 0.0, 0.0)
+            images_b = gen_channel(11, dx_true, 0.0)
+
+            chan_cfg() = AnalysisConfig(
+                DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
+                                fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)),
+                FilterConfig(photons = (100.0, Inf)),
+                FrameConnectConfig(max_frame_gap = 2);
+                camera = cam,
+            )
+
+            outdir = mktempdir()
+            mt = MultiTargetConfig(
+                labels = [:A, :B],
+                steps  = [CrossAlignConfig(align = AlignConfig(method = :fft))],
+                outdir = outdir,
+            )
+            (result, info) = analyze([(images_a, chan_cfg()), (images_b, chan_cfg())], mt)
+
+            @test result isa MultiTargetResult
+            for label in (:A, :B)
+                p = joinpath(outdir, "smld_$(label).h5")
+                @test isfile(p)
+                loaded = load_smld(p)
+                @test [e.x for e in loaded.emitters] == [e.x for e in result[label].smld.emitters]
+                @test [e.y for e in loaded.emitters] == [e.y for e in result[label].smld.emitters]
+            end
+
+            # smld_B.h5 == result.smlds[2] == result[:B].smld, all three agreeing on
+            # the SAME (aligned) coordinates.
+            loaded_b = load_smld(joinpath(outdir, "smld_B.h5"))
+            @test [e.x for e in loaded_b.emitters] == [e.x for e in result.smlds[2].emitters]
+            @test [e.y for e in loaded_b.emitters] == [e.y for e in result.smlds[2].emitters]
+            @test result.smlds[2] === result[:B].smld
+
+            # And the aligned B must actually differ from B's pre-alignment data
+            # -- catches a regression where the "aligned" save silently falls
+            # back to writing unaligned data. `result[:B].smld_connected` is
+            # NOT a safe baseline for this: it's FrameConnectInfo's pre-COMBINE
+            # linked data, and combining alone (independent of cross-align)
+            # shifts the mean by its own ~0.2 μm, which would make this
+            # assertion pass even with a broken cross-align. Instead, compare
+            # against the channel's own last-saved pre-alignment SMLD -- the
+            # frame-connect step's `smld_combined.h5`, i.e. B's phase-1 result
+            # exactly as it entered CrossAlignConfig. Found by directory pattern
+            # (not a hard-coded step number), since the channel's own step
+            # numbering is an implementation detail of chan_cfg() above.
+            b_dir = joinpath(outdir, "B")
+            fc_dirs = filter(d -> occursin(r"^\d+_frameconnect$", d), readdir(b_dir))
+            @test length(fc_dirs) == 1
+            pre = load_smld(joinpath(b_dir, only(fc_dirs), "smld_combined.h5"))
+            mean_x(s) = sum(e.x for e in s.emitters) / length(s.emitters)
+            # dx_true = 0.1 μm was removed by alignment; require most of it back.
+            @test abs(mean_x(result[:B].smld) - mean_x(pre)) >= 0.05
         end
     end
 else

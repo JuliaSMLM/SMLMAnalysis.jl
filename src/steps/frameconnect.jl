@@ -42,7 +42,7 @@ function frameconnect_step(smld::BasicSMLD, cfg::SMLMFrameConnection.FrameConnec
                                     smld_connected, connect_info)
 
         if checkpoint >= Checkpoint.EXPENSIVE
-            _save_step_smld(dir, combined; filename="smld_combined.jld2")
+            _save_step_smld(dir, combined; filename="smld_combined.h5")
         end
     end
 

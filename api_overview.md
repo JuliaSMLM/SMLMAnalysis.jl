@@ -78,7 +78,7 @@ Complete pipeline description.
 - `roi::Union{NamedTuple, Nothing}` - Optional ROI as `(x=100:300, y=50:200)`
 - `outdir::Union{String, Nothing}` - Output directory
 - `verbose::Int` - Verbosity level (default: `Verbosity.STANDARD`)
-- `checkpoint::Int` - Which steps persist their output SMLD as JLD2 (default: `Checkpoint.EXPENSIVE`; see Checkpoint Levels)
+- `checkpoint::Int` - Which steps persist their output SMLD as HDF5 `smld_*.h5` (default: `Checkpoint.EXPENSIVE`; see Checkpoint Levels)
 
 ### AnalysisInfo
 
@@ -120,24 +120,6 @@ Logged after each step execution.
 StepInfo(number, cfg, elapsed_s, summary_dict; info=typed_info)
 ```
 
-### DataSource
-
-Lazy loading wrapper for image data.
-
-**Fields:**
-- `images::Union{AbstractArray{<:Real,3}, Nothing}` - Single dataset
-- `images_vec::Union{Vector{<:AbstractArray{<:Real,3}}, Nothing}` - Multiple datasets
-- `path::Union{String, Nothing}` - File path for deferred loading
-- `frame_range::Union{UnitRange{Int}, Nothing}` - Frame subset
-
-**Constructors:**
-```julia
-DataSource(images)           # Single 3D array (1 dataset)
-DataSource(image_stacks)     # Vector{Array} (N datasets)
-DataSource(path)             # File path (lazy loading)
-DataSource()                 # Empty (file-based DetectFitConfig)
-```
-
 ### MultiTargetConfig
 
 Configuration for multi-channel analysis.
@@ -158,7 +140,7 @@ Result of multi-channel analysis. Access per-channel results via `result[:label]
 **Fields:**
 - `labels::Vector{Symbol}` - Channel labels
 - `smlds::Vector{BasicSMLD}` - Per-channel SMLDs (aligned if a `CrossAlignConfig` ran)
-- `channels::Dict{Symbol, AnalysisResult}` - Per-channel results
+- `channels::Dict{Symbol, AnalysisResult}` - Per-channel results; `.smld` is the same final (aligned) data as `smlds`, `.smld_connected` the channel's pre-alignment connected data
 - `step_infos::Vector{StepInfo}` - The cross-channel steps' infos
 - `outdir::String` - Root output directory
 
@@ -352,7 +334,7 @@ Dispatch on `Vector{BasicSMLD}` inside a `MultiTargetConfig` pipeline:
 
 - `CompositeRenderConfig(; strategy, zoom, colors, clip_percentile=:auto, scalebar)` —
   multi-channel composite render (pass-through).
-- `CrossAlignConfig(; method=:entropy, maxn, histbinsize)` — cross-channel alignment
+- `CrossAlignConfig(; align=AlignConfig())` — cross-channel alignment; every parameter (incl. `verbose`) lives on the upstream `AlignConfig`
   (state-modifying; returns aligned SMLDs).
 - `CrossCorrConfig(; r_max, dr)` — pairwise cross-correlation g(r).
 

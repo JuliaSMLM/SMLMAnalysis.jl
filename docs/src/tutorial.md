@@ -6,7 +6,6 @@ This walkthrough runs a complete SMLM analysis pipeline on simulated data, showi
 
 ```julia
 using SMLMAnalysis
-using MicroscopePSFs
 
 # Camera: 256x128 pixels @ 100nm
 camera = IdealCamera(256, 128, 0.1)
@@ -17,6 +16,11 @@ pattern = Nmer2D(n=8, d=0.05)
 fluor = GenericFluor(photons=50000.0, k_off=20.0, k_on=0.02)
 
 (_, sim_info) = simulate(sim_params; pattern=pattern, molecule=fluor, camera=camera)
+
+# Generate camera frames from the simulated ground truth, one call per dataset
+image_stacks = [gen_images(sim_info.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
+                            dataset=d, bg=20.0, poisson_noise=true)[1]
+                 for d in 1:4]
 ```
 
 Image generation uses `gen_images` from SMLMSim with a Gaussian PSF model, one call per dataset. See `examples/generate_data.jl` for the full setup.
@@ -331,7 +335,7 @@ mt = MultiTargetConfig(
     (image_stacks_lines,    config_lines),
 ], mt)
 
-result[:clusters].smld     # per-channel SMLD
+result[:clusters].smld     # per-channel final SMLD (== result.smlds[1])
 result.smlds               # Vector{BasicSMLD} (all channels, possibly aligned)
 info.channels[:clusters]   # per-channel AnalysisInfo
 ```

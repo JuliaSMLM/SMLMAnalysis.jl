@@ -28,7 +28,7 @@ module Verbosity
 end
 
 # ============================================================
-# Checkpoint Levels (SMLD JLD2 persistence per step)
+# Checkpoint Levels (per-step SMLD persistence as HDF5 via save_smld)
 # ============================================================
 """
     Checkpoint
@@ -57,78 +57,6 @@ module Checkpoint
     const END       = 1   # final SMLD step only (orchestrator handles)
     const EXPENSIVE = 2   # expensive steps + final (default)
     const ALL       = 3   # every SMLD-producing step
-end
-
-# ============================================================
-# Data Source - lazy loading wrapper
-# ============================================================
-
-"""
-    DataSource
-
-Lazy loading wrapper for SMLM image data. Supports:
-- Single 3D array (one dataset)
-- Vector of 3D arrays (multiple datasets, boundaries encoded in data structure)
-- File path for deferred loading
-
-# Constructors
-```julia
-DataSource(images)                          # From single 3D array (1 dataset)
-DataSource(image_stacks)                    # From Vector{Array} (N datasets)
-DataSource(path; frame_range=nothing)       # From file path (lazy)
-```
-"""
-struct DataSource
-    images::Union{AbstractArray{<:Real,3}, Nothing}
-    images_vec::Union{Vector{<:AbstractArray{<:Real,3}}, Nothing}
-    path::Union{String, Nothing}
-    frame_range::Union{UnitRange{Int}, Nothing}
-end
-
-DataSource(images::AbstractArray{<:Real,3}) = DataSource(images, nothing, nothing, nothing)
-DataSource(vec::Vector{<:AbstractArray{<:Real,3}}) = DataSource(nothing, vec, nothing, nothing)
-DataSource(path::String; frame_range=nothing) = DataSource(nothing, nothing, path, frame_range)
-# Empty data source (for file-based DetectFitConfig workflows)
-DataSource() = DataSource(nothing, nothing, nothing, nothing)
-
-"""
-    get_images(ds::DataSource) -> AbstractArray{<:Real,3}
-
-Return the single image stack held by `ds`, loading it from `ds.path` if the source
-is file-backed. Errors if the source holds multiple datasets (use `ds.images_vec`)
-or specifies no data.
-"""
-function get_images(ds::DataSource)
-    ds.images !== nothing && return ds.images
-    ds.images_vec !== nothing && error("DataSource holds multiple datasets. Access via ds.images_vec.")
-    ds.path !== nothing || error("No data source specified")
-    data, _ = smart_h5_to_array(ds.path; max_frames=ds.frame_range === nothing ? nothing : last(ds.frame_range))
-    if ds.frame_range !== nothing
-        return data[:, :, ds.frame_range]
-    end
-    data
-end
-
-"""
-    n_datasets(ds::DataSource) -> Int
-
-Number of datasets in this data source.
-"""
-function n_datasets(ds::DataSource)
-    ds.images_vec !== nothing && return length(ds.images_vec)
-    ds.images !== nothing && return 1
-    1  # file-based: determined at load time
-end
-
-"""
-    n_frames_per_dataset(ds::DataSource) -> Int
-
-Frames per dataset. For Vector{Array}, uses first element.
-"""
-function n_frames_per_dataset(ds::DataSource)
-    ds.images_vec !== nothing && return size(ds.images_vec[1], 3)
-    ds.images !== nothing && return size(ds.images, 3)
-    0  # file-based: determined at load time
 end
 
 # ============================================================
@@ -609,7 +537,7 @@ mt = MultiTargetConfig(
     labels = [:IgG, :C1q],
     steps = [
         CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
-        CrossAlignConfig(method=:entropy),
+        CrossAlignConfig(),
         CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
     ],
     outdir = "output/cell1/",
@@ -632,14 +560,17 @@ the final SMLD vectors for composite rendering.
 
 # Fields
 - `labels::Vector{Symbol}`: Channel labels in order
-- `smlds::Vector{SMLMData.BasicSMLD}`: Per-channel SMLD results (may be aligned)
-- `channels::Dict{Symbol, AnalysisResult}`: Per-channel results
+- `smlds::Vector{SMLMData.BasicSMLD}`: Per-channel final SMLDs, after the multi-target
+  steps (aligned if an alignment step ran)
+- `channels::Dict{Symbol, AnalysisResult}`: Per-channel results. `.smld` is the same
+  final (aligned) data as `smlds`; `.smld_connected` is the channel's pre-alignment
+  connected data and `.drift_model` its drift model
 - `step_infos::Vector{StepInfo}`: Multi-target step history
 - `outdir::String`: Output directory
 
 # Indexing
 ```julia
-result[:IgG]         # Access per-channel AnalysisResult
+result[:IgG]         # Per-channel AnalysisResult (.smld == result.smlds[1])
 keys(result)         # Channel labels
 result.smlds         # Vector of all SMLDs
 ```
