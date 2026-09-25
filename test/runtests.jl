@@ -1648,25 +1648,34 @@ if SMLM_TEST_FULL
             # end-to-end -- the multi-target analogue of "upstream API smoke" above --
             # to catch a regression where the orchestrator stops calling
             # _finalize_channels! after the phase-2 multi-target steps (Codex #51).
+            # Channel B is channel A's own pattern (same seed) offset by a known
+            # 0.1 μm, so the saved file must show the *aligned* B, not raw B.
             cam = IdealCamera(32, 32, 0.1)
-            gen_channel(seed) = begin
+            dx_true = 0.1
+            gen_channel(seed, dx, dy) = begin
                 Random.seed!(seed)
                 sim = StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 1)
                 (_, si) = simulate(sim;
                     pattern  = Nmer2D(n = 8, d = 0.05),
                     molecule = GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
                     camera   = cam)
-                (imgs, _) = gen_images(si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
+                model = deepcopy(si.smld_model)
+                for e in model.emitters
+                    e.x += dx
+                    e.y += dy
+                end
+                (imgs, _) = gen_images(model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
                     dataset = 1, bg = 20.0, poisson_noise = true)
                 [imgs]
             end
-            images_a = gen_channel(11)
-            images_b = gen_channel(12)
+            images_a = gen_channel(11, 0.0, 0.0)
+            images_b = gen_channel(11, dx_true, 0.0)
 
             chan_cfg() = AnalysisConfig(
                 DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
                                 fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)),
-                FilterConfig(photons = (100.0, Inf));
+                FilterConfig(photons = (100.0, Inf)),
+                FrameConnectConfig(max_frame_gap = 2);
                 camera = cam,
             )
 
@@ -1686,6 +1695,27 @@ if SMLM_TEST_FULL
                 @test [e.x for e in loaded.emitters] == [e.x for e in result[label].smld.emitters]
                 @test [e.y for e in loaded.emitters] == [e.y for e in result[label].smld.emitters]
             end
+
+            # smld_B.h5 == result.smlds[2] == result[:B].smld, all three agreeing on
+            # the SAME (aligned) coordinates.
+            loaded_b = load_smld(joinpath(outdir, "smld_B.h5"))
+            @test [e.x for e in loaded_b.emitters] == [e.x for e in result.smlds[2].emitters]
+            @test [e.y for e in loaded_b.emitters] == [e.y for e in result.smlds[2].emitters]
+            @test result.smlds[2] === result[:B].smld
+
+            # And the aligned B must actually differ from B's pre-alignment
+            # (frame-connected) data -- catches a regression where the "aligned"
+            # save silently falls back to writing unaligned data. smld_connected
+            # is FrameConnectInfo's pre-COMBINE linked data (SMLMFrameConnection
+            # frameconnect.jl), so it doesn't share an emitter count with the
+            # combined-then-aligned result; compare mean position instead of a
+            # per-emitter zip.
+            pre = result[:B].smld_connected
+            @test pre !== nothing
+            meanxy(s) = (sum(e.x for e in s.emitters) / length(s.emitters),
+                         sum(e.y for e in s.emitters) / length(s.emitters))
+            mean_shift = hypot((meanxy(result[:B].smld) .- meanxy(pre))...)
+            @test mean_shift > 0.05
         end
     end
 else
