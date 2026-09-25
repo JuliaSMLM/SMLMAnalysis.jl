@@ -132,11 +132,12 @@ end
 Save `smld_<label>.h5` from the post-multi-target-step `state` and rebuild each
 channel's `AnalysisResult` around it, so `result[label].smld` agrees with
 `result.smlds`. `smld_connected` and `drift_model` stay from the channel run.
-Requires that `state` is an `AbstractVector{<:SMLMData.BasicSMLD}` with one
-entry per label, in label order — a custom multi-target step that returns
-anything else (wrong length, or an untyped container like `Any[...]` even if
-its actual elements happen to be `BasicSMLD`s) leaves the label mapping
-undefined or the type contract `_write_composite_readme!` relies on broken,
+Requires that `state` is a `Vector{<:SMLMData.BasicSMLD}` with one entry per
+label, in label order — the exact type `_write_composite_readme!` requires of
+it right after this call. A custom multi-target step that returns anything
+else (wrong length; an untyped container like `Any[...]` even if its actual
+elements happen to be `BasicSMLD`s; a `view`/`SubArray` rather than a
+`Vector`) leaves the label mapping undefined or breaks that type contract,
 and is a contract violation either way, so this throws `ArgumentError` rather
 than silently skipping the save (a caller relying on `_write_composite_readme!`
 right after this would otherwise hit a `BoundsError` or `MethodError` instead
@@ -145,7 +146,7 @@ of a clear error).
 function _finalize_channels!(channel_results::Dict{Symbol,AnalysisResult}, state,
                              labels::Vector{Symbol}, outdir::String;
                              verbose::Int=Verbosity.STANDARD)
-    if !(state isa AbstractVector && eltype(state) <: SMLMData.BasicSMLD && length(state) == length(labels))
+    if !(state isa Vector{<:SMLMData.BasicSMLD} && length(state) == length(labels))
         throw(ArgumentError("Multi-target steps must return a Vector with one BasicSMLD per channel, in label order; got $(typeof(state)) for labels $labels"))
     end
     for (i, label) in enumerate(labels)
