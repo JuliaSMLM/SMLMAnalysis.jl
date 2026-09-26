@@ -35,6 +35,30 @@ end
 Logging.catch_exceptions(::TeeLogger) = true
 
 """
+    FlushingLogger(logger, io)
+
+Wraps `logger` and `flush(io)`s after every `handle_message`. `log.txt` is
+normally only flushed in `_with_log_file`'s `finally`, so a crash mid-pipeline
+(a killed process, an unhandled exception the `finally` never runs for cleanly
+enough to flush before termination) can leave the file missing the tail of
+what was actually logged. Delegating every other logger method to `logger`
+keeps this a transparent wrapper.
+"""
+struct FlushingLogger{L<:Logging.AbstractLogger} <: Logging.AbstractLogger
+    logger::L
+    io::IO
+end
+
+Logging.min_enabled_level(fl::FlushingLogger) = Logging.min_enabled_level(fl.logger)
+Logging.shouldlog(fl::FlushingLogger, args...) = Logging.shouldlog(fl.logger, args...)
+Logging.catch_exceptions(fl::FlushingLogger) = Logging.catch_exceptions(fl.logger)
+
+function Logging.handle_message(fl::FlushingLogger, args...; kwargs...)
+    Logging.handle_message(fl.logger, args...; kwargs...)
+    flush(fl.io)
+end
+
+"""
     _with_log_file(f, outdir)
 
 Run `f()` with @info output teed to `outdir/log.txt`.
@@ -58,7 +82,8 @@ function _with_log_file(f, outdir)
 
     try
         println(io, "=== SMLMAnalysis $(Dates.now()) ===")
-        file_logger = Logging.SimpleLogger(io, Logging.Info)
+        flush(io)
+        file_logger = FlushingLogger(Logging.SimpleLogger(io, Logging.Info), io)
         tee = TeeLogger(Logging.AbstractLogger[Logging.current_logger(), file_logger])
         Logging.with_logger(tee) do
             f()
@@ -211,11 +236,11 @@ function analyze(config::AnalysisConfig)
     # ROI, so silently returning full-frame coordinates would contradict the config.
     # Reject the combination rather than mislead. (To crop file-based data, load it
     # and call analyze(images, config), or restrict via DetectFitConfig.)
-    config.roi === nothing || error(
+    config.roi === nothing || throw(ArgumentError(
         "AnalysisConfig.roi is not supported for file-based analyze(config): the ROI " *
         "crop is not applied when images are loaded from disk, so coordinates would be " *
         "full-frame despite the ROI. Load the images and use analyze(images, config) to " *
-        "apply the crop, or remove the roi.")
+        "apply the crop, or remove the roi."))
     _run_pipeline(nothing, config.steps, config.camera, config.outdir, config.verbose, config.checkpoint; roi=config.roi)
 end
 
@@ -247,6 +272,29 @@ function _find_final_smld_step(steps::Vector{SMLMData.AbstractSMLMConfig})
 end
 
 # ============================================================
+# Stale step directories
+# ============================================================
+
+"""
+    _warn_stale_step_dirs(outdir, steps)
+
+`@warn` once, listing them, if `outdir` already contains `NN_*` step directories
+(the `step_outdir` naming convention) that this run will not (re)write -- e.g. a
+leftover directory from an earlier, differently-shaped pipeline run into the same
+`outdir` (fewer steps, reordered steps, a renamed step). Never deletes anything;
+this is a heads-up, not a cleanup.
+"""
+function _warn_stale_step_dirs(outdir::String, steps::Vector{SMLMData.AbstractSMLMConfig})
+    isdir(outdir) || return
+    produced = Set(lpad(i, 2, '0') * "_" * step_name(cfg) for (i, cfg) in enumerate(steps))
+    stale = filter(readdir(outdir)) do entry
+        isdir(joinpath(outdir, entry)) && occursin(r"^\d\d_", entry) && !(entry in produced)
+    end
+    isempty(stale) && return
+    @warn "outdir already contains step directories this run does not produce (not deleted)" outdir stale=sort(stale)
+end
+
+# ============================================================
 # Pipeline loop (pure dispatch, no isa routing)
 # ============================================================
 
@@ -265,9 +313,17 @@ function _run_pipeline(initial_state, steps::Vector{SMLMData.AbstractSMLMConfig}
                        outdir::Union{String,Nothing}, v::Int,
                        cp_level::Int=Checkpoint.EXPENSIVE;
                        roi=nothing)
+    # AnalysisConfig already validates verbose/checkpoint at construction, but
+    # _run_pipeline is itself callable directly (bypassing AnalysisConfig), so
+    # re-validate here rather than let an out-of-range level misbehave silently
+    # deep in a step's `if verbose >= Verbosity.X` checks.
+    _validate_verbose(v)
+    _validate_checkpoint(cp_level)
+
     t_start = time_ns()
     if outdir !== nothing
         mkpath(outdir)
+        _warn_stale_step_dirs(outdir, steps)
         # Write orchestration-level config up-front, so provenance survives a mid-pipeline failure.
         _save_pipeline_config!(outdir, steps, camera, roi, v, cp_level)
     end

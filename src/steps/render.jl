@@ -8,9 +8,6 @@ render_step(smld, RenderConfig(zoom=10, colormap=:turbo, color_by=:absolute_fram
 ```
 """
 
-# Override step_name so dirs are "07_render" not "07_renderconfig"
-step_name(::SMLMRender.RenderConfig) = "render"
-
 """
     render_step(smld, cfg; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)
 
@@ -85,14 +82,18 @@ _step_summary(info::SMLMRender.RenderInfo) = Dict{Symbol,Any}(
 )
 
 """
-    analyze(smld, cfg::RenderConfig; kwargs...) -> (smld, StepInfo)
+    analyze(smld, cfg::RenderConfig; outdir, step_number, verbose, checkpoint) -> (smld, StepInfo)
 
 Render localizations to a super-resolution image. The image is saved to disk
 (via render_step); the smld passes through so subsequent pipeline steps can
 operate on it. Use `render_step` or `SMLMRender.render` directly to get the image.
+
+`checkpoint` is accepted (like every other step's `analyze`) but unused: a
+render step produces an image, not an SMLD, so there is nothing to checkpoint.
 """
 function analyze(smld::BasicSMLD, cfg::SMLMRender.RenderConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
+                 checkpoint::Int=Checkpoint.EXPENSIVE)
     t = @elapsed (render_image, render_info) = render_step(smld, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose)
     (smld, StepInfo(step_number, cfg, t, _step_summary(render_info); info=render_info))

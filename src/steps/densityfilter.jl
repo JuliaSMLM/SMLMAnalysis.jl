@@ -66,13 +66,13 @@ _step_summary(info::DensityFilterInfo) = Dict{Symbol,Any}(
 )
 
 """
-    analyze(smld, cfg::DensityFilterConfig; kwargs...) -> (filtered_smld, StepInfo)
+    analyze(smld, cfg::DensityFilterConfig; outdir, step_number, verbose, checkpoint) -> (filtered_smld, StepInfo)
 
 Filter localizations by neighbor density.
 """
 function analyze(smld::BasicSMLD, cfg::DensityFilterConfig;
                  outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
+                 checkpoint::Int=Checkpoint.EXPENSIVE)
     t = @elapsed (filtered, df_info) = densityfilter_step(smld, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose)
 

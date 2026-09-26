@@ -25,12 +25,12 @@ selected entirely by the concrete config type. See the SMLMClustering
 documentation for the algorithm details and per-config parameters.
 """
 
-# Output folder/log label = the STEP's role (`edge_classify`), NOT the upstream
-# gate-method name (`kde_valley` / `outer_polygon`), which is internal-mechanism
-# jargon at the pipeline level — it doesn't read as "edge classification" at a
-# glance. The gate method still rides in `config.toml` + the StepInfo summary
-# (`:method`) for provenance, so nothing is lost.
-step_name(cfg::SMLMClustering.AbstractEdgeClassifyConfig) = "edge_classify"
+# Output folder/log label = the STEP's role (`edgeclassify`, matching every other
+# step's underscore-free naming), NOT the upstream gate-method name (`kde_valley` /
+# `outer_polygon`), which is internal-mechanism jargon at the pipeline level — it
+# doesn't read as "edge classification" at a glance. The gate method still rides in
+# `config.toml` + the StepInfo summary (`:method`) for provenance, so nothing is lost.
+step_name(cfg::SMLMClustering.AbstractEdgeClassifyConfig) = "edgeclassify"
 
 _step_summary(info::SMLMClustering.EdgeClassifyInfo) = Dict{Symbol,Any}(
     :method     => SMLMClustering.method_name(info.config),
@@ -42,7 +42,7 @@ _step_summary(info::SMLMClustering.EdgeClassifyInfo) = Dict{Symbol,Any}(
 )
 
 """
-    analyze(smld, cfg::AbstractEdgeClassifyConfig; kwargs...) -> (smld_out, StepInfo)
+    analyze(smld, cfg::AbstractEdgeClassifyConfig; outdir, step_number, verbose, checkpoint) -> (smld_out, StepInfo)
 
 Classify each localization as `:interior` / `:membrane` / `:outside` against the
 cell mask(s) carved by SMLMClustering. The method is selected by the concrete type
@@ -54,7 +54,7 @@ live in the step's `EdgeClassifyInfo` (`info.class` / `interior_mask(info)`).
 """
 function analyze(smld::BasicSMLD, cfg::SMLMClustering.AbstractEdgeClassifyConfig;
                  outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
+                 checkpoint::Int=Checkpoint.EXPENSIVE)
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
     v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_locs=length(smld.emitters)

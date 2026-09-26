@@ -61,7 +61,7 @@ tendency estimate to inside the cell.
 ## Outputs
 
 At `verbose >= STANDARD` with an `outdir`, the step writes `config.toml`, `info.toml`,
-and an edge report (diagnostics plus figures) under `{step}_edge_classify/`. The
+and an edge report (diagnostics plus figures) under `{step}_edgeclassify/`. The
 StepInfo summary records the gate `:method`, emitter counts, and the number of cells.
 
 See the [SMLMClustering documentation](https://github.com/JuliaSMLM/SMLMClustering.jl)

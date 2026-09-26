@@ -8,11 +8,6 @@ The SMART microscope stores data in HDF5 files with structure:
 - /Main/stage_XXX: Stage position data
 """
 
-using HDF5
-using SMLMData
-
-export load_smart_h5, load_smart_h5_info
-
 """
     load_smart_h5_info(filepath::String)
 

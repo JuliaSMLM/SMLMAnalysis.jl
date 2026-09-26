@@ -5,8 +5,8 @@ Groups localizations into emitters using Bayesian inference via RJMCMC.
 Requires frame-connected (and ideally calibrated) data.
 """
 
-# BaGoLConfig is defined in SMLMBaGoL (upstream owns config, like DriftConfig/RenderConfig)
-const BaGoLConfig = SMLMBaGoL.BaGoLConfig
+# BaGoLConfig is upstream-owned (like DriftConfig/RenderConfig); the alias itself
+# lives in SMLMAnalysis.jl, next to the other upstream aliases.
 
 """
     bagol_step(smld, cfg; outdir=nothing, step_number=0, verbose=Verbosity.STANDARD)
@@ -92,13 +92,13 @@ _step_summary(info::BaGoLInfo) = Dict{Symbol,Any}(
 #  called from bagol_step above — no local duplicate needed since SMLMBaGoL v0.3.7-DEV.)
 
 """
-    analyze(smld, cfg::BaGoLConfig; kwargs...) -> (bagol_smld, StepInfo)
+    analyze(smld, cfg::BaGoLConfig; outdir, step_number, verbose, checkpoint) -> (bagol_smld, StepInfo)
 
 Group localizations into emitters via Bayesian inference (BaGoL).
 """
 function analyze(smld::BasicSMLD, cfg::BaGoLConfig;
                  outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
+                 checkpoint::Int=Checkpoint.EXPENSIVE)
     t = @elapsed (bagol_smld, bagol_info) = bagol_step(smld, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose, checkpoint=checkpoint)
     (bagol_smld, StepInfo(step_number, cfg, t, _step_summary(bagol_info); info=bagol_info))

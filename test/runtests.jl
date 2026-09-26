@@ -3,6 +3,7 @@ using SMLMFrameConnection
 using SMLMDriftCorrection
 using GaussMLE
 using Test
+using Aqua
 using Random
 using TOML
 using Statistics
@@ -22,6 +23,13 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         # And the binding must be SMLMData's camera type, not Makie's.
         @test AbstractCamera === SMLMAnalysis.SMLMData.AbstractCamera
         @test IdealCamera <: AbstractCamera
+    end
+
+    @testset "Aqua" begin
+        # `ambiguities=(recursive=false,)`: recursive ambiguity checking also flags
+        # method ambiguities defined entirely inside our upstream dependencies
+        # (SMLMData/SMLMRender/etc.), which are not ours to fix here.
+        Aqua.test_all(SMLMAnalysis; ambiguities=(recursive=false,))
     end
 
     @testset "docs cover every SMLMAnalysis-owned export" begin
@@ -205,7 +213,7 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test cfg.datasets === nothing                          # default is no selection
         cfg_range = DetectFitConfig(datasets=1:19)
         @test cfg_range.datasets == 1:19
-        @test cfg_range.datasets isa UnitRange{Int}
+        @test cfg_range.datasets isa Vector{Int}   # concrete field type: any AbstractVector{Int} is accepted but stored as Vector{Int}
         cfg_sparse = DetectFitConfig(datasets=[1, 2, 3, 5, 7])
         @test cfg_sparse.datasets == [1, 2, 3, 5, 7]
         @test cfg_sparse.datasets isa Vector{Int}
@@ -215,8 +223,37 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test SMLMAnalysis._select_sources(src, nothing) === src
         @test SMLMAnalysis._select_sources(src, [1, 3, 5]) == [src[1], src[3], src[5]]
         @test SMLMAnalysis._select_sources(src, 2:4) == src[2:4]
-        @test_throws ErrorException SMLMAnalysis._select_sources(src, [1, 6])
-        @test_throws ErrorException SMLMAnalysis._select_sources(src, [0, 1])
+        @test_throws ArgumentError SMLMAnalysis._select_sources(src, [1, 6])
+        @test_throws ArgumentError SMLMAnalysis._select_sources(src, [0, 1])
+
+        # No kwargs... catch-all on step analyze() methods: a misspelled keyword
+        # must raise MethodError, not silently vanish into a kwargs sink.
+        smld_empty = BasicSMLD(Emitter2DFit{Float64}[], cam, 1, 1, Dict{String,Any}())
+        @test_throws MethodError analyze(smld_empty, FilterConfig(); bogus_kwarg=1)
+    end
+
+    @testset "Verbosity/Checkpoint validation" begin
+        cam = IdealCamera(64, 64, 0.1)
+
+        # Valid levels round-trip through AnalysisConfig / MultiTargetConfig construction.
+        @test AnalysisConfig(camera=cam, verbose=Verbosity.SILENT, checkpoint=Checkpoint.NONE).verbose == Verbosity.SILENT
+        @test AnalysisConfig(camera=cam, verbose=Verbosity.DEBUG, checkpoint=Checkpoint.ALL).checkpoint == Checkpoint.ALL
+        @test MultiTargetConfig(labels=[:A], outdir="x", verbose=Verbosity.DEBUG).verbose == Verbosity.DEBUG
+
+        # Out-of-range verbose/checkpoint must raise ArgumentError at construction.
+        @test_throws ArgumentError AnalysisConfig(camera=cam, verbose=-1)
+        @test_throws ArgumentError AnalysisConfig(camera=cam, verbose=Verbosity.DEBUG + 1)
+        @test_throws ArgumentError AnalysisConfig(camera=cam, checkpoint=-1)
+        @test_throws ArgumentError AnalysisConfig(camera=cam, checkpoint=Checkpoint.ALL + 1)
+        @test_throws ArgumentError MultiTargetConfig(labels=[:A], outdir="x", verbose=-1)
+        @test_throws ArgumentError MultiTargetConfig(labels=[:A], outdir="x", verbose=Verbosity.DEBUG + 1)
+
+        # Same validation at the _run_pipeline entry point, for direct calls that
+        # bypass AnalysisConfig entirely.
+        steps = AbstractSMLMConfig[]
+        @test_throws ArgumentError SMLMAnalysis._run_pipeline(nothing, steps, cam, nothing, -1)
+        @test_throws ArgumentError SMLMAnalysis._run_pipeline(nothing, steps, cam, nothing, Verbosity.STANDARD, -1)
+        @test_throws ArgumentError SMLMAnalysis._run_pipeline(nothing, steps, cam, nothing, Verbosity.STANDARD, Checkpoint.ALL + 1)
     end
 
     @testset "CalibrationConfig re-export" begin
@@ -350,7 +387,7 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         a, b = mk(0.0, 0.0), mk(0.08, -0.05)
         labels = [:A, :B]
         (state, si) = analyze([a, b], CrossAlignConfig();
-            outdir=nothing, step_number=1, verbose=0, colors=[:cyan, :magenta], labels=labels)
+            outdir=nothing, step_number=1, verbose=0)
         meanxy(s) = (sum(e.x for e in s.emitters) / N, sum(e.y for e in s.emitters) / N)
         off(s1, s2) = hypot((meanxy(s2) .- meanxy(s1))...)
         @test off(state[1], state[2]) < 0.010          # known ~94 nm offset removed to < 10 nm
@@ -666,9 +703,12 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
 
     @testset "GaussMLE emitter types + abstract-eltype round-trip" begin
         # Regression coverage for the AbstractEmitter type-erasure + serialization fix:
-        #  - _with_dataset must handle EVERY advertised GaussMLE emitter type
-        #    (GaussianXYNB → Emitter2DFitGaussMLE, AstigmaticXYZNB → Emitter3DFitGaussMLE),
-        #    or detectfit throws a MethodError the moment those fitters are used.
+        #  - detectfit sets each emitter's dataset field by mutating it in place
+        #    (all advertised emitter types are mutable structs, so this needs no
+        #    per-type dispatch — unlike the old positional-reconstruction
+        #    `_with_dataset`, removed once every type was confirmed mutable), for
+        #    EVERY advertised GaussMLE emitter type (GaussianXYNB → Emitter2DFitGaussMLE,
+        #    AstigmaticXYZNB → Emitter3DFitGaussMLE) as well as the standard ones.
         #  - save_smld/load_smld must round-trip those types and the standard-3D
         #    off-diagonal covariances, AND must key off the concrete emitter even when
         #    the SMLD is typed BasicSMLD{T,AbstractEmitter} (as the pre-narrowing
@@ -676,15 +716,18 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         cam = IdealCamera(8, 8, 0.1)
         T = Float64
 
-        # _with_dataset must not MethodError for the fixed-width / astigmatic types.
+        # Setting .dataset in place must work for the fixed-width / astigmatic types
+        # and leave every other field untouched.
         e2g = GaussMLE.Emitter2DFitGaussMLE{T}(0.1, 0.2, 1000.0, 5.0,
                 0.01, 0.012, 0.003, 20.0, 0.5, 0.4, 1, 1, 0, 1)
         e3g = GaussMLE.Emitter3DFitGaussMLE{T}(0.1, 0.2, 0.3, 1000.0, 5.0,
                 0.01, 0.012, 0.02, 0.003, 0.001, 0.002, 20.0, 0.5, 0.4, 1, 1, 0, 1)
-        @test SMLMAnalysis._with_dataset(e2g, 7).dataset == 7
-        @test SMLMAnalysis._with_dataset(e2g, 7).σ_xy ≈ 0.003
-        @test SMLMAnalysis._with_dataset(e3g, 7).dataset == 7
-        @test SMLMAnalysis._with_dataset(e3g, 7).σ_yz ≈ 0.002
+        e2g.dataset = 7
+        @test e2g.dataset == 7
+        @test e2g.σ_xy ≈ 0.003
+        e3g.dataset = 7
+        @test e3g.dataset == 7
+        @test e3g.σ_yz ≈ 0.002
 
         mktempdir() do dir
             # Emitter2DFitGaussMLE (GaussianXYNB) round-trip.

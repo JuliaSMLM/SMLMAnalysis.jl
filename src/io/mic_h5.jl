@@ -162,7 +162,7 @@ function load_mic_h5_block(filepath::String, block_num::Int)
         data_keys = sort([k for k in keys(zpos) if startswith(k, "Data")])
 
         if block_num < 1 || block_num > length(data_keys)
-            error("Block $block_num out of range (1:$(length(data_keys)))")
+            throw(ArgumentError("Block $block_num out of range (1:$(length(data_keys)))"))
         end
 
         dk = data_keys[block_num]

@@ -78,13 +78,13 @@ _step_summary(info::FilterInfo) = Dict{Symbol,Any}(
 )
 
 """
-    analyze(smld, cfg::FilterConfig; kwargs...) -> (filtered_smld, StepInfo)
+    analyze(smld, cfg::FilterConfig; outdir, step_number, verbose, checkpoint) -> (filtered_smld, StepInfo)
 
 Filter localizations by quality criteria.
 """
 function analyze(smld::BasicSMLD, cfg::FilterConfig;
                  outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
+                 checkpoint::Int=Checkpoint.EXPENSIVE)
     t = @elapsed (filtered, filter_info) = filter_step(smld, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose)
 
@@ -115,15 +115,26 @@ function _filter_smld(smld::BasicSMLD, cfg::FilterConfig)
         mask .&= [lo <= e.pvalue <= hi for e in emitters]
     end
 
-    # 3D-only axial filters; no-op on 2D SMLDs (emitters without z / σ_z).
-    if cfg.z !== nothing && length(emitters) > 0 && hasproperty(emitters[1], :z)
-        lo, hi = cfg.z
-        mask .&= [lo <= e.z <= hi for e in emitters]
+    # 3D-only axial filters; no-op on 2D SMLDs (emitters without z / σ_z). Warn once
+    # (not per-emitter) when the bound is set but has nothing to act on, rather than
+    # silently doing nothing -- the empty-emitters case is skipped since we can't
+    # tell 2D from 3D without an emitter to inspect.
+    if cfg.z !== nothing && length(emitters) > 0
+        if hasproperty(emitters[1], :z)
+            lo, hi = cfg.z
+            mask .&= [lo <= e.z <= hi for e in emitters]
+        else
+            @warn "FilterConfig.z has no effect: emitters have no z field (2D SMLD)"
+        end
     end
 
-    if cfg.sigma_z !== nothing && length(emitters) > 0 && hasproperty(emitters[1], :σ_z)
-        lo, hi = cfg.sigma_z
-        mask .&= [lo <= e.σ_z <= hi for e in emitters]
+    if cfg.sigma_z !== nothing && length(emitters) > 0
+        if hasproperty(emitters[1], :σ_z)
+            lo, hi = cfg.sigma_z
+            mask .&= [lo <= e.σ_z <= hi for e in emitters]
+        else
+            @warn "FilterConfig.sigma_z has no effect: emitters have no σ_z field (2D SMLD)"
+        end
     end
 
     if cfg.psf_sigma !== nothing && length(emitters) > 0
@@ -144,6 +155,8 @@ function _filter_smld(smld::BasicSMLD, cfg::FilterConfig)
             if !is_auto || (lo_x > 0 && hi_x > 0 && lo_y > 0 && hi_y > 0)
                 mask .&= [lo_x <= e.σx <= hi_x && lo_y <= e.σy <= hi_y for e in emitters]
             end
+        else
+            @warn "FilterConfig.psf_sigma has no effect: emitter type $(typeof(emitters[1])) has no PSF-width field"
         end
     end
 
@@ -166,7 +179,7 @@ function _get_psf_sigma_bounds(range_spec, values::Vector)
     elseif range_spec isa Tuple{Float64, Float64}
         return range_spec
     else
-        error("psf_sigma_range must be :auto or (min, max) tuple, got: $range_spec")
+        throw(ArgumentError("psf_sigma_range must be :auto or (min, max) tuple, got: $range_spec"))
     end
 end
 

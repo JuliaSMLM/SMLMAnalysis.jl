@@ -108,6 +108,9 @@ export CalibrationConfig, CalibrationResult
 
 # Re-export from SMLMDriftCorrection
 export driftcorrect
+# Re-export DriftConfig (used directly as a pipeline step, like RenderConfig)
+const DriftConfig = SMLMDriftCorrection.DriftConfig
+export DriftConfig
 # Re-export alignment API (used by CrossAlignConfig step)
 const AlignConfig = SMLMDriftCorrection.AlignConfig
 const AlignInfo = SMLMDriftCorrection.AlignInfo
@@ -115,6 +118,9 @@ export align_smld, AlignConfig, AlignInfo
 
 # Re-export from SMLMBaGoL
 export run_bagol, BaGoLDiagnostics
+# Re-export BaGoLConfig (upstream owns the config, used directly as a pipeline step)
+const BaGoLConfig = SMLMBaGoL.BaGoLConfig
+export BaGoLConfig
 
 # Re-export from SMLMRender
 export render
@@ -181,13 +187,10 @@ include("steps/filter.jl")
 export FilterConfig
 
 include("steps/frameconnect.jl")
-# FrameConnectConfig is re-exported above (from SMLMFrameConnection)
-
-# CalibrationConfig is re-exported above (from SMLMFrameConnection)
+# FrameConnectConfig / CalibrationConfig are re-exported above (from SMLMFrameConnection)
 
 include("steps/driftcorrect.jl")
-# DriftConfig is defined as const alias in driftcorrect.jl and exported below
-export DriftConfig
+# DriftConfig is re-exported above (from SMLMDriftCorrection)
 
 include("steps/densityfilter.jl")
 export DensityFilterConfig
@@ -207,7 +210,7 @@ include("steps/crosscorr.jl")
 export CrossCorrConfig
 
 include("steps/bagol.jl")
-export BaGoLConfig
+# BaGoLConfig is re-exported above (from SMLMBaGoL)
 
 include("steps/clustering.jl")
 # Clustering config types (DBSCANConfig/HopkinsConfig/…) are re-exported above
@@ -278,8 +281,6 @@ end
 #                           path polls NVML, which some GPUs do not support)
 #   - outdir  = nothing   → no disk writes
 #   - GaussianXYNBS       → Emitter2DFitSigma, the path the examples exercise
-#                           (GaussianXYNB/Emitter2DFitGaussMLE lacks a
-#                           `_with_dataset` method — see steps/common.jl)
 #   - verbose = SILENT    → no build-time log spam
 #   - seeded, dense data  → deterministic and never empty; sparse localization
 #                           sets crash downstream reductions over emitter arrays
