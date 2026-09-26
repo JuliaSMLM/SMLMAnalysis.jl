@@ -95,6 +95,7 @@ See the SMLMRender documentation for the full field list (`target`, `color`,
 (smld, _) = analyze(smld, RenderConfig(zoom = 10, color_by = :photons, colormap = :viridis))
 
 # Get the image array directly
+using SMLMRender   # Pkg.add("SMLMRender") — needed to call render() directly, not through analyze()
 (img, rinfo) = SMLMRender.render(smld, RenderConfig(zoom = 20))
 ```
 

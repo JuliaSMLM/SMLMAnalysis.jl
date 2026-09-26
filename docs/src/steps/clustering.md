@@ -104,6 +104,8 @@ noise points are dropped from the returned SMLD rather than labeled `0`).
 (labeled, info) = analyze(smld, DBSCANConfig(eps_nm = 50.0, min_points = 5))
 info.info.n_clusters                       # number of clusters found
 (labeled, _) = analyze(labeled, RenderConfig(zoom = 20))  # pass-through; labels flow through emitter.id
+
+using SMLMRender   # Pkg.add("SMLMRender") — needed to call render() directly, not through analyze()
 (img, _) = SMLMRender.render(labeled, RenderConfig(zoom = 20))       # image array, colored by cluster id
 
 # Read-only: is the data clustered at all?
