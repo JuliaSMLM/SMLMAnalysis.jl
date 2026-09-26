@@ -9,6 +9,12 @@ KDTree range queries with Ripley's isotropic edge correction.
 - g(r) > 1: spatial clustering / co-localization
 - g(r) = 1: random (CSR)
 - g(r) < 1: exclusion / anti-correlation
+
+Each channel's density normalizes against its OWN camera's whole pixel-edge FOV area
+(`(x_max-x_min)*(y_max-y_min)`), not the localizations' actual spatial extent. When the
+sample occupies only part of the FOV (e.g. a small cell in a large field), the true local
+density is higher than this FOV-wide estimate, so even CSR data confined to that
+sub-region will read g(r) > 1 rather than tending to 1.
 """
 
 """

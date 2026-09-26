@@ -21,8 +21,9 @@ Run independent analysis pipelines for each channel, then execute multi-target
 steps (composite rendering, cross-channel alignment, etc.) via dispatch.
 
 Each element of `channels` is a `(data, AnalysisConfig)` tuple where `data` is an
-image stack (or Vector of stacks) or file path. The `config.labels` must match the
-number of channels.
+image stack (or Vector of stacks), or `nothing` for a file-based channel (one whose
+`AnalysisConfig`'s `DetectFitConfig` has `path`/`paths` set — `data` is never itself a
+file path). The `config.labels` must match the number of channels.
 
 # Arguments
 - `channels`: Vector of `(data, AnalysisConfig)` tuples, one per target/color
