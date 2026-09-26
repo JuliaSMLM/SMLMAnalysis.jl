@@ -202,7 +202,7 @@ config = AnalysisConfig(
 )
 println("  Steps: $(length(config.steps))")
 for (i, step) in enumerate(config.steps)
-    println("    $i. $(step_name(step))")
+    println("    $i. $(SMLMAnalysis.step_name(step))")
 end
 println()
 

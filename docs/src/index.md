@@ -64,7 +64,7 @@ deciding the next step:
                         boxer = BoxerConfig(boxsize = 9, psf_sigma = 0.130)))
 (smld, _) = analyze(smld, FilterConfig(photons = (500.0, Inf)))
 (smld, _) = analyze(smld, RenderConfig(zoom = 20, colormap = :inferno))  # render step is a pass-through
-(img,  _) = render(smld, RenderConfig(zoom = 20, colormap = :inferno))   # get the image array directly
+(img,  _) = SMLMRender.render(smld, RenderConfig(zoom = 20, colormap = :inferno))   # get the image array directly
 ```
 
 See **[The Pipeline Model](@ref)** for why this dispatch design makes steps

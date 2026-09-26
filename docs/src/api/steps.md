@@ -33,7 +33,7 @@ BaGoLConfig
 !!! note "CalibrationConfig is a sub-config"
     `CalibrationConfig` configures uncertainty calibration *inside*
     `FrameConnectConfig` (via its `calibration=` field) — it is **not** a separate
-    pipeline step. `CalibrationResult` holds its output.
+    pipeline step. `SMLMFrameConnection.CalibrationResult` holds its output.
 
 ### Clustering (re-exported)
 
@@ -51,12 +51,15 @@ Each step's `analyze()` returns a [`StepInfo`](@ref) whose `.info` field holds t
 step's typed info struct.
 
 ```@docs
-DetectFitInfo
-FilterInfo
-IntensityFilterInfo
-DensityFilterInfo
-BaGoLInfo
+SMLMAnalysis.DetectFitInfo
+SMLMAnalysis.FilterInfo
+SMLMAnalysis.IntensityFilterInfo
+SMLMAnalysis.DensityFilterInfo
+SMLMAnalysis.BaGoLInfo
 ```
+
+These info structs are not exported (reached via `.info` on a `StepInfo`, not
+typed directly) — use `SMLMAnalysis.Name` when a type annotation is needed.
 
 !!! note "Upstream info types"
     Some steps return their upstream packages' info structs:

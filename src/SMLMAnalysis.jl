@@ -38,12 +38,19 @@ config = AnalysisConfig(
 ```
 
 # Re-exported Types
-Key types from ecosystem packages are re-exported for convenience:
-- SMLMData: AbstractCamera, IdealCamera, SCMOSCamera, BasicSMLD, Emitter types
-- GaussMLE: GaussMLEConfig, PSF models, ROIBatch
-- SMLMFrameConnection: FrameConnectConfig
-- SMLMDriftCorrection: DriftConfig
-- SMLMRender: render strategies
+Only the names a user must type to build/run a pipeline are exported; see
+`api_overview.md` for the exact list. Highlights:
+- SMLMData: IdealCamera, SCMOSCamera (cameras)
+- GaussMLE: GaussMLEConfig, PSF models
+- SMLMFrameConnection: FrameConnectConfig, CalibrationConfig
+- SMLMDriftCorrection: DriftConfig, AlignConfig
+- SMLMBaGoL: BaGoLConfig
+- SMLMRender: RenderConfig, render strategies
+- SMLMClustering: clustering/spatial-statistics/edge-classify config types
+
+Result/info structs (e.g. `AnalysisResult`, `DetectFitInfo`) and upstream verbs
+(`simulate`, `render`, `cluster`, `fit`, …) are not exported — reach them via
+`SMLMAnalysis.Name` or their owning package.
 """
 module SMLMAnalysis
 
@@ -71,20 +78,11 @@ using NearestNeighbors
 using Optim
 using Distributions: Poisson, ccdf, Gamma, pdf
 
-# Re-export from SMLMData
-# AbstractCamera must be declared explicitly: CairoMakie also exports an unrelated
-# Makie.AbstractCamera, and the ambiguity would leave the exported binding
-# undeclared (dangling export → UndefVarError in downstream `using` code).
-using SMLMData: AbstractCamera
-export AbstractCamera, IdealCamera, SCMOSCamera
-export Emitter2DFit, Emitter3DFit
-export BasicSMLD, ROIBatch
-export AbstractSMLMConfig, AbstractSMLMInfo
-
-# Re-export from SMLMSim
-export StaticSMLMConfig
-export simulate, gen_images
-export Nmer2D, Line2D, GenericFluor
+# Re-export from SMLMData (cameras only — a user must type these to build a
+# pipeline; Emitter2DFit/Emitter3DFit/BasicSMLD/ROIBatch are receive-only and
+# reached via SMLMData.Name; AbstractCamera/AbstractSMLMConfig/AbstractSMLMInfo
+# are extension hooks, not exported — see workflows/extending.md)
+export IdealCamera, SCMOSCamera
 
 # Re-export from SMLMBoxer
 export BoxerConfig
@@ -92,83 +90,61 @@ export BoxerConfig
 # Re-export from GaussMLE
 export GaussMLEConfig
 export GaussianXYNB, GaussianXYNBS, GaussianXYNBSXSY, AstigmaticXYZNB
-# Re-export fit - use GaussMLE's fit for fitters
-using GaussMLE: fit
-export fit
 
 # Re-export from SMLMFrameConnection
-export frameconnect
 # Re-export FrameConnectConfig (used directly as step config)
 const FrameConnectConfig = SMLMFrameConnection.FrameConnectConfig
 export FrameConnectConfig
-# Re-export CalibrationConfig and CalibrationResult (used via FrameConnectConfig.calibration)
+# Re-export CalibrationConfig (used via FrameConnectConfig.calibration)
 const CalibrationConfig = SMLMFrameConnection.CalibrationConfig
-const CalibrationResult = SMLMFrameConnection.CalibrationResult
-export CalibrationConfig, CalibrationResult
+export CalibrationConfig
 
 # Re-export from SMLMDriftCorrection
-export driftcorrect
 # Re-export DriftConfig (used directly as a pipeline step, like RenderConfig)
 const DriftConfig = SMLMDriftCorrection.DriftConfig
 export DriftConfig
-# Re-export alignment API (used by CrossAlignConfig step)
+# Re-export AlignConfig (used by CrossAlignConfig step)
 const AlignConfig = SMLMDriftCorrection.AlignConfig
-const AlignInfo = SMLMDriftCorrection.AlignInfo
-export align_smld, AlignConfig, AlignInfo
+export AlignConfig
 
 # Re-export from SMLMBaGoL
-export run_bagol, BaGoLDiagnostics
 # Re-export BaGoLConfig (upstream owns the config, used directly as a pipeline step)
 const BaGoLConfig = SMLMBaGoL.BaGoLConfig
 export BaGoLConfig
 
 # Re-export from SMLMRender
-export render
 export HistogramRender, GaussianRender, CircleRender, EllipseRender
 # Re-export RenderConfig from SMLMRender (used directly as step config)
 const RenderConfig = SMLMRender.RenderConfig
 export RenderConfig
 
 # Re-export from SMLMClustering
-export cluster, cluster_statistics
-const AbstractClusterConfig = SMLMClustering.AbstractClusterConfig
-const AbstractStatisticsConfig = SMLMClustering.AbstractStatisticsConfig
-const ClusterInfo = SMLMClustering.ClusterInfo
-const ClusterStatisticsInfo = SMLMClustering.ClusterStatisticsInfo
 const DBSCANConfig = SMLMClustering.DBSCANConfig
 const HDBSCANConfig = SMLMClustering.HDBSCANConfig
 const HierarchicalConfig = SMLMClustering.HierarchicalConfig
 const VoronoiConfig = SMLMClustering.VoronoiConfig
 const HopkinsConfig = SMLMClustering.HopkinsConfig
 const VoronoiDensityConfig = SMLMClustering.VoronoiDensityConfig
-export AbstractClusterConfig, AbstractStatisticsConfig
-export ClusterInfo, ClusterStatisticsInfo
 export DBSCANConfig, HDBSCANConfig, HierarchicalConfig, VoronoiConfig
 export HopkinsConfig, VoronoiDensityConfig
 
 # Re-export from SMLMClustering — edge classification
-const AbstractEdgeClassifyConfig = SMLMClustering.AbstractEdgeClassifyConfig
 const OuterPolygonConfig = SMLMClustering.OuterPolygonConfig
 const KdeValleyConfig = SMLMClustering.KdeValleyConfig
-const EdgeClassifyInfo = SMLMClustering.EdgeClassifyInfo
-const CellPolygon = SMLMClustering.CellPolygon
-const MultiCellMask = SMLMClustering.MultiCellMask
-export in_cell, interior_mask, interior_fraction
-export AbstractEdgeClassifyConfig, OuterPolygonConfig, KdeValleyConfig
-export EdgeClassifyInfo, CellPolygon, MultiCellMask
+export OuterPolygonConfig, KdeValleyConfig
 
 # ============================================================
 # Core types
 # ============================================================
 include("types.jl")
 export Verbosity, Checkpoint
-export AnalysisConfig, AnalysisResult, AnalysisInfo, StepInfo
+export AnalysisConfig
 export stepinfo, stepinfos
-export DetectFitInfo, FilterInfo, DensityFilterInfo, IntensityFilterInfo, BaGoLInfo
-export CompositeRenderInfo, CrossAlignInfo, CrossCorrInfo
-export AbstractMultiTargetStep
-export MultiTargetConfig, MultiTargetResult, MultiTargetInfo
-export step_name
+export MultiTargetConfig
+# AnalysisResult/AnalysisInfo/StepInfo/*Info structs, AbstractMultiTargetStep,
+# MultiTargetResult/MultiTargetInfo, and the step_name/step_outdir extension
+# hooks are not exported — reach them via SMLMAnalysis.Name (see
+# api_overview.md's "Non-exported but public" section).
 
 # ============================================================
 # Step configs and pure step functions
@@ -177,8 +153,8 @@ export step_name
 # Forward-declare analyze so step files can add dispatch methods
 function analyze end
 
-include("steps/common.jl")  # Shared helpers for steps
-export step_outdir
+include("steps/common.jl")  # Shared helpers for steps (step_outdir is an
+# extension hook, not exported — see workflows/extending.md)
 
 include("steps/detectfit.jl")
 export DetectFitConfig

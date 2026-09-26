@@ -34,11 +34,11 @@ moment a downstream step subsets emitters); it lives in the step's
 
 ```julia
 (smld, step_info) = analyze(smld, KdeValleyConfig())
-info = step_info.info                 # ::EdgeClassifyInfo
+info = step_info.info                 # ::SMLMClustering.EdgeClassifyInfo
 info.class                            # per-emitter Vector{Symbol}
-interior_mask(info)                   # BitVector of the :interior emitters
-in_cell(info)                         # :interior ∪ :membrane
-interior_fraction(info)               # scalar summary
+SMLMClustering.interior_mask(info)      # BitVector of the :interior emitters
+SMLMClustering.in_cell(info)            # :interior ∪ :membrane
+SMLMClustering.interior_fraction(info)  # scalar summary
 ```
 
 Only the cell-mask **geometry** travels downstream, mirrored into `metadata`:
