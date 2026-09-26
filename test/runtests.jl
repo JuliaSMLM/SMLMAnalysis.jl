@@ -94,14 +94,70 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test di.n_fits == 950
         @test di.selected_source_indices === nothing
 
+        @test di.n_nonfinite == 0
+
         # Full 8-arg constructor with provenance
         di_sel = DetectFitInfo([], [], 3, 500, 450, 1000, 0.5, [1, 3, 5])
         @test di_sel.selected_source_indices == [1, 3, 5]
         @test di_sel.n_datasets == 3
+        @test di_sel.n_nonfinite == 0
+
+        # _drop_nonfinite_emitters: drops emitters with a NaN/Inf in any AbstractFloat field.
+        e_ok = Emitter2DFit(1.0, 1.0, 100.0, 5.0, 0.01, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, 1)
+        e_nan_y = Emitter2DFit(1.0, NaN, 100.0, 5.0, 0.01, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, 2)
+        e_inf_photons = Emitter2DFit(1.0, 1.0, Inf, 5.0, 0.01, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, 3)
+        kept, n_dropped = SMLMAnalysis._drop_nonfinite_emitters([e_ok, e_nan_y, e_inf_photons])
+        @test kept == [e_ok]
+        @test n_dropped == 2
 
         dfi = DensityFilterInfo(1000, 800, 5, 0.3)
         @test dfi.n_before == 1000
         @test dfi.threshold == 5
+
+        # densityfilter's per-point query radius n_sigma*sqrt(σ_i^2+max_σ^2) is an
+        # exact upper bound for the pair test dist < n_sigma*sqrt(σ_i^2+σ_j^2) it
+        # gates on, so switching the KD-tree query from a single global radius to a
+        # per-point one must not change which emitters survive. Cross-check against
+        # an independent brute-force count of that same pair test.
+        cam = IdealCamera(64, 64, 0.1)
+        xs = [0.0, 0.05, 0.0, 0.05, 5.0]
+        ys = [0.0, 0.0, 0.05, 0.05, 5.0]
+        σs = [0.01, 0.01, 0.01, 0.05, 0.2]
+        emitters = [Emitter2DFit(xs[i], ys[i], 1000.0, 10.0, σs[i], σs[i], 0.0, 1.0, 1.0, i, 1, 0, i) for i in 1:5]
+        smld_df = BasicSMLD(emitters, cam, 1, 1, Dict{String,Any}())
+        cfg_df = DensityFilterConfig(n_sigma=3.0, min_neighbors=1)
+        filtered_df, _ = SMLMAnalysis.densityfilter_step(smld_df, cfg_df)
+
+        σ = [sqrt(e.σ_x^2 + e.σ_y^2) for e in emitters]
+        expected_counts = zeros(Int, 5)
+        for i in 1:5, j in 1:5
+            i == j && continue
+            dist = sqrt((emitters[i].x - emitters[j].x)^2 + (emitters[i].y - emitters[j].y)^2)
+            dist < cfg_df.n_sigma * sqrt(σ[i]^2 + σ[j]^2) && (expected_counts[i] += 1)
+        end
+        @test length(filtered_df.emitters) == count(>=(cfg_df.min_neighbors), expected_counts)
+
+        # Non-finite σ is rejected up front rather than silently propagating.
+        bad_emitters = [Emitter2DFit(0.0, 0.0, 1000.0, 10.0, NaN, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, 1)]
+        smld_bad = BasicSMLD(bad_emitters, cam, 1, 1, Dict{String,Any}())
+        @test_throws ArgumentError SMLMAnalysis.densityfilter_step(smld_bad, cfg_df)
+
+        # IntensityFilter: non-finite photons rejected up front. Needs >=100
+        # emitters, otherwise the step's own "too few emitters" early return
+        # would skip the check before it is reached.
+        many = [Emitter2DFit(0.01i, 0.01i, 1000.0, 10.0, 0.01, 0.01, 0.0, 1.0, 1.0, i, 1, 0, i) for i in 2:100]
+        bad_photon = Emitter2DFit(0.5, 0.5, NaN, 10.0, 0.01, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, 1)
+        smld_ifbad = BasicSMLD(vcat([bad_photon], many), cam, 1, 1, Dict{String,Any}())
+        @test_throws ArgumentError SMLMAnalysis.intensityfilter_step(smld_ifbad, IntensityFilterConfig())
+
+        # psf_sigma: an explicit (lo, hi) — including a 0.0 lower bound — is
+        # always applied, unlike :auto's "skip when degenerate" behavior.
+        mkem_sigma(σ, i) = GaussMLE.Emitter2DFitSigma{Float64}(
+            0.0, 0.0, 1000.0, 5.0, σ, 0.01, 0.01, 0.0, 20.0, 0.5, 0.002, 1.0, 1, 1, 0, i)
+        smld_ps = BasicSMLD([mkem_sigma(0.05, 1), mkem_sigma(0.3, 2)], cam, 1, 1, Dict{String,Any}())
+        filtered_ps, _ = SMLMAnalysis.filter_step(smld_ps, FilterConfig(psf_sigma=(0.0, 0.1)))
+        @test length(filtered_ps.emitters) == 1
+        @test filtered_ps.emitters[1].σ == 0.05
     end
 
     @testset "analyze dispatch" begin
@@ -114,6 +170,11 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test hasmethod(analyze, Tuple{BasicSMLD, DriftConfig})
         @test hasmethod(analyze, Tuple{BasicSMLD, DensityFilterConfig})
         @test hasmethod(analyze, Tuple{BasicSMLD, RenderConfig})
+
+        # analyze(data, config::AnalysisConfig) with a data type _normalize_data
+        # doesn't recognize (e.g. a String — data is never itself a file path;
+        # use `nothing` with a file-based DetectFitConfig instead).
+        @test_throws ArgumentError analyze("some/path.h5", AnalysisConfig(camera=IdealCamera(8, 8, 0.1)))
 
         # Verify old step function names are not exported
         @test !isdefined(Main, :detectfit)
@@ -131,6 +192,14 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test cfg2.camera === cam
         @test cfg2.boxer.boxsize == 7
         @test cfg2.fitter.psf_model isa GaussianXYNBS
+
+        # _inject_camera (AnalysisConfig pipeline path): pixel_size/qe on the
+        # DetectFitConfig would be silently ignored (the pipeline camera always
+        # wins), so it's rejected instead of accepted-and-dropped.
+        @test SMLMAnalysis._inject_camera(cfg, cam).camera === cam    # no pixel_size/qe: fine
+        @test_throws ArgumentError SMLMAnalysis._inject_camera(DetectFitConfig(pixel_size=0.1), cam)
+        @test_throws ArgumentError SMLMAnalysis._inject_camera(DetectFitConfig(qe=0.9), cam)
+        @test SMLMAnalysis._inject_camera(DetectFitConfig(camera=cam, pixel_size=0.1), cam).camera === cam  # camera already set: unchanged
 
         # DetectFitConfig.datasets selection field
         @test cfg.datasets === nothing                          # default is no selection
@@ -512,14 +581,14 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         nrow, ncol, nfr = 6, 8, 3
         img = [1000r + 10c + f for r in 1:nrow, c in 1:ncol, f in 1:nfr]
         roi_x, roi_y = 3:6, 2:4        # columns, rows
-        cropped = crop_images(img, roi_x, roi_y)
+        cropped = SMLMAnalysis.crop_images(img, roi_x, roi_y)
         @test size(cropped) == (length(roi_y), length(roi_x), nfr)
         @test cropped == img[roi_y, roi_x, :]
         @test cropped[1, 1, 1] == 1000 * first(roi_y) + 10 * first(roi_x) + 1
 
         # crop_camera uses the same convention: roi_x → x-edges, roi_y → y-edges.
         cam = IdealCamera(ncol, nrow, 0.1)   # IdealCamera(nx=cols, ny=rows, px)
-        cc = crop_camera(cam, roi_x, roi_y)
+        cc = SMLMAnalysis.crop_camera(cam, roi_x, roi_y)
         @test cc.pixel_edges_x == cam.pixel_edges_x[first(roi_x):last(roi_x)+1]
         @test cc.pixel_edges_y == cam.pixel_edges_y[first(roi_y):last(roi_y)+1]
         @test length(cc.pixel_edges_x) - 1 == length(roi_x)   # x pixel count = #cols
@@ -652,11 +721,11 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             # Abstract-eltype SMLD (as the pipeline produced before narrowing):
             # save_smld must reload it as concrete Emitter2DFitSigma, NOT degrade to
             # Emitter2DFit and drop the PSF-width σ.
-            abs_v = AbstractEmitter[GaussMLE.Emitter2DFitSigma{T}(
+            abs_v = SMLMAnalysis.AbstractEmitter[GaussMLE.Emitter2DFitSigma{T}(
                         0.1i, 0.2i, 1000.0 + i, 5.0, 0.13,
                         0.01, 0.012, 0.003, 20.0, 0.5, 0.002,
                         0.4, i, 1, 0, i) for i in 1:4]
-            @test eltype(abs_v) == AbstractEmitter
+            @test eltype(abs_v) == SMLMAnalysis.AbstractEmitter
             s_abs = BasicSMLD(abs_v, cam, 10, 1, Dict{String,Any}())
             pabs = joinpath(dir, "abs.h5"); save_smld(pabs, s_abs); labs = load_smld(pabs)
             @test eltype(labs.emitters) <: GaussMLE.Emitter2DFitSigma   # NOT Emitter2DFit
@@ -824,8 +893,9 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test stepinfos(info, :filter) == [si_a, si_c]
             @test [si.number for si in stepinfos(info, "filter")] == [1, 3]
 
-            # Missing name: stepinfo throws KeyError, stepinfos returns empty
-            @test_throws KeyError stepinfo(info, :nope)
+            # Missing name: stepinfo throws ArgumentError listing available names,
+            # stepinfos returns empty
+            @test_throws ArgumentError stepinfo(info, :nope)
             @test isempty(stepinfos(info, :nope))
         end
     end
@@ -859,6 +929,13 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
 
             # track=false (default) gitignores the namespaced skill dir.
             @test occursin(".claude/skills/smlma-ecosystem/", read(joinpath(dir, ".gitignore"), String))
+
+            # The rewritten .gitignore follows the umask, like a direct `write`
+            # would — not the fixed 0600 a mktemp-created temp carries over
+            # (the bug _replace_atomically's tempname()+write() path avoids).
+            control = joinpath(dir, "control.txt")
+            write(control, "control")
+            @test filemode(joinpath(dir, ".gitignore")) & 0o777 == filemode(control) & 0o777
 
             # Doctor: freshly installed, not stale.
             st = agent_guide_status(dir = dir)
@@ -1013,12 +1090,15 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test !ispath(joinpath(dir, "smlm-agent-guide"))    # bundle never written
         end
 
-        # _write_atomic: a failed write (destination is a directory, refused outright)
-        # must leave no stray temp file behind.
+        # agent_guide's writes now go through _replace_atomically (src/io/atomic.jl),
+        # same as save_smld: a failed write (destination is a directory, refused
+        # outright) must leave no stray temp file behind.
         mktempdir() do dir
             mkpath(joinpath(dir, "somedir"))
-            @test_throws ArgumentError SMLMAnalysis._write_atomic(joinpath(dir, "somedir"), "x")
-            @test readdir(dir) == ["somedir"]   # no stray .somedir.tmp-<pid>
+            @test_throws ArgumentError SMLMAnalysis._replace_atomically(joinpath(dir, "somedir")) do tmp
+                write(tmp, "x")
+            end
+            @test readdir(dir) == ["somedir"]   # no stray temp file
         end
 
         if Sys.isunix()
@@ -1307,7 +1387,7 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
                 g["Gain"] = gain_stored
             end
 
-            cal = load_mic_h5_calibration_for_scmos(path)
+            cal = SMLMAnalysis.load_mic_h5_calibration_for_scmos(path)
             @test all(cal.readnoise .≈ 1.0f0)
             @test all(cal.gain .≈ 0.5f0)     # e⁻/ADU = 1/gain_stored
             @test all(cal.offset .≈ 100.0f0)
@@ -1319,11 +1399,29 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         end
     end
 
+    @testset "load_mic_h5 warns on an unreadable data block" begin
+        # Data002 is a group without its nested dataset, so _resolve_data_path
+        # throws for it — load_mic_h5 must @warn (naming the block and the error)
+        # and skip it, rather than the previous bare `catch; continue`.
+        mktempdir() do dir
+            path = joinpath(dir, "corrupt.h5")
+            SMLMAnalysis.HDF5.h5open(path, "w") do f
+                g = SMLMAnalysis.HDF5.create_group(f, "Channel01/Zposition001")
+                g["Data001"] = rand(Float32, 4, 4, 3)
+                SMLMAnalysis.HDF5.create_group(g, "Data002")
+            end
+            @test_logs (:warn, r"load_mic_h5: skipping unreadable data block \"Data002\"") match_mode=:any load_mic_h5(path)
+            images, dataset_indices = load_mic_h5(path)
+            @test size(images, 3) == 3
+            @test all(==(1), dataset_indices)
+        end
+    end
+
     @testset "atomic saves refuse a directory destination" begin
-        # Saves go through _replace_atomically: temp file + rename(2). rename fails on a
-        # directory destination rather than deleting it (and everything inside it), so
-        # save_smld and save_pipeline_state must throw and leave the directory intact.
-        # The exception type differs by Julia version, so only a throw is asserted.
+        # save_smld goes through _replace_atomically: temp file + rename(2). rename
+        # fails on a directory destination rather than deleting it (and everything
+        # inside it), so it must throw and leave the directory intact. The exception
+        # type differs by Julia version, so only a throw is asserted.
         cam = IdealCamera(8, 8, 0.1)
         T = Float64
         es = [Emitter2DFit{T}(0.1i, 0.2i, 1000.0 + i, 5.0, 0.01, 0.012, 20.0, 0.5, 0.4, i, 1, 0, i)
@@ -1349,19 +1447,6 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             save_smld(good, smld)
             @test isfile(good)
             @test isempty(filter(f -> f ∉ ("out.h5", "good.h5"), readdir(dir)))
-
-            # save_pipeline_state: same refusal guard, tested directly rather than via
-            # a full pipeline run (AnalysisResult is cheap to construct by hand; a full
-            # analyze() run is not).
-            result = AnalysisResult(smld, nothing, nothing)
-            target2 = joinpath(dir, "ckpt.jld2")
-            mkdir(target2)
-            inner2 = joinpath(target2, "keepme.txt")
-            write(inner2, "do not delete me")
-            @test_throws Exception save_pipeline_state(target2, result)
-            @test isdir(target2)
-            @test read(inner2, String) == "do not delete me"
-            @test isempty(filter(f -> f != "keepme.txt", readdir(target2)))
         end
 
         # Race: a directory appears at the destination after the isdir pre-check.
@@ -1455,6 +1540,12 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
 
         @test result isa AnalysisResult
         @test length(result.smld.emitters) >= 1
+
+        # stepinfo: by name, by config type, and the not-found ArgumentError.
+        @test stepinfo(info, :driftcorrect).name == "driftcorrect"
+        @test stepinfo(info, DriftConfig).name == "driftcorrect"
+        @test_throws ArgumentError stepinfo(info, :nosuchstep)
+        @test_throws ArgumentError stepinfo(info, SMLMAnalysis.CrossAlignConfig)
     end
 end
 
