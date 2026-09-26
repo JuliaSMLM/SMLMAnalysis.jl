@@ -201,7 +201,11 @@ function load_mic_h5(filepath::String;
                 data_path = _resolve_data_path(f, dk)
                 push!(frames_per_block, size(f[data_path], 3))
                 push!(valid_keys, dk)
-            catch
+            catch e
+                e isa InterruptException && rethrow()
+                # Skip blocks without valid data, but surface the loss — a silently
+                # dropped block otherwise shows up only as a frame-count mismatch.
+                @warn "load_mic_h5: skipping unreadable data block \"$dk\"" exception=e
                 continue
             end
         end

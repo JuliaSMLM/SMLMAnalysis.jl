@@ -128,9 +128,6 @@ end
 # Step Configs - use AbstractSMLMConfig from SMLMData
 # ============================================================
 
-# Alias for backward compatibility within this package
-const StepConfig = SMLMData.AbstractSMLMConfig
-
 """
     AbstractMultiTargetStep <: AbstractSMLMConfig
 
@@ -147,7 +144,7 @@ Derive step name from config type (e.g., `FilterConfig` → `"filter"`, `DriftCo
 step_name(cfg::SMLMData.AbstractSMLMConfig) = lowercase(replace(string(nameof(typeof(cfg))), r"Config|Options" => ""))
 
 # ============================================================
-# StepInfo - typed step record (replaces StepRecord)
+# StepInfo - typed step record
 # ============================================================
 """
     StepInfo <: AbstractSMLMInfo
@@ -178,24 +175,6 @@ function StepInfo(number::Int, cfg::SMLMData.AbstractSMLMConfig, elapsed_s::Floa
 end
 
 # ============================================================
-# StepRecord - deprecated, kept for JLD2 checkpoint backward compat
-# ============================================================
-struct StepRecord
-    number::Int
-    name::String
-    config::SMLMData.AbstractSMLMConfig
-    timestamp::DateTime
-    timing::Float64
-    summary::Dict{Symbol, Any}
-    info::Any
-end
-
-"""Convert legacy StepRecord to StepInfo."""
-function StepInfo(r::StepRecord)
-    StepInfo(r.number, r.name, r.config, r.timestamp, r.timing, r.summary, nothing)
-end
-
-# ============================================================
 # Native info structs for SMLMAnalysis-owned steps
 # ============================================================
 
@@ -208,6 +187,9 @@ Info from combined detection and fitting step.
 `DetectFitConfig.datasets` selected a subset (e.g. `[1,2,3,5,7]` when a
 corrupted block was skipped). `nothing` means no selection was applied and the
 output datasets correspond 1:1 to the resolved source slots.
+
+`n_nonfinite` counts fitted emitters dropped because a fit produced a non-finite
+value (NaN/Inf) in one of its `AbstractFloat` fields (x, y, photons, bg, σ, ...).
 """
 struct DetectFitInfo <: SMLMData.AbstractSMLMInfo
     boxes_info::Vector{Any}
@@ -218,11 +200,14 @@ struct DetectFitInfo <: SMLMData.AbstractSMLMInfo
     n_frames_per_dataset::Int
     elapsed_s::Float64
     selected_source_indices::Union{Vector{Int}, Nothing}
+    n_nonfinite::Int
 end
 
-# Back-compat constructor (old 7-arg form defaults selected_source_indices to nothing)
+# Back-compat constructors (older positional forms default newer fields)
 DetectFitInfo(boxes_info, fit_info, n_datasets, n_rois, n_fits, n_frames_per_dataset, elapsed_s) =
-    DetectFitInfo(boxes_info, fit_info, n_datasets, n_rois, n_fits, n_frames_per_dataset, elapsed_s, nothing)
+    DetectFitInfo(boxes_info, fit_info, n_datasets, n_rois, n_fits, n_frames_per_dataset, elapsed_s, nothing, 0)
+DetectFitInfo(boxes_info, fit_info, n_datasets, n_rois, n_fits, n_frames_per_dataset, elapsed_s, selected_source_indices) =
+    DetectFitInfo(boxes_info, fit_info, n_datasets, n_rois, n_fits, n_frames_per_dataset, elapsed_s, selected_source_indices, 0)
 
 """
     FilterInfo <: AbstractSMLMInfo
@@ -390,7 +375,10 @@ Immutable result from `analyze()`. Replaces the old mutable `Analysis` struct.
 
 # Fields
 - `smld::BasicSMLD`: Final SMLD after all steps
-- `smld_connected::Union{BasicSMLD, Nothing}`: Connected SMLD (if frameconnect was run)
+- `smld_connected::Union{BasicSMLD, Nothing}`: Connected SMLD, captured AT the FrameConnect
+  step (if one was run) — a snapshot of the pipeline state at that point, not updated by
+  later steps. In the common ordering where FrameConnect precedes Drift, this is the
+  pre-drift-correction SMLD, not the final one.
 - `drift_model::Any`: Drift model (if driftcorrect was run)
 
 # Access
@@ -422,9 +410,12 @@ end
 
 Complete description of an SMLM analysis pipeline.
 
-The `steps` vector contains upstream package configs (BoxerConfig, GaussMLEConfig, etc.)
-and SMLMAnalysis-specific configs (FilterConfig, DensityFilterConfig). The pipeline executes
-steps in order.
+The `steps` vector contains step configs — the ones `step_name`/`analyze` dispatch on
+directly, e.g. `DetectFitConfig`, `FilterConfig`, `DriftConfig`, `RenderConfig` — both
+SMLMAnalysis-owned (`FilterConfig`, `DensityFilterConfig`, …) and upstream ones taken as
+pipeline steps (`DriftConfig`, `RenderConfig`, …). `BoxerConfig`/`GaussMLEConfig` are NOT
+steps themselves; they nest inside `DetectFitConfig` (`boxer=...`, `fitter=...`), as the
+example below shows. The pipeline executes steps in order.
 
 # Fields
 - `camera::AbstractCamera`: Camera model (required, no default)
@@ -432,6 +423,8 @@ steps in order.
 - `roi::Union{NamedTuple, Nothing}`: Optional ROI as `(x=100:300, y=50:200)` to crop images/camera
 - `outdir::Union{String, Nothing}`: Output directory for results
 - `verbose::Int`: Verbosity level (default: STANDARD)
+- `checkpoint::Int`: Per-step output granularity (e.g. `Checkpoint.EXPENSIVE`); controls how
+  much intermediate state (figures, cached SMLDs) each step writes to `outdir`
 
 # Example
 ```julia
@@ -609,8 +602,9 @@ end
     stepinfo(info, name) -> StepInfo
 
 The FIRST pipeline step whose name matches `name` (a `Symbol` or `String`, e.g.
-`:frameconnect`), searching `info.step_infos`. Throws `KeyError` if none matches. Access
-the upstream typed info via `.info`, timing via `.elapsed_s`, config via `.config`.
+`:frameconnect`), searching `info.step_infos`. Throws `ArgumentError` (listing the
+available step names) if none matches. Access the upstream typed info via `.info`,
+timing via `.elapsed_s`, config via `.config`.
 
 For `MultiTargetInfo` this searches only the cross-channel `step_infos`, NOT the per-channel
 histories in `info.channels`. When a step name repeats (e.g. several `render` steps) this
@@ -620,7 +614,22 @@ returns the first; use [`stepinfos`](@ref) to get them all. (This differs from t
 function stepinfo(info::Union{AnalysisInfo,MultiTargetInfo}, name::Union{Symbol,AbstractString})
     key = String(name)
     idx = findfirst(si -> si.name == key, info.step_infos)
-    idx === nothing && throw(KeyError(key))
+    idx === nothing && throw(ArgumentError(
+        "no step named $(repr(key)); available step names: $(join(unique(si.name for si in info.step_infos), ", "))"))
+    return info.step_infos[idx]
+end
+
+"""
+    stepinfo(info::AnalysisInfo, T::Type{<:AbstractSMLMConfig}) -> StepInfo
+
+The FIRST pipeline step whose config `isa T`, searching `info.step_infos`. Throws
+`ArgumentError` (listing the available step names) if none matches. Useful when the step
+name is unknown or ambiguous but the config type is not, e.g. `stepinfo(info, DriftConfig)`.
+"""
+function stepinfo(info::AnalysisInfo, T::Type{<:SMLMData.AbstractSMLMConfig})
+    idx = findfirst(si -> si.config isa T, info.step_infos)
+    idx === nothing && throw(ArgumentError(
+        "no step with config isa $T; available step names: $(join(unique(si.name for si in info.step_infos), ", "))"))
     return info.step_infos[idx]
 end
 
@@ -634,6 +643,15 @@ several composite renders that the removed `steps` Dict hid behind suffixed keys
 """
 stepinfos(info::Union{AnalysisInfo,MultiTargetInfo}, name::Union{Symbol,AbstractString}) =
     filter(si -> si.name == String(name), info.step_infos)
+
+"""
+    stepinfos(info::AnalysisInfo, T::Type{<:AbstractSMLMConfig}) -> Vector{StepInfo}
+
+All steps whose config `isa T`, in pipeline order (empty if none). Mirrors the
+type-based [`stepinfo`](@ref).
+"""
+stepinfos(info::AnalysisInfo, T::Type{<:SMLMData.AbstractSMLMConfig}) =
+    filter(si -> si.config isa T, info.step_infos)
 
 function Base.show(io::IO, mtr::MultiTargetResult)
     n = sum(length(s.emitters) for s in mtr.smlds)
