@@ -14,14 +14,37 @@ AI-parseable API reference for SMLMAnalysis.jl.
 
 **Config provenance**: Some configs are defined locally (`DetectFitConfig`, `FilterConfig`), others are re-exported from upstream packages via const aliases (`DriftConfig = SMLMDriftCorrection.DriftConfig`).
 
+## Non-exported but public
+
+Only names a user must *type* to build/run a pipeline are exported (see the module
+docstring). Result/info structs are received via dot-access, not typed, so they are
+not exported; when a type annotation is still needed, reach them as `SMLMAnalysis.Name`:
+`AnalysisResult`, `AnalysisInfo`, `StepInfo`, `AbstractSMLMConfig`, `AbstractSMLMInfo`,
+`AbstractMultiTargetStep`, `MultiTargetResult`, `MultiTargetInfo`, `DetectFitInfo`,
+`FilterInfo`, `DensityFilterInfo`, `IntensityFilterInfo`, `BaGoLInfo`,
+`CompositeRenderInfo`, `CrossAlignInfo`, `CrossCorrInfo`. The `step_name`/`step_outdir`
+extension hooks (for [Extending the Pipeline](https://JuliaSMLM.github.io/SMLMAnalysis.jl/dev/workflows/extending/))
+are reached the same way.
+
+Upstream re-exports were trimmed to the same rule: `AbstractCamera`, `BasicSMLD`,
+`Emitter2DFit`/`Emitter3DFit`, `ROIBatch` (`SMLMData`); `StaticSMLMConfig`,
+`simulate`/`gen_images`, `Nmer2D`/`Line2D`/`GenericFluor` (`SMLMSim`); `fit` (`GaussMLE`);
+`frameconnect`, `CalibrationResult` (`SMLMFrameConnection`); `driftcorrect`, `align_smld`,
+`AlignInfo` (`SMLMDriftCorrection`); `run_bagol`, `BaGoLDiagnostics` (`SMLMBaGoL`);
+`render` (`SMLMRender`); `cluster`/`cluster_statistics`, `AbstractClusterConfig`,
+`AbstractStatisticsConfig`, `ClusterInfo`, `ClusterStatisticsInfo`,
+`in_cell`/`interior_mask`/`interior_fraction`, `AbstractEdgeClassifyConfig`,
+`EdgeClassifyInfo`, `CellPolygon`, `MultiCellMask` (`SMLMClustering`) all still work,
+qualified with their owning package.
+
 ## Core Functions
 
 ### analyze
 
 ```julia
-(result, info) = analyze(data, config::AnalysisConfig) -> (AnalysisResult, AnalysisInfo)
-(result, info) = analyze(config::AnalysisConfig) -> (AnalysisResult, AnalysisInfo)  # file-based
-(result, info) = analyze(data, steps...; camera, kwargs...) -> (AnalysisResult, AnalysisInfo)  # varargs
+(result, info) = analyze(data, config::AnalysisConfig) -> (SMLMAnalysis.AnalysisResult, SMLMAnalysis.AnalysisInfo)
+(result, info) = analyze(config::AnalysisConfig) -> (SMLMAnalysis.AnalysisResult, SMLMAnalysis.AnalysisInfo)  # file-based
+(result, info) = analyze(data, steps...; camera, kwargs...) -> (SMLMAnalysis.AnalysisResult, SMLMAnalysis.AnalysisInfo)  # varargs
 ```
 
 Run complete SMLM analysis pipeline. Returns tuple of (AnalysisResult, AnalysisInfo).
@@ -64,8 +87,8 @@ Each returns `(result, StepInfo)` where StepInfo wraps:
 Immutable result from `analyze()`.
 
 **Fields:**
-- `smld::BasicSMLD` - Final localizations
-- `smld_connected::Union{BasicSMLD, Nothing}` - Connected localizations (if frameconnect was run)
+- `smld::SMLMData.BasicSMLD` - Final localizations
+- `smld_connected::Union{SMLMData.BasicSMLD, Nothing}` - Connected localizations (if frameconnect was run)
 - `drift_model` - Drift correction model (if driftcorrect was run)
 
 ### AnalysisConfig
@@ -73,8 +96,8 @@ Immutable result from `analyze()`.
 Complete pipeline description.
 
 **Fields:**
-- `camera::AbstractCamera` - Camera model (required)
-- `steps::Vector{AbstractSMLMConfig}` - Ordered pipeline steps
+- `camera::SMLMData.AbstractCamera` - Camera model (required)
+- `steps::Vector{SMLMAnalysis.AbstractSMLMConfig}` - Ordered pipeline steps
 - `roi::Union{NamedTuple, Nothing}` - Optional ROI as `(x=100:300, y=50:200)`
 - `outdir::Union{String, Nothing}` - Output directory
 - `verbose::Int` - Verbosity level (default: `Verbosity.STANDARD`)
@@ -86,7 +109,7 @@ Aggregated metadata from pipeline run.
 
 **Fields:**
 - `elapsed_s::Float64` - Total elapsed time in seconds
-- `step_infos::Vector{StepInfo}` - Full step history
+- `step_infos::Vector{SMLMAnalysis.StepInfo}` - Full step history
 
 Look up a step by name with `stepinfo(info, name)` (first match, throws `ArgumentError`
 listing available step names if none) or `stepinfos(info, name)` (all matches, in order).
@@ -111,15 +134,15 @@ Logged after each step execution.
 **Fields:**
 - `number::Int` - Step number in the pipeline
 - `name::String` - Step name (derived from config type, e.g., `"filter"`)
-- `config::AbstractSMLMConfig` - Configuration used
+- `config::SMLMAnalysis.AbstractSMLMConfig` - Configuration used
 - `timestamp::DateTime` - When the step completed
 - `elapsed_s::Float64` - Duration in seconds
 - `summary::Dict{Symbol, Any}` - Step statistics (counts, rates, etc.)
-- `info::Union{AbstractSMLMInfo, Nothing}` - Typed upstream info struct (FilterInfo, DriftInfo, etc.)
+- `info::Union{SMLMAnalysis.AbstractSMLMInfo, Nothing}` - Typed upstream info struct (FilterInfo, DriftInfo, etc.)
 
 **Constructor:**
 ```julia
-StepInfo(number, cfg, elapsed_s, summary_dict; info=typed_info)
+SMLMAnalysis.StepInfo(number, cfg, elapsed_s, summary_dict; info=typed_info)
 ```
 
 ### MultiTargetConfig
@@ -129,7 +152,7 @@ Configuration for multi-channel analysis.
 **Fields:**
 - `labels::Vector{Symbol}` - Channel labels (e.g., `[:IgG, :C1q]`)
 - `colors::Vector{Symbol}` - Colors per channel (default: cyan/magenta for 2, CMY for 3)
-- `steps::Vector{AbstractMultiTargetStep}` - Multi-target steps run after the
+- `steps::Vector{SMLMAnalysis.AbstractMultiTargetStep}` - Multi-target steps run after the
   per-channel pipelines (`CompositeRenderConfig`, `CrossAlignConfig`, `CrossCorrConfig`)
 - `outdir::String` - Output directory (required)
 - `verbose::Int` - Verbosity level (default: `Verbosity.STANDARD`)
@@ -141,13 +164,13 @@ Result of multi-channel analysis. Access per-channel results via `result[:label]
 
 **Fields:**
 - `labels::Vector{Symbol}` - Channel labels
-- `smlds::Vector{BasicSMLD}` - Per-channel SMLDs (aligned if a `CrossAlignConfig` ran)
-- `channels::Dict{Symbol, AnalysisResult}` - Per-channel results; `.smld` is the same final (aligned) data as `smlds`, `.smld_connected` the channel's pre-alignment connected data
-- `step_infos::Vector{StepInfo}` - The cross-channel steps' infos
+- `smlds::Vector{SMLMData.BasicSMLD}` - Per-channel SMLDs (aligned if a `CrossAlignConfig` ran)
+- `channels::Dict{Symbol, SMLMAnalysis.AnalysisResult}` - Per-channel results; `.smld` is the same final (aligned) data as `smlds`, `.smld_connected` the channel's pre-alignment connected data
+- `step_infos::Vector{SMLMAnalysis.StepInfo}` - The cross-channel steps' infos
 - `outdir::String` - Root output directory
 
-`MultiTargetInfo` (the second return) has `elapsed_s`, `channels::Dict{Symbol,AnalysisInfo}`,
-and `step_infos::Vector{StepInfo}`; `stepinfo(info, :crossalign)` searches `step_infos`.
+`SMLMAnalysis.MultiTargetInfo` (the second return) has `elapsed_s`, `channels::Dict{Symbol,SMLMAnalysis.AnalysisInfo}`,
+and `step_infos::Vector{SMLMAnalysis.StepInfo}`; `stepinfo(info, :crossalign)` searches `step_infos`.
 
 ## Step Configs
 
@@ -324,7 +347,7 @@ re-exported: `DBSCANConfig`, `HDBSCANConfig`, `HierarchicalConfig`, `VoronoiConf
 
 Non-destructive interior/edge labelling of a cell's localizations. Config types
 re-exported: `OuterPolygonConfig`, `KdeValleyConfig`. The class is written to
-`info.class` / `interior_mask`; emitters are not removed.
+`info.class` / `SMLMClustering.interior_mask`; emitters are not removed.
 
 ```julia
 (smld, info) = analyze(smld, OuterPolygonConfig())
@@ -332,7 +355,7 @@ re-exported: `OuterPolygonConfig`, `KdeValleyConfig`. The class is written to
 
 ### Multi-target steps
 
-Dispatch on `Vector{BasicSMLD}` inside a `MultiTargetConfig` pipeline:
+Dispatch on `Vector{SMLMData.BasicSMLD}` inside a `MultiTargetConfig` pipeline:
 
 - `CompositeRenderConfig(; strategy, zoom, colors, clip_percentile=:auto, scalebar)` —
   multi-channel composite render (pass-through).
@@ -348,14 +371,14 @@ upstream docstring for types and meaning.
 
 ### Native to SMLMAnalysis
 
-- `DetectFitInfo`: `boxes_info`, `fit_info` (per-dataset upstream infos), `n_datasets`, `n_rois`, `n_fits`, `n_frames_per_dataset`, `elapsed_s`, `selected_source_indices`
-- `FilterInfo`: `n_before`, `n_after`, `elapsed_s`
-- `IntensityFilterInfo`: `n_before`, `n_after`, `field_mode`, `lambda_max_global`, `field_params`, `field_fit_r2`, `elapsed_s`, `p2_estimate` (or `nothing`), `p2_tail_threshold`, `p2_tail_obs`, `p2_tail_f2`
-- `DensityFilterInfo`: `n_before`, `n_after`, `threshold`, `elapsed_s`
-- `BaGoLInfo`: `n_locs_in`, `n_emitters`, `compression`, `final_μ`, `final_shape`, `n_partitions`, `tau_um`, `diagnostics` (`SMLMBaGoL.BaGoLDiagnostics`)
-- `CompositeRenderInfo`: `render_info`, `strategy`, `zoom`, `n_channels`, `elapsed_s`
-- `CrossAlignInfo`: `align_info` (upstream `AlignInfo`), `shifts` (per-channel `(x, y)` in µm), `max_shift_nm`, `elapsed_s`
-- `CrossCorrInfo`: `r`, `g`, `n_a`, `n_b`, `area`, `r_max`, `dr`, `channel_a`, `channel_b`, `elapsed_s`
+- `SMLMAnalysis.DetectFitInfo`: `boxes_info`, `fit_info` (per-dataset upstream infos), `n_datasets`, `n_rois`, `n_fits`, `n_frames_per_dataset`, `elapsed_s`, `selected_source_indices`
+- `SMLMAnalysis.FilterInfo`: `n_before`, `n_after`, `elapsed_s`
+- `SMLMAnalysis.IntensityFilterInfo`: `n_before`, `n_after`, `field_mode`, `lambda_max_global`, `field_params`, `field_fit_r2`, `elapsed_s`, `p2_estimate` (or `nothing`), `p2_tail_threshold`, `p2_tail_obs`, `p2_tail_f2`
+- `SMLMAnalysis.DensityFilterInfo`: `n_before`, `n_after`, `threshold`, `elapsed_s`
+- `SMLMAnalysis.BaGoLInfo`: `n_locs_in`, `n_emitters`, `compression`, `final_μ`, `final_shape`, `n_partitions`, `tau_um`, `diagnostics` (`SMLMBaGoL.BaGoLDiagnostics`)
+- `SMLMAnalysis.CompositeRenderInfo`: `render_info`, `strategy`, `zoom`, `n_channels`, `elapsed_s`
+- `SMLMAnalysis.CrossAlignInfo`: `align_info` (upstream `SMLMDriftCorrection.AlignInfo`), `shifts` (per-channel `(x, y)` in µm), `max_shift_nm`, `elapsed_s`
+- `SMLMAnalysis.CrossCorrInfo`: `r`, `g`, `n_a`, `n_b`, `area`, `r_max`, `dr`, `channel_a`, `channel_b`, `elapsed_s`
 
 ### BoxesInfo (from SMLMBoxer)
 
@@ -375,7 +398,7 @@ end
 
 ```julia
 struct FrameConnectInfo{T}
-    connected::BasicSMLD{T}
+    connected::SMLMData.BasicSMLD{T}
     n_input::Int
     n_tracks::Int
     n_combined::Int
@@ -388,11 +411,11 @@ struct FrameConnectInfo{T}
     algorithm::Symbol
     n_preclusters::Int
     n_filtered::Int                     # tracks dropped by FrameConnectConfig.track_length
-    calibration                         # CalibrationResult, or nothing when no CalibrationConfig was set
+    calibration                         # SMLMFrameConnection.CalibrationResult, or nothing when no CalibrationConfig was set
 end
 ```
 
-`CalibrationResult` fields: `sigma_motion_nm`, `k_scale`, `A`, `B`, `A_sigma`, `B_sigma`,
+`SMLMFrameConnection.CalibrationResult` fields: `sigma_motion_nm`, `k_scale`, `A`, `B`, `A_sigma`, `B_sigma`,
 `r_squared`, `mean_chi2`, `n_pairs`, `n_tracks_used`, `n_tracks_filtered`, `bin_centers`,
 `bin_observed`, `bin_counts`, `frame_shifts`, `calibration_applied`, `warning`.
 
@@ -476,8 +499,8 @@ end
 ### save_smld / load_smld
 
 ```julia
-save_smld(path::String, smld::BasicSMLD)
-smld = load_smld(path::String) -> BasicSMLD
+save_smld(path::String, smld::SMLMData.BasicSMLD)
+smld = load_smld(path::String) -> SMLMData.BasicSMLD
 ```
 
 HDF5 serialization of SMLD data. (`save_smld` also takes

@@ -28,7 +28,8 @@ nothing here lives inside SMLMAnalysis:
 
 ```julia
 using SMLMAnalysis
-using SMLMAnalysis: analyze, StepInfo, Verbosity   # extend `analyze`, build a StepInfo
+using SMLMAnalysis: analyze, StepInfo, Verbosity, AbstractSMLMConfig, AbstractSMLMInfo   # extend `analyze`, build a StepInfo, subtype the config/info hooks
+using SMLMData: BasicSMLD
 
 # 1. A config type — parameters only, no logic.
 struct SpatialFilterConfig <: AbstractSMLMConfig

@@ -29,11 +29,15 @@ stepinfos
 
 ```@docs
 AnalysisConfig
-AnalysisResult
-AnalysisInfo
-StepInfo
+SMLMAnalysis.AnalysisResult
+SMLMAnalysis.AnalysisInfo
+SMLMAnalysis.StepInfo
 Checkpoint
 ```
+
+`AnalysisResult`, `AnalysisInfo`, and `StepInfo` are not exported (a user only
+*receives* them, never types them to build a pipeline) — reach them as
+`SMLMAnalysis.Name` when a type annotation is needed.
 
 ### Verbosity Levels
 

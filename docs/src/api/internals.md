@@ -11,4 +11,5 @@ releases — they are documented here for contributors. See
 ```@autodocs
 Modules = [SMLMAnalysis]
 Public = false
+Filter = not_documented_elsewhere
 ```
