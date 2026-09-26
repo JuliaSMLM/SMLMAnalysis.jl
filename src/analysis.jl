@@ -82,6 +82,16 @@ function _normalize_data(data::AbstractArray{<:Real,3})
     [data]
 end
 
+# Fallback: anything else (e.g. a file path String, mistaking this for the
+# file-based DetectFitConfig path) gets a message naming what IS accepted,
+# instead of the bare MethodError multiple dispatch would otherwise give.
+function _normalize_data(data)
+    throw(ArgumentError(
+        "analyze(data, config::AnalysisConfig): data must be a Vector{<:AbstractArray{<:Real,3}} " *
+        "or an AbstractArray{<:Real,3} (or `nothing` for a file-based DetectFitConfig pipeline); " *
+        "got $(typeof(data))"))
+end
+
 """Apply ROI cropping to data."""
 function _apply_roi(data::Vector{<:AbstractArray{<:Real,3}}, roi)
     [crop_images(img, roi.x, roi.y) for img in data]
