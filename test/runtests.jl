@@ -1136,7 +1136,7 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
 
             # The rewritten .gitignore follows the umask, like a direct `write`
             # would — not the fixed 0600 a mktemp-created temp carries over
-            # (the bug _replace_atomically's tempname()+write() path avoids).
+            # (the bug _replace_atomically's private-temp-dir + write() path avoids).
             control = joinpath(dir, "control.txt")
             write(control, "control")
             @test filemode(joinpath(dir, ".gitignore")) & 0o777 == filemode(control) & 0o777
@@ -1665,6 +1665,23 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             end
             @test read(joinpath(p, "keep"), String) == "k"
             @test readdir(dir) == ["out.h5"]
+        end
+
+        # The writer's temp path lives in a directory only we can enter (POSIX), so
+        # no other user sharing the destination directory can pre-place a symlink at it.
+        if !Sys.iswindows()
+            mktempdir() do dir
+                p = joinpath(dir, "out.txt")
+                SMLMAnalysis._replace_atomically(p) do tmp
+                    @test dirname(tmp) != dir
+                    @test dirname(dirname(tmp)) == dir
+                    @test filemode(dirname(tmp)) & 0o777 == 0o700
+                    @test !ispath(tmp)
+                    write(tmp, "x")
+                end
+                @test read(p, String) == "x"
+                @test readdir(dir) == ["out.txt"]
+            end
         end
 
         # A failing writer leaves no temp behind and never touches the destination.
