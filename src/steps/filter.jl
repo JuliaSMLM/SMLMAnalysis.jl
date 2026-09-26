@@ -127,16 +127,21 @@ function _filter_smld(smld::BasicSMLD, cfg::FilterConfig)
     end
 
     if cfg.psf_sigma !== nothing && length(emitters) > 0
-        # Determine bounds: :auto calculates mode ± 10%, or use explicit (min, max)
+        # Determine bounds: :auto calculates mode ± 10%, or use explicit (min, max).
+        # :auto returns the (0.0, 0.0) sentinel when mode estimation is degenerate
+        # (e.g. all-zero σ) — skip rather than filter everything out. An explicit
+        # (lo, hi), including a 0.0 lower bound, is a deliberate choice and is
+        # always applied as given.
+        is_auto = cfg.psf_sigma === :auto
         if hasproperty(emitters[1], :σ)
             lo, hi = _get_psf_sigma_bounds(cfg.psf_sigma, [e.σ for e in emitters])
-            if lo > 0 && hi > 0
+            if !is_auto || (lo > 0 && hi > 0)
                 mask .&= [lo <= e.σ <= hi for e in emitters]
             end
         elseif hasproperty(emitters[1], :σx) && hasproperty(emitters[1], :σy)
             lo_x, hi_x = _get_psf_sigma_bounds(cfg.psf_sigma, [e.σx for e in emitters])
             lo_y, hi_y = _get_psf_sigma_bounds(cfg.psf_sigma, [e.σy for e in emitters])
-            if lo_x > 0 && hi_x > 0 && lo_y > 0 && hi_y > 0
+            if !is_auto || (lo_x > 0 && hi_x > 0 && lo_y > 0 && hi_y > 0)
                 mask .&= [lo_x <= e.σx <= hi_x && lo_y <= e.σy <= hi_y for e in emitters]
             end
         end

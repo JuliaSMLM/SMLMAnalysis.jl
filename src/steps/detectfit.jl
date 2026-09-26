@@ -86,6 +86,23 @@ function _warn_unequal_frame_counts(frames_per_dataset::Vector{Int}, verbose::In
 end
 
 """
+    _drop_nonfinite_emitters(emitters) -> (kept, n_dropped)
+
+Drop every emitter with a non-finite value (NaN/Inf) in any of its `AbstractFloat`
+fields (x, y, photons, bg, σ_x, σ_y, ...). GaussMLE can produce non-finite fit
+results on an ill-conditioned ROI; keeping them poisons every downstream step that
+assumes finite floats (rendering, filtering, drift correction).
+"""
+function _drop_nonfinite_emitters(emitters::AbstractVector)
+    isfinite_emitter(e) = all(fieldnames(typeof(e))) do f
+        val = getfield(e, f)
+        !(val isa AbstractFloat) || isfinite(val)
+    end
+    kept = filter(isfinite_emitter, emitters)
+    return kept, length(emitters) - length(kept)
+end
+
+"""
     detectfit(data, camera, cfg; kwargs...) -> (smld, DetectFitInfo)
 
 Run combined detection and fitting on image data.
@@ -243,6 +260,11 @@ function _detectfit_core(image_stacks, camera::SMLMData.AbstractCamera, cfg::Det
 
     _warn_unequal_frame_counts(frames_per_dataset, v)
 
+    all_emitters, n_nonfinite = _drop_nonfinite_emitters(all_emitters)
+    n_nonfinite > 0 && @warn "detectfit: dropped $n_nonfinite emitter(s) with a non-finite " *
+        "fit result (NaN/Inf in x, y, photons, bg, or σ); check BoxerConfig/GaussMLEConfig " *
+        "or an ill-conditioned ROI."
+
     # Narrow the accumulated AbstractEmitter[] to its concrete element type before
     # building the SMLD. A single fitter yields one concrete emitter type; keeping
     # BasicSMLD{T,AbstractEmitter} would erase it, breaking type-stable dispatch and
@@ -252,7 +274,7 @@ function _detectfit_core(image_stacks, camera::SMLMData.AbstractCamera, cfg::Det
     smld = BasicSMLD(emitters, camera, n_frames_per_dataset, n_datasets_val, Dict{String,Any}())
 
     detect_info = DetectFitInfo(all_boxes_info, all_fit_info,
-        n_datasets_val, total_rois, total_fits, n_frames_per_dataset, t, selected_indices)
+        n_datasets_val, total_rois, total_fits, n_frames_per_dataset, t, selected_indices, n_nonfinite)
 
     if dir !== nothing
         _save_detectfit_outputs!(dir, outdir, smld, camera, cfg, v, t, total_rois, total_fits,
@@ -323,9 +345,23 @@ end
     _inject_camera(cfg::DetectFitConfig, camera::AbstractCamera) -> DetectFitConfig
 
 Inject camera into DetectFitConfig if not already set. Used by AnalysisConfig pipeline.
+
+Throws `ArgumentError` if `cfg.pixel_size`/`cfg.qe` were also set: in an `AnalysisConfig`
+pipeline the camera always comes from `AnalysisConfig.camera`, so `_auto_camera`'s MIC-H5
+auto-build (which those fields drive) never runs and they would otherwise be silently
+ignored. Build the camera with `build_camera_from_mic_h5(path; pixel_size, qe)` and pass
+it to `AnalysisConfig(...; camera=...)` instead.
 """
 function _inject_camera(cfg::DetectFitConfig, camera::SMLMData.AbstractCamera)
     cfg.camera !== nothing && return cfg
+    if cfg.pixel_size !== nothing || cfg.qe != 1.0
+        throw(ArgumentError(
+            "DetectFitConfig.pixel_size/qe have no effect in an AnalysisConfig pipeline: " *
+            "the camera comes from AnalysisConfig.camera, not from DetectFitConfig's own " *
+            "auto-camera build. Build it yourself with " *
+            "build_camera_from_mic_h5(path; pixel_size=$(cfg.pixel_size), qe=$(cfg.qe)) " *
+            "and pass it as AnalysisConfig(...; camera=...)."))
+    end
     DetectFitConfig(; camera=camera, [f => getfield(cfg, f) for f in fieldnames(DetectFitConfig) if f != :camera]...)
 end
 
@@ -356,7 +392,8 @@ _step_summary(info::DetectFitInfo) = Dict{Symbol,Any}(
     :n_datasets => info.n_datasets,
     :n_rois => info.n_rois,
     :n_fits => info.n_fits,
-    :n_frames_per_dataset => info.n_frames_per_dataset
+    :n_frames_per_dataset => info.n_frames_per_dataset,
+    :n_nonfinite => info.n_nonfinite
 )
 
 """

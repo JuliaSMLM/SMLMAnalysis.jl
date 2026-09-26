@@ -93,6 +93,10 @@ function intensityfilter_step(smld::BasicSMLD, cfg::IntensityFilterConfig;
         xs = [e.x for e in emitters]
         ys = [e.y for e in emitters]
         photons = [e.photons for e in emitters]
+        n_nonfinite = count(!isfinite, photons)
+        n_nonfinite > 0 && throw(ArgumentError(
+            "intensityfilter: $n_nonfinite emitter(s) have non-finite photons; " *
+            "check the upstream fit that produced this input before intensity filtering."))
 
         # Global rate estimate (high percentile = upper bound of single-emitter emission)
         lambda_global = max(1.0, quantile(photons, cfg.rate_percentile))

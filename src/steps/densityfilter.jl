@@ -92,8 +92,12 @@ function _filter_by_density(smld::BasicSMLD, cfg::DensityFilterConfig)
 
     n_sigma = cfg.n_sigma
     σ = [sqrt(e.σ_x^2 + e.σ_y^2) for e in emitters]
+    n_nonfinite = count(!isfinite, σ)
+    n_nonfinite > 0 && throw(ArgumentError(
+        "densityfilter: $n_nonfinite localization(s) have a non-finite σ (from σ_x/σ_y); " *
+        "this can happen with data loaded via `load_smld` from an upstream fit that produced " *
+        "NaN/Inf. Drop or fix these localizations before density filtering."))
     max_σ = maximum(σ)
-    max_radius = n_sigma * 2 * max_σ
 
     coords = zeros(2, n)
     for i in 1:n
@@ -104,9 +108,14 @@ function _filter_by_density(smld::BasicSMLD, cfg::DensityFilterConfig)
 
     neighbor_counts = zeros(Int, n)
     for i in 1:n
+        # Per-point radius n_sigma*sqrt(σ[i]^2 + max_σ^2) is an exact upper bound for
+        # the pair test `dist < n_sigma*sqrt(σ[i]^2 + σ[j]^2)` below (σ[j] <= max_σ for
+        # every j), so this changes nothing about which pairs pass the neighbour test —
+        # only how tightly the KD-tree query is bounded per point instead of globally.
+        radius_i = n_sigma * sqrt(σ[i]^2 + max_σ^2)
         # Query with a column view of the coords the tree was built from — avoids
         # allocating a fresh [x, y] vector for every emitter in the hot loop.
-        candidates = inrange(tree, view(coords, :, i), max_radius)
+        candidates = inrange(tree, view(coords, :, i), radius_i)
 
         for j in candidates
             j == i && continue
