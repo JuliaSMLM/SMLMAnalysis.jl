@@ -88,9 +88,11 @@ Aggregated metadata from pipeline run.
 - `elapsed_s::Float64` - Total elapsed time in seconds
 - `step_infos::Vector{StepInfo}` - Full step history
 
-Look up a step by name with `stepinfo(info, name)` (first match, throws `KeyError` if none)
-or `stepinfos(info, name)` (all matches, in order). Both take a `Symbol` or `String` and
-return `StepInfo`; reach the upstream typed info via `.info`.
+Look up a step by name with `stepinfo(info, name)` (first match, throws `ArgumentError`
+listing available step names if none) or `stepinfos(info, name)` (all matches, in order).
+Both also accept a config type in place of `name` (e.g. `stepinfo(info, DriftConfig)`).
+`name` is a `Symbol` or `String`; both return `StepInfo`; reach the upstream typed info
+via `.info`.
 
 **Step info types** (via `stepinfo(info, name).info`):
 - `:detectfit` -> `DetectFitInfo` (its `boxes_info::Vector{BoxesInfo}` / `fit_info::Vector{GaussMLEFitInfo}` hold the per-dataset upstream infos)
@@ -355,21 +357,6 @@ upstream docstring for types and meaning.
 - `CrossAlignInfo`: `align_info` (upstream `AlignInfo`), `shifts` (per-channel `(x, y)` in µm), `max_shift_nm`, `elapsed_s`
 - `CrossCorrInfo`: `r`, `g`, `n_a`, `n_b`, `area`, `r_max`, `dr`, `channel_a`, `channel_b`, `elapsed_s`
 
-### GaussMLEFitInfo (from GaussMLE)
-
-```julia
-struct GaussMLEFitInfo
-    elapsed_s::Float64
-    backend::Symbol       # :cpu or :gpu
-    device_id::Int        # GPU device, -1 for CPU
-    n_fits::Int
-    n_converged::Int
-    batch_size
-    n_batches
-    memory_per_batch
-end
-```
-
 ### BoxesInfo (from SMLMBoxer)
 
 ```julia
@@ -493,16 +480,7 @@ save_smld(path::String, smld::BasicSMLD)
 smld = load_smld(path::String) -> BasicSMLD
 ```
 
-HDF5 serialization of SMLD data.
-
-### save_pipeline_state / load_pipeline_state
-
-```julia
-save_pipeline_state(path, result::AnalysisResult; smld_raw=nothing, step_infos=nothing, camera=nothing)
-state = load_pipeline_state(path)  # NamedTuple: smld, smld_raw, smld_connected, drift_model, step_infos, …
-```
-
-JLD2-based full pipeline state save/restore. (`save_smld` also takes
+HDF5 serialization of SMLD data. (`save_smld` also takes
 `source_file`, `drift_model`, and `compression` keywords.)
 
 ### H5 Loading
@@ -511,7 +489,6 @@ JLD2-based full pipeline state save/restore. (`save_smld` also takes
 # SMART microscope format (/Main/data)
 images = load_smart_h5(path; frame_range=nothing)     # ONE array (width, height, frames) — not a tuple
 info   = load_smart_h5_info(path)                     # width, height, nframes, dtype, file_size_gb
-frame  = load_smart_h5_frame(path, i)
 data, info = smart_h5_to_array(path; max_frames)      # the pair-returning form: (height, width, frames) + info
 
 # MIC (MATLAB Instrument Control) format — one or more blocks, each a dataset
