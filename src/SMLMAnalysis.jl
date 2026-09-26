@@ -77,22 +77,21 @@ using Distributions: Poisson, ccdf, Gamma, pdf
 # undeclared (dangling export → UndefVarError in downstream `using` code).
 using SMLMData: AbstractCamera
 export AbstractCamera, IdealCamera, SCMOSCamera
-export AbstractEmitter, Emitter2D, Emitter3D, Emitter2DFit, Emitter3DFit
+export Emitter2DFit, Emitter3DFit
 export BasicSMLD, ROIBatch
 export AbstractSMLMConfig, AbstractSMLMInfo
 
 # Re-export from SMLMSim
-export StaticSMLMConfig, DiffusionSMLMConfig
-export simulate, gen_images, gen_image
-export Nmer2D, Nmer3D, Line2D, GenericFluor
+export StaticSMLMConfig
+export simulate, gen_images
+export Nmer2D, Line2D, GenericFluor
 
 # Re-export from SMLMBoxer
-export getboxes, BoxerConfig
+export BoxerConfig
 
 # Re-export from GaussMLE
 export GaussMLEConfig
 export GaussianXYNB, GaussianXYNBS, GaussianXYNBSXSY, AstigmaticXYZNB
-export GaussMLEFitInfo
 # Re-export fit - use GaussMLE's fit for fitters
 using GaussMLE: fit
 export fit
@@ -118,7 +117,7 @@ export align_smld, AlignConfig, AlignInfo
 export run_bagol, BaGoLDiagnostics
 
 # Re-export from SMLMRender
-export render, save_image
+export render
 export HistogramRender, GaussianRender, CircleRender, EllipseRender
 # Re-export RenderConfig from SMLMRender (used directly as step config)
 const RenderConfig = SMLMRender.RenderConfig
@@ -148,7 +147,7 @@ const KdeValleyConfig = SMLMClustering.KdeValleyConfig
 const EdgeClassifyInfo = SMLMClustering.EdgeClassifyInfo
 const CellPolygon = SMLMClustering.CellPolygon
 const MultiCellMask = SMLMClustering.MultiCellMask
-export classify_emitters, in_cell, interior_mask, interior_fraction
+export in_cell, interior_mask, interior_fraction
 export AbstractEdgeClassifyConfig, OuterPolygonConfig, KdeValleyConfig
 export EdgeClassifyInfo, CellPolygon, MultiCellMask
 
@@ -163,7 +162,6 @@ export DetectFitInfo, FilterInfo, DensityFilterInfo, IntensityFilterInfo, BaGoLI
 export CompositeRenderInfo, CrossAlignInfo, CrossCorrInfo
 export AbstractMultiTargetStep
 export MultiTargetConfig, MultiTargetResult, MultiTargetInfo
-export crop_camera, crop_images
 export step_name
 
 # ============================================================
@@ -228,15 +226,11 @@ include("io/smld_io.jl")
 export save_smld, load_smld, smld_info
 
 include("io/smart_h5.jl")
-export load_smart_h5, load_smart_h5_info, load_smart_h5_frame, smart_h5_to_array
+export load_smart_h5, load_smart_h5_info, smart_h5_to_array
 
 include("io/mic_h5.jl")
 export load_mic_h5, load_mic_h5_info, load_mic_h5_block
-export load_mic_h5_calibration, load_mic_h5_calibration_for_scmos
 export build_camera_from_mic_h5
-
-include("io/checkpoint_io.jl")
-export save_pipeline_state, load_pipeline_state
 
 # ============================================================
 # Analysis orchestrator
