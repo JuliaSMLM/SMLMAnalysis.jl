@@ -33,6 +33,7 @@ moment a downstream step subsets emitters); it lives in the step's
 `EdgeClassifyInfo`, reached at the classify point:
 
 ```julia
+using SMLMClustering   # Pkg.add("SMLMClustering") — needed to call these accessors directly
 (smld, step_info) = analyze(smld, KdeValleyConfig())
 info = step_info.info                 # ::SMLMClustering.EdgeClassifyInfo
 info.class                            # per-emitter Vector{Symbol}

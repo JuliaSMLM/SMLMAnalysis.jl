@@ -5,6 +5,9 @@ This walkthrough runs a complete SMLM analysis pipeline on simulated data, showi
 ## Setup
 
 ```julia
+using Pkg
+Pkg.add(["SMLMAnalysis", "SMLMSim"])   # SMLMSim for simulated data
+
 using SMLMAnalysis
 using SMLMSim   # simulation types/verbs are no longer re-exported by SMLMAnalysis
 
@@ -227,6 +230,8 @@ save_smld("output/after_detectfit.h5", smld)
 cal = fc_info.info.calibration   # SMLMFrameConnection.CalibrationResult
 (smld_dc, dc_info) = analyze(smld_fc, DriftConfig(degree=2))
 (smld_dc, _) = analyze(smld_dc, RenderConfig(zoom=20, colormap=:inferno))  # pass-through; writes image to outdir
+
+using SMLMRender   # Pkg.add("SMLMRender") — needed to call render() directly, not through analyze()
 (img, _) = SMLMRender.render(smld_dc, RenderConfig(zoom=20, colormap=:inferno))       # in-memory image array
 
 # Resume from saved checkpoint in new session

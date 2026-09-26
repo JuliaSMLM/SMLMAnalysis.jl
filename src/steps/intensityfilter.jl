@@ -216,15 +216,29 @@ function _estimate_excitation_field(xs, ys, photons, lambda_global, cfg::Intensi
 end
 
 """
-    _bin_index(v, v_min, dv, n_bins) -> Int
+    _bin_index(v, v_min, v_max, dv, n_bins) -> Int
 
-1-based bin index for `v`, given the bin origin `v_min`, bin width `dv`, and bin
-count `n_bins`. Matches the half-open `[v_min+(i-1)*dv, v_min+i*dv)` binning
-convention used throughout this file; the `clamp` absorbs `v == v_max` (and any
-float roundoff at the outer edge) into the last bin, same as the original
-per-bin `x_max + eps(x_max)` upper-edge widening did.
+1-based bin index for `v` under the half-open edge convention
+`[v_min+(i-1)*dv, v_min+i*dv)`, with the last bin's upper edge widened to
+`v_max+eps(v_max)` — the same edges the original per-bin scan compared
+against. Computes a floor-division guess and corrects it against those exact
+edges (stepping down/up while it lands outside them), so it reproduces the
+original scan's half-open edge comparisons bit-for-bit despite float
+roundoff. Returns `0` if no bin contains `v` (matches the original: such an
+emitter fell in no bin and was dropped).
 """
-_bin_index(v, v_min, dv, n_bins) = clamp(floor(Int, (v - v_min) / dv) + 1, 1, n_bins)
+function _bin_index(v, v_min, v_max, dv, n_bins)
+    lo(i) = v_min + (i - 1) * dv
+    hi(i) = i == n_bins ? v_max + eps(v_max) : v_min + i * dv
+    i = clamp(floor(Int, (v - v_min) / dv) + 1, 1, n_bins)
+    while i > 1 && v < lo(i)
+        i -= 1
+    end
+    while i < n_bins && v >= hi(i)
+        i += 1
+    end
+    return (lo(i) <= v < hi(i)) ? i : 0
+end
 
 """
     _spatial_bin_rates(xs, ys, photons, cfg)
@@ -234,7 +248,8 @@ single pass over the emitters — each emitter's `(ix, iy)` bin is computed
 directly from its coordinates via `_bin_index`, rather than scanning every
 emitter once per bin (the previous `_compute_bin_stat` was an unused,
 near-identical O(n_bins²·n) twin of this; merged away). Bin edges/centers are
-still derived from `extrema(xs)`/`extrema(ys)`, so results are unchanged.
+still derived from `extrema(xs)`/`extrema(ys)`, and `_bin_index` reproduces the
+original scan's half-open edge comparisons exactly, so results are unchanged.
 
 Returns named tuple with `centers_x`, `centers_y`, `rates`, `counts`, and grid info.
 `rate_grid` is stored `[ix, iy]` (Makie's `heatmap!` convention: first index is
@@ -256,8 +271,9 @@ function _spatial_bin_rates(xs, ys, photons, cfg::IntensityFilterConfig)
     # Single pass: bucket each emitter's photon count into its (ix, iy) bin.
     bins = [Float64[] for _ in 1:n_bins, _ in 1:n_bins]
     for i in eachindex(xs)
-        ix = _bin_index(xs[i], x_min, dx, n_bins)
-        iy = _bin_index(ys[i], y_min, dy, n_bins)
+        ix = _bin_index(xs[i], x_min, x_max, dx, n_bins)
+        iy = _bin_index(ys[i], y_min, y_max, dy, n_bins)
+        (ix == 0 || iy == 0) && continue
         push!(bins[ix, iy], photons[i])
     end
 
@@ -272,12 +288,12 @@ function _spatial_bin_rates(xs, ys, photons, cfg::IntensityFilterConfig)
         bin_photons = bins[ix, iy]
         if length(bin_photons) >= min_count
             bx_lo = x_min + (ix - 1) * dx
-            bx_hi = ix == n_bins ? x_max : x_min + ix * dx
+            bx_hi = ix == n_bins ? x_max + eps(x_max) : x_min + ix * dx
             by_lo = y_min + (iy - 1) * dy
-            by_hi = iy == n_bins ? y_max : y_min + iy * dy
+            by_hi = iy == n_bins ? y_max + eps(y_max) : y_min + iy * dy
             rate = quantile(bin_photons, pct)
-            push!(centers_x, (bx_lo + bx_hi) / 2)
-            push!(centers_y, (by_lo + by_hi) / 2)
+            push!(centers_x, (bx_lo + min(bx_hi, x_max)) / 2)
+            push!(centers_y, (by_lo + min(by_hi, y_max)) / 2)
             push!(rates, rate)
             push!(counts, length(bin_photons))
             rate_grid[ix, iy] = rate

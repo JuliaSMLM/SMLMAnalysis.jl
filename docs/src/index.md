@@ -60,6 +60,7 @@ The same steps can be run one at a time for interactive exploration — every
 deciding the next step:
 
 ```julia
+using SMLMRender   # Pkg.add("SMLMRender") — needed to call render() directly, not through analyze()
 (smld, _) = analyze(image_stacks, DetectFitConfig(camera = cam,
                         boxer = BoxerConfig(boxsize = 9, psf_sigma = 0.130)))
 (smld, _) = analyze(smld, FilterConfig(photons = (500.0, Inf)))

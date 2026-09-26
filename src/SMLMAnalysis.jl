@@ -78,6 +78,12 @@ using NearestNeighbors
 using Optim
 using Distributions: Poisson, ccdf, Gamma, pdf
 
+# AbstractCamera must be declared explicitly: CairoMakie also exports an unrelated
+# Makie.AbstractCamera, and the ambiguity would leave the binding undeclared
+# (dangling → UndefVarError on `SMLMAnalysis.AbstractCamera`) even though it isn't
+# exported.
+using SMLMData: AbstractCamera
+
 # Re-export from SMLMData (cameras only — a user must type these to build a
 # pipeline; Emitter2DFit/Emitter3DFit/BasicSMLD/ROIBatch are receive-only and
 # reached via SMLMData.Name; AbstractCamera/AbstractSMLMConfig/AbstractSMLMInfo
