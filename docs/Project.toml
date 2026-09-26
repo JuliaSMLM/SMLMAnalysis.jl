@@ -5,6 +5,9 @@ SMLMBaGoL = "70c4bcd9-ed9a-43d6-baf8-7d0db1eb70ee"
 SMLMClustering = "5e733723-370a-41a4-ac41-ff3a91b0b806"
 SMLMDriftCorrection = "34bda2d1-2fff-475a-a8c4-7f53d4251312"
 
+[compat]
+Documenter = "1"
+
 # Source override for the doc build: the docs must always build against this
 # checkout (path = "..", relative to julia_shared_dev/SMLMAnalysis/docs — NOT a
 # worktree), not whatever SMLMAnalysis version is registered, so docs stay in

@@ -59,6 +59,30 @@ module Checkpoint
     const ALL       = 3   # every SMLD-producing step
 end
 
+"""
+    _validate_verbose(v::Int) -> Int
+
+Throw `ArgumentError` if `v` is outside `[Verbosity.SILENT, Verbosity.DEBUG]`.
+Returns `v` unchanged otherwise, so it can be used inline.
+"""
+function _validate_verbose(v::Int)
+    (Verbosity.SILENT <= v <= Verbosity.DEBUG) || throw(ArgumentError(
+        "verbose=$v is outside the Verbosity range [$(Verbosity.SILENT), $(Verbosity.DEBUG)]"))
+    v
+end
+
+"""
+    _validate_checkpoint(cp::Int) -> Int
+
+Throw `ArgumentError` if `cp` is outside `[Checkpoint.NONE, Checkpoint.ALL]`.
+Returns `cp` unchanged otherwise, so it can be used inline.
+"""
+function _validate_checkpoint(cp::Int)
+    (Checkpoint.NONE <= cp <= Checkpoint.ALL) || throw(ArgumentError(
+        "checkpoint=$cp is outside the Checkpoint range [$(Checkpoint.NONE), $(Checkpoint.ALL)]"))
+    cp
+end
+
 # ============================================================
 # ROI Cropping - preserves physical coordinates
 # ============================================================
@@ -192,8 +216,8 @@ output datasets correspond 1:1 to the resolved source slots.
 value (NaN/Inf) in one of its `AbstractFloat` fields (x, y, photons, bg, σ, ...).
 """
 struct DetectFitInfo <: SMLMData.AbstractSMLMInfo
-    boxes_info::Vector{Any}
-    fit_info::Vector{Any}
+    boxes_info::Vector{SMLMBoxer.BoxesInfo}
+    fit_info::Vector{GaussMLE.GaussMLEFitInfo}
     n_datasets::Int
     n_rois::Int
     n_fits::Int
@@ -379,7 +403,7 @@ Immutable result from `analyze()`. Replaces the old mutable `Analysis` struct.
   step (if one was run) — a snapshot of the pipeline state at that point, not updated by
   later steps. In the common ordering where FrameConnect precedes Drift, this is the
   pre-drift-correction SMLD, not the final one.
-- `drift_model::Any`: Drift model (if driftcorrect was run)
+- `drift_model::Union{SMLMDriftCorrection.AbstractIntraInter, Nothing}`: Drift model (if driftcorrect was run)
 
 # Access
 ```julia
@@ -393,7 +417,7 @@ stepinfo(info, :driftcorrect).info # Step info from upstream packages
 struct AnalysisResult
     smld::SMLMData.BasicSMLD
     smld_connected::Union{SMLMData.BasicSMLD, Nothing}
-    drift_model::Any
+    drift_model::Union{SMLMDriftCorrection.AbstractIntraInter, Nothing}
 end
 
 function Base.show(io::IO, r::AnalysisResult)
@@ -450,6 +474,12 @@ config = AnalysisConfig(
     outdir::Union{String, Nothing} = nothing
     verbose::Int = Verbosity.STANDARD
     checkpoint::Int = Checkpoint.EXPENSIVE
+
+    function AnalysisConfig(camera, steps, roi, outdir, verbose, checkpoint)
+        _validate_verbose(verbose)
+        _validate_checkpoint(checkpoint)
+        new(camera, steps, roi, outdir, verbose, checkpoint)
+    end
 end
 
 # Varargs constructor: AnalysisConfig(step1, step2, ...; camera=cam, outdir="out/")
@@ -504,7 +534,7 @@ Supports up to 6 channels; provide explicit colors for more.
 """
 function _default_colors(n::Int)
     defaults = [:cyan, :magenta, :yellow, :red, :green, :blue]
-    n <= length(defaults) || error("Provide explicit colors for >$(length(defaults)) channels")
+    n <= length(defaults) || throw(ArgumentError("Provide explicit colors for >$(length(defaults)) channels"))
     defaults[1:n]
 end
 
@@ -543,6 +573,11 @@ mt = MultiTargetConfig(
     steps::Vector{AbstractMultiTargetStep} = AbstractMultiTargetStep[]
     outdir::String
     verbose::Int = Verbosity.STANDARD
+
+    function MultiTargetConfig(labels, colors, steps, outdir, verbose)
+        _validate_verbose(verbose)
+        new(labels, colors, steps, outdir, verbose)
+    end
 end
 
 """

@@ -307,54 +307,6 @@ function _plan_sample_frames(ds_frame_counts::Vector{Int}, n_samples::Int=12)
 end
 
 # ============================================================
-# Dataset assignment helpers
-# ============================================================
-
-"""Update emitter's dataset field using struct reconstruction"""
-function _with_dataset(e::Emitter2DFit{T}, ds::Int) where T
-    Emitter2DFit{T}(
-        e.x, e.y, e.photons, e.bg, e.σ_x, e.σ_y, e.σ_photons, e.σ_bg;
-        σ_xy=e.σ_xy, frame=e.frame, dataset=ds, track_id=e.track_id, id=e.id
-    )
-end
-
-function _with_dataset(e::Emitter2D{T}, ds::Int) where T
-    Emitter2D{T}(e.x, e.y, e.photons, e.σ_x, e.σ_y, e.frame, ds, e.track_id)
-end
-
-function _with_dataset(e::GaussMLE.Emitter2DFitSigma{T}, ds::Int) where T
-    GaussMLE.Emitter2DFitSigma{T}(
-        e.x, e.y, e.photons, e.bg, e.σ,
-        e.σ_x, e.σ_y, e.σ_xy, e.σ_photons, e.σ_bg, e.σ_σ,
-        e.pvalue, e.frame, ds, e.track_id, e.id
-    )
-end
-
-function _with_dataset(e::GaussMLE.Emitter2DFitSigmaXY{T}, ds::Int) where T
-    GaussMLE.Emitter2DFitSigmaXY{T}(
-        e.x, e.y, e.photons, e.bg, e.σx, e.σy,
-        e.σ_x, e.σ_y, e.σ_xy, e.σ_photons, e.σ_bg, e.σ_σx, e.σ_σy,
-        e.pvalue, e.frame, ds, e.track_id, e.id
-    )
-end
-
-function _with_dataset(e::GaussMLE.Emitter2DFitGaussMLE{T}, ds::Int) where T
-    GaussMLE.Emitter2DFitGaussMLE{T}(
-        e.x, e.y, e.photons, e.bg,
-        e.σ_x, e.σ_y, e.σ_xy, e.σ_photons, e.σ_bg,
-        e.pvalue, e.frame, ds, e.track_id, e.id
-    )
-end
-
-function _with_dataset(e::GaussMLE.Emitter3DFitGaussMLE{T}, ds::Int) where T
-    GaussMLE.Emitter3DFitGaussMLE{T}(
-        e.x, e.y, e.z, e.photons, e.bg,
-        e.σ_x, e.σ_y, e.σ_z, e.σ_xy, e.σ_xz, e.σ_yz, e.σ_photons, e.σ_bg,
-        e.pvalue, e.frame, ds, e.track_id, e.id
-    )
-end
-
-# ============================================================
 # Output helpers (used by all step save functions)
 # ============================================================
 
