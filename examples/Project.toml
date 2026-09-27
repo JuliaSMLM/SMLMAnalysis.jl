@@ -14,3 +14,6 @@ SMLMDriftCorrection = "34bda2d1-2fff-475a-a8c4-7f53d4251312"
 SMLMFrameConnection = "1517b1a9-81e8-461f-b994-92eb29599690"
 SMLMRender = "d945b928-cd23-4282-89d9-fc086b52682d"
 SMLMSim = "5a0a87e4-02d4-41f5-bf26-b8c94c784a04"
+
+[compat]
+SMLMBoxer = "0.3.0"
