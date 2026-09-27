@@ -1,0 +1,12 @@
+# Test groups (admiral decision 0008). Declare only the groups this package has; every declared
+# group needs at least one .jl file, and every folder under test/ must be a declared group.
+#   Core      test/*.jl         fast curated tests; plain Pkg.test(); at most 2 min on CI
+#   QA        test/qa/          Aqua and ExplicitImports; its own CI job
+#   Long      test/long/        slow correctness (full simulated pipelines); lab machine
+# SMLMAnalysis has no GPU, Data or Hardware tests: every test runs on simulated CPU data.
+
+[Core]
+
+[QA]
+
+[Long]
