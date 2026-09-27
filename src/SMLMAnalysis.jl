@@ -54,35 +54,54 @@ Result/info structs (e.g. `AnalysisResult`, `DetectFitInfo`) and upstream verbs
 """
 module SMLMAnalysis
 
-using Dates
-using Logging
-using Random
-using Statistics
-using TOML
+using Dates: Dates, DateTime, now
+using Logging: Logging
+using Random: Random
+using Statistics: Statistics, mean, median, quantile, std, var
+using TOML: TOML
 
-# Core dependencies
-using SMLMData
-using SMLMSim
-using SMLMBoxer
-using GaussMLE
-using SMLMFrameConnection
-using SMLMRender
-using SMLMDriftCorrection
-using SMLMBaGoL
-using SMLMClustering
-using MicroscopePSFs
-using HDF5
-using JLD2
-using CairoMakie
-using NearestNeighbors
-using Optim
+# Core dependencies. Every name is imported explicitly (ExplicitImports checks this in
+# test/qa/qa.jl); qualified access (SMLMDriftCorrection.driftcorrect) needs only the module.
+using SMLMData: SMLMData, AbstractEmitter, BasicSMLD, Emitter2DFit, Emitter3DFit,
+    IdealCamera, ROIBatch, SCMOSCamera
+using SMLMSim: SMLMSim, GenericFluor, Nmer2D, StaticSMLMConfig, gen_images, simulate
+using SMLMBoxer: SMLMBoxer, BoxerConfig
+using GaussMLE: GaussMLE, AstigmaticXYZNB, GaussMLEConfig, GaussianXYNB, GaussianXYNBS,
+    GaussianXYNBSXSY
+using SMLMFrameConnection: SMLMFrameConnection
+using SMLMRender: SMLMRender, CircleRender, EllipseRender, GaussianRender, HistogramRender
+using SMLMDriftCorrection: SMLMDriftCorrection
+using SMLMBaGoL: SMLMBaGoL
+using SMLMClustering: SMLMClustering
+using MicroscopePSFs: MicroscopePSFs
+using HDF5: HDF5, create_group, h5open
+using JLD2: JLD2
+# Makie's plotting names (and FileIO's save) come through CairoMakie; Makie itself is not a
+# direct dependency.
+using CairoMakie: CairoMakie, Axis, Colorbar, DataAspect, Figure, GridLayout, Label, Legend,
+    Point2f, axislegend, band!, barplot!, heatmap!, hidedecorations!, hidespines!,
+    hideydecorations!, hist!, hlines!, lines!, poly!, save, scatter!, text, text!, vlines!,
+    vspan!, xlims!, ylims!
+using NearestNeighbors: NearestNeighbors, KDTree, inrange
+using Optim: Optim, NelderMead, optimize
 using Distributions: Poisson, ccdf, Gamma, pdf
 
-# AbstractCamera must be declared explicitly: CairoMakie also exports an unrelated
-# Makie.AbstractCamera, and the ambiguity would leave the binding undeclared
-# (dangling → UndefVarError on `SMLMAnalysis.AbstractCamera`) even though it isn't
-# exported.
-using SMLMData: AbstractCamera
+# Upstream names reachable as SMLMAnalysis.Name without being exported (api_overview.md,
+# "Non-exported but public"; test/exports.jl checks each one resolves). Nothing in src uses
+# them, so test/qa/qa.jl exempts them from ExplicitImports' stale-import check.
+# The three SMLMData abstract types are extension hooks; importing AbstractCamera by name
+# also stops CairoMakie's unrelated Makie.AbstractCamera leaving the binding ambiguous.
+using SMLMData: AbstractCamera, AbstractSMLMConfig, AbstractSMLMInfo
+using SMLMSim: Line2D
+using GaussMLE: fit
+using SMLMFrameConnection: CalibrationResult, frameconnect
+using SMLMDriftCorrection: AlignInfo, align_smld, driftcorrect
+using SMLMBaGoL: BaGoLDiagnostics, run_bagol
+using SMLMRender: render
+using SMLMClustering: AbstractClusterConfig, AbstractEdgeClassifyConfig,
+    AbstractStatisticsConfig, CellPolygon, ClusterInfo, ClusterStatisticsInfo,
+    EdgeClassifyInfo, MultiCellMask, cluster, cluster_statistics, in_cell, interior_fraction,
+    interior_mask
 
 # Re-export from SMLMData (cameras only — a user must type these to build a
 # pipeline; Emitter2DFit/Emitter3DFit/BasicSMLD/ROIBatch are receive-only and
