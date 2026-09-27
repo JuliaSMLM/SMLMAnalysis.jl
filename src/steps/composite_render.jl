@@ -109,15 +109,15 @@ _step_summary(info::CompositeRenderInfo) = Dict{Symbol, Any}(
 )
 
 """
-    analyze(smlds::Vector{BasicSMLD}, cfg::CompositeRenderConfig; outdir, step_number, verbose, colors) -> (smlds, StepInfo)
+    analyze(smlds::Vector{BasicSMLD}, cfg::CompositeRenderConfig; outdir, step_number, verbose, labels, colors) -> (smlds, StepInfo)
 
-Multi-target dispatch: composite render. SMLDs pass through. `colors` is the
-only multi-target keyword this step reads (it does not use `labels`).
+Multi-target dispatch: composite render. SMLDs pass through. Accepts both
+`labels` and `colors` (every multi-target step does), but only reads `colors`.
 """
 function analyze(
         smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CompositeRenderConfig;
         outdir = nothing, step_number::Int = 0, verbose::Int = Verbosity.STANDARD,
-        colors::Vector{Symbol} = Symbol[]
+        labels::Vector{Symbol} = Symbol[], colors::Vector{Symbol} = Symbol[]
     )
     t = @elapsed (smlds, cr_info) = composite_render_step(
         smlds, cfg;

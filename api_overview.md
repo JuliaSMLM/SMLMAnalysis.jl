@@ -355,7 +355,11 @@ re-exported: `OuterPolygonConfig`, `KdeValleyConfig`. The class is written to
 
 ### Multi-target steps
 
-Dispatch on `Vector{SMLMData.BasicSMLD}` inside a `MultiTargetConfig` pipeline:
+Dispatch on `Vector{SMLMData.BasicSMLD}` inside a `MultiTargetConfig` pipeline.
+Every step's `analyze(smlds, cfg; outdir, step_number, verbose, labels, colors)`
+method is called with both `labels` and `colors` keywords, whether or not it
+reads either — a custom `AbstractMultiTargetStep`'s `analyze` method must accept
+both:
 
 - `CompositeRenderConfig(; strategy, zoom, colors, clip_percentile=:auto, scalebar)` —
   multi-channel composite render (pass-through).
