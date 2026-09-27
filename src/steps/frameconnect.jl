@@ -75,13 +75,13 @@ function _step_summary(info::SMLMFrameConnection.FrameConnectInfo)
 end
 
 """
-    analyze(smld, cfg::SMLMFrameConnection.FrameConnectConfig; kwargs...) -> (combined_smld, StepInfo)
+    analyze(smld, cfg::SMLMFrameConnection.FrameConnectConfig; outdir, step_number, verbose, checkpoint) -> (combined_smld, StepInfo)
 
 Run frame connection on localizations.
 """
 function analyze(smld::BasicSMLD, cfg::SMLMFrameConnection.FrameConnectConfig;
                  outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
+                 checkpoint::Int=Checkpoint.EXPENSIVE)
     t = @elapsed (combined, connect_info) = frameconnect_step(smld, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose, checkpoint=checkpoint)
     (combined, StepInfo(step_number, cfg, t, _step_summary(connect_info); info=connect_info))

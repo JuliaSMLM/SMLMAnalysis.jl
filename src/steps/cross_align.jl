@@ -30,8 +30,6 @@ CrossAlignConfig(align=AlignConfig(method=:fft))          # CC only
         SMLMDriftCorrection.AlignConfig()
 end
 
-step_name(::CrossAlignConfig) = "crossalign"
-
 """
     crossalign_step(smlds, cfg; outdir, step_number, verbose) -> (aligned_smlds, CrossAlignInfo)
 
@@ -133,12 +131,13 @@ _step_summary(info::CrossAlignInfo) = Dict{Symbol,Any}(
 )
 
 """
-    analyze(smlds::Vector{BasicSMLD}, cfg::CrossAlignConfig; kwargs...) -> (aligned_smlds, StepInfo)
+    analyze(smlds::Vector{BasicSMLD}, cfg::CrossAlignConfig; outdir, step_number, verbose) -> (aligned_smlds, StepInfo)
 
-Multi-target dispatch: cross-channel alignment. Modifies SMLDs.
+Multi-target dispatch: cross-channel alignment. Modifies SMLDs. Uses neither
+`colors` nor `labels`, so this step's `analyze` does not accept them.
 """
 function analyze(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossAlignConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD, kwargs...)
+                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD)
     t = @elapsed (aligned, ca_info) = crossalign_step(smlds, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose)
     (aligned, StepInfo(step_number, cfg, t, _step_summary(ca_info); info=ca_info))

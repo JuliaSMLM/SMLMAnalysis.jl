@@ -162,7 +162,7 @@ function load_mic_h5_block(filepath::String, block_num::Int)
         data_keys = sort([k for k in keys(zpos) if startswith(k, "Data")])
 
         if block_num < 1 || block_num > length(data_keys)
-            error("Block $block_num out of range (1:$(length(data_keys)))")
+            throw(ArgumentError("Block $block_num out of range (1:$(length(data_keys)))"))
         end
 
         dk = data_keys[block_num]
@@ -201,7 +201,11 @@ function load_mic_h5(filepath::String;
                 data_path = _resolve_data_path(f, dk)
                 push!(frames_per_block, size(f[data_path], 3))
                 push!(valid_keys, dk)
-            catch
+            catch e
+                e isa InterruptException && rethrow()
+                # Skip blocks without valid data, but surface the loss — a silently
+                # dropped block otherwise shows up only as a frame-count mismatch.
+                @warn "load_mic_h5: skipping unreadable data block \"$dk\"" exception=e
                 continue
             end
         end

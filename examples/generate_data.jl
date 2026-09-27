@@ -12,7 +12,9 @@ Usage:
 """
 
 using SMLMAnalysis
-using SMLMSim: Nanoruler2D   # new pattern, not yet re-exported by SMLMAnalysis
+using SMLMSim   # simulation verbs are no longer re-exported by SMLMAnalysis;
+                # Nanoruler2D is a new pattern, not re-exported either
+using SMLMData: BasicSMLD
 using MicroscopePSFs
 using JLD2
 

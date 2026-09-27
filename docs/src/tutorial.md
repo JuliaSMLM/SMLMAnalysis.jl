@@ -5,7 +5,11 @@ This walkthrough runs a complete SMLM analysis pipeline on simulated data, showi
 ## Setup
 
 ```julia
+using Pkg
+Pkg.add(["SMLMAnalysis", "SMLMSim"])   # SMLMSim for simulated data
+
 using SMLMAnalysis
+using SMLMSim   # simulation types/verbs are no longer re-exported by SMLMAnalysis
 
 # Camera: 256x128 pixels @ 100nm
 camera = IdealCamera(256, 128, 0.1)
@@ -112,7 +116,7 @@ Calibration results are available on the returned info:
 (smld, fc_info) = analyze(smld, FrameConnectConfig(max_frame_gap=5,
     calibration=CalibrationConfig(clamp_k_to_one=true)))
 
-cal = fc_info.info.calibration   # FrameConnectInfo.calibration::CalibrationResult
+cal = fc_info.info.calibration   # FrameConnectInfo.calibration::SMLMFrameConnection.CalibrationResult
 cal.k_scale                       # k
 cal.sigma_motion_nm               # sqrt(A) in nm
 cal.mean_chi2                     # ~2.0 means well-calibrated
@@ -223,10 +227,12 @@ save_smld("output/after_detectfit.h5", smld)
 # Continue pipeline (calibration is a sub-config of FrameConnectConfig)
 (smld_fc, fc_info) = analyze(smld_filtered, FrameConnectConfig(max_frame_gap=5,
     calibration=CalibrationConfig(clamp_k_to_one=true)))
-cal = fc_info.info.calibration   # CalibrationResult
+cal = fc_info.info.calibration   # SMLMFrameConnection.CalibrationResult
 (smld_dc, dc_info) = analyze(smld_fc, DriftConfig(degree=2))
 (smld_dc, _) = analyze(smld_dc, RenderConfig(zoom=20, colormap=:inferno))  # pass-through; writes image to outdir
-(img, _) = render(smld_dc, RenderConfig(zoom=20, colormap=:inferno))       # in-memory image array
+
+using SMLMRender   # Pkg.add("SMLMRender") — needed to call render() directly, not through analyze()
+(img, _) = SMLMRender.render(smld_dc, RenderConfig(zoom=20, colormap=:inferno))       # in-memory image array
 
 # Resume from saved checkpoint in new session
 smld = load_smld("output/after_detectfit.h5")

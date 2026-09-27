@@ -33,12 +33,13 @@ moment a downstream step subsets emitters); it lives in the step's
 `EdgeClassifyInfo`, reached at the classify point:
 
 ```julia
+using SMLMClustering   # Pkg.add("SMLMClustering") — needed to call these accessors directly
 (smld, step_info) = analyze(smld, KdeValleyConfig())
-info = step_info.info                 # ::EdgeClassifyInfo
+info = step_info.info                 # ::SMLMClustering.EdgeClassifyInfo
 info.class                            # per-emitter Vector{Symbol}
-interior_mask(info)                   # BitVector of the :interior emitters
-in_cell(info)                         # :interior ∪ :membrane
-interior_fraction(info)               # scalar summary
+SMLMClustering.interior_mask(info)      # BitVector of the :interior emitters
+SMLMClustering.in_cell(info)            # :interior ∪ :membrane
+SMLMClustering.interior_fraction(info)  # scalar summary
 ```
 
 Only the cell-mask **geometry** travels downstream, mirrored into `metadata`:
@@ -61,7 +62,7 @@ tendency estimate to inside the cell.
 ## Outputs
 
 At `verbose >= STANDARD` with an `outdir`, the step writes `config.toml`, `info.toml`,
-and an edge report (diagnostics plus figures) under `{step}_edge_classify/`. The
+and an edge report (diagnostics plus figures) under `{step}_edgeclassify/`. The
 StepInfo summary records the gate `:method`, emitter counts, and the number of cells.
 
 See the [SMLMClustering documentation](https://github.com/JuliaSMLM/SMLMClustering.jl)

@@ -15,14 +15,29 @@ _resolve_colors(cfg::CompositeRenderConfig, defaults::Vector{Symbol}) = cfg.colo
 _resolve_colors(::AbstractMultiTargetStep, defaults::Vector{Symbol}) = defaults
 
 """
+    _multitarget_extra_kwargs(cfg, colors, labels) -> NamedTuple
+
+Multi-target step `analyze()` methods no longer carry a `kwargs...` catch-all,
+and each only declares the keyword(s) it actually reads (`CompositeRenderConfig`
+→ `colors`, `CrossCorrConfig` → `labels`, `CrossAlignConfig` → neither). This
+dispatches on the step's config type to build exactly the keyword set its
+`analyze` method accepts, so the orchestrator loop below never passes an
+unsupported keyword.
+"""
+_multitarget_extra_kwargs(::AbstractMultiTargetStep, colors::Vector{Symbol}, labels::Vector{Symbol}) = NamedTuple()
+_multitarget_extra_kwargs(::CompositeRenderConfig, colors::Vector{Symbol}, labels::Vector{Symbol}) = (colors=colors,)
+_multitarget_extra_kwargs(::CrossCorrConfig, colors::Vector{Symbol}, labels::Vector{Symbol}) = (labels=labels,)
+
+"""
     analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig) -> (MultiTargetResult, MultiTargetInfo)
 
 Run independent analysis pipelines for each channel, then execute multi-target
 steps (composite rendering, cross-channel alignment, etc.) via dispatch.
 
 Each element of `channels` is a `(data, AnalysisConfig)` tuple where `data` is an
-image stack (or Vector of stacks) or file path. The `config.labels` must match the
-number of channels.
+image stack (or Vector of stacks), or `nothing` for a file-based channel (one whose
+`AnalysisConfig`'s `DetectFitConfig` has `path`/`paths` set — `data` is never itself a
+file path). The `config.labels` must match the number of channels.
 
 # Arguments
 - `channels`: Vector of `(data, AnalysisConfig)` tuples, one per target/color
@@ -59,9 +74,9 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
 
     # Validate inputs
     n = length(channels)
-    length(config.labels) == n || error("Number of labels ($(length(config.labels))) must match number of channels ($n)")
-    length(config.colors) == n || error("Number of colors ($(length(config.colors))) must match number of channels ($n)")
-    length(unique(config.labels)) == n || error("Channel labels must be unique: $(config.labels)")
+    length(config.labels) == n || throw(ArgumentError("Number of labels ($(length(config.labels))) must match number of channels ($n)"))
+    length(config.colors) == n || throw(ArgumentError("Number of colors ($(length(config.colors))) must match number of channels ($n)"))
+    length(unique(config.labels)) == n || throw(ArgumentError("Channel labels must be unique: $(config.labels)"))
 
     mkpath(config.outdir)
 
@@ -102,8 +117,9 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
     state = smlds
     for (i, step_cfg) in enumerate(config.steps)
         colors = _resolve_colors(step_cfg, config.colors)
+        extra = _multitarget_extra_kwargs(step_cfg, colors, config.labels)
         (state, step_info) = analyze(state, step_cfg;
-            outdir=composite_dir, step_number=i, verbose=v, colors=colors, labels=config.labels)
+            outdir=composite_dir, step_number=i, verbose=v, extra...)
         push!(step_infos, step_info)
     end
 

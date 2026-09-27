@@ -3,6 +3,7 @@ using SMLMFrameConnection
 using SMLMDriftCorrection
 using GaussMLE
 using Test
+using Aqua
 using Random
 using TOML
 using Statistics
@@ -11,17 +12,81 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
 
 @testset "fast" begin
     @testset "exports resolve" begin
-        # Every exported name must have a defined binding. `export AbstractCamera`
-        # was dangling: SMLMData and Makie (via CairoMakie) both export an
-        # AbstractCamera, the ambiguity left the module binding undeclared, and
-        # downstream `f(x::AbstractCamera)` threw UndefVarError after
-        # `using SMLMAnalysis`. This sweep catches any future collision a new
-        # dependency introduces.
+        # Every exported name must have a defined binding. This used to catch a
+        # dangling `export AbstractCamera`: SMLMData and Makie (via CairoMakie)
+        # both export an AbstractCamera, and the ambiguity left the module
+        # binding undeclared even though `export` listed it. AbstractCamera is
+        # no longer exported (it's an extension hook, reached as
+        # `SMLMAnalysis.SMLMData.AbstractCamera`), but this sweep still catches
+        # any future collision a new dependency introduces.
         dangling = [n for n in names(SMLMAnalysis) if !isdefined(SMLMAnalysis, n)]
         @test isempty(dangling)
-        # And the binding must be SMLMData's camera type, not Makie's.
-        @test AbstractCamera === SMLMAnalysis.SMLMData.AbstractCamera
-        @test IdealCamera <: AbstractCamera
+        @test IdealCamera <: SMLMAnalysis.SMLMData.AbstractCamera
+    end
+
+    @testset "exact export set" begin
+        # Every export must justify itself (Keith's ruling, 2026-09):
+        # build-a-pipeline / run-it / pick-a-result-out / load-or-save / manage-the-guide.
+        # This is the literal list, so any future export is a deliberate edit here.
+        keep = [
+            :analyze, :stepinfo, :stepinfos, :Verbosity, :Checkpoint,
+            :AnalysisConfig, :MultiTargetConfig,
+            :DetectFitConfig, :FilterConfig, :DensityFilterConfig, :IntensityFilterConfig,
+            :CompositeRenderConfig, :CrossAlignConfig, :CrossCorrConfig,
+            :FrameConnectConfig, :CalibrationConfig, :DriftConfig, :AlignConfig,
+            :RenderConfig, :BaGoLConfig, :BoxerConfig, :GaussMLEConfig,
+            :GaussianXYNB, :GaussianXYNBS, :GaussianXYNBSXSY, :AstigmaticXYZNB,
+            :HistogramRender, :GaussianRender, :CircleRender, :EllipseRender,
+            :DBSCANConfig, :HDBSCANConfig, :HierarchicalConfig, :VoronoiConfig,
+            :HopkinsConfig, :VoronoiDensityConfig, :OuterPolygonConfig, :KdeValleyConfig,
+            :IdealCamera, :SCMOSCamera,
+            :save_smld, :load_smld, :smld_info, :load_smart_h5, :load_smart_h5_info,
+            :smart_h5_to_array, :load_mic_h5, :load_mic_h5_info, :load_mic_h5_block,
+            :build_camera_from_mic_h5,
+            :install_agent_guide, :uninstall_agent_guide, :agent_guide_status,
+        ]
+        @test Set(names(SMLMAnalysis)) == Set([:SMLMAnalysis; keep])
+    end
+
+    @testset "non-exported but public names resolve" begin
+        # api_overview.md's "Non-exported but public" section promises every one of
+        # these resolves as `SMLMAnalysis.Name`, exported or not. Hard-coded here (not
+        # parsed from the doc) so a naming collision with a new `using`d dependency —
+        # like the CairoMakie/Makie `AbstractCamera` one this guards against — is
+        # caught immediately instead of silently leaving a dangling binding.
+        public_names = [
+            # Owned result/info structs and extension hooks.
+            :AnalysisResult, :AnalysisInfo, :StepInfo, :AbstractSMLMConfig, :AbstractSMLMInfo,
+            :AbstractMultiTargetStep, :MultiTargetResult, :MultiTargetInfo, :DetectFitInfo,
+            :FilterInfo, :DensityFilterInfo, :IntensityFilterInfo, :BaGoLInfo,
+            :CompositeRenderInfo, :CrossAlignInfo, :CrossCorrInfo, :step_name, :step_outdir,
+            # Upstream re-exports, qualified with their owning package in the docs but
+            # also reachable one level down as SMLMAnalysis.Name.
+            :AbstractCamera, :BasicSMLD, :Emitter2DFit, :Emitter3DFit, :ROIBatch,
+            :StaticSMLMConfig, :simulate, :gen_images, :Nmer2D, :Line2D, :GenericFluor,
+            :fit, :frameconnect, :CalibrationResult, :driftcorrect, :align_smld, :AlignInfo,
+            :run_bagol, :BaGoLDiagnostics, :render, :cluster, :cluster_statistics,
+            :AbstractClusterConfig, :AbstractStatisticsConfig, :ClusterInfo, :ClusterStatisticsInfo,
+            :in_cell, :interior_mask, :interior_fraction, :AbstractEdgeClassifyConfig,
+            :EdgeClassifyInfo, :CellPolygon, :MultiCellMask,
+        ]
+        for n in public_names
+            @test (try; getglobal(SMLMAnalysis, n); true; catch; false; end)
+        end
+        @test SMLMAnalysis.AbstractCamera === SMLMAnalysis.SMLMData.AbstractCamera
+    end
+
+    @testset "Aqua" begin
+        # `ambiguities=(recursive=false,)`: recursive ambiguity checking also flags
+        # method ambiguities defined entirely inside our upstream dependencies
+        # (SMLMData/SMLMRender/etc.), which are not ours to fix here.
+        # Skipped in the downgrade-compat CI job (SMLM_DOWNGRADE_CI=true): there the
+        # oldest-allowed upstream versions carry their own ambiguities, the action
+        # merges test extras into [deps] (so Aqua flags itself as stale), and the
+        # persistent-task probe cannot precompile. Aqua runs on every other job.
+        if get(ENV, "SMLM_DOWNGRADE_CI", "false") != "true"
+            Aqua.test_all(SMLMAnalysis; ambiguities=(recursive=false,))
+        end
     end
 
     @testset "docs cover every SMLMAnalysis-owned export" begin
@@ -59,49 +124,105 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
     end
 
     @testset "Types" begin
-        # Test AnalysisInfo constructor
-        info = AnalysisInfo()
+        # Test SMLMAnalysis.AnalysisInfo constructor
+        info = SMLMAnalysis.AnalysisInfo()
         @test info.elapsed_s == 0.0
         @test isempty(info.step_infos)
 
-        # Test AnalysisInfo with data
+        # Test SMLMAnalysis.AnalysisInfo with data
         cfg0 = FilterConfig()
-        si0 = StepInfo(1, cfg0, 0.2, Dict{Symbol,Any}(); info=FilterInfo(10, 8, 0.2))
-        info = AnalysisInfo(1.5, StepInfo[si0])
+        si0 = SMLMAnalysis.StepInfo(1, cfg0, 0.2, Dict{Symbol,Any}(); info=SMLMAnalysis.FilterInfo(10, 8, 0.2))
+        info = SMLMAnalysis.AnalysisInfo(1.5, SMLMAnalysis.StepInfo[si0])
         @test info.elapsed_s == 1.5
         @test length(info.step_infos) == 1
-        @test info.step_infos[1].info isa FilterInfo
+        @test info.step_infos[1].info isa SMLMAnalysis.FilterInfo
 
-        # Test StepInfo with typed info
+        # Test SMLMAnalysis.StepInfo with typed info
         cfg = FilterConfig()
-        filter_info = FilterInfo(100, 80, 0.5)
-        step_info = StepInfo(1, cfg, 0.5, Dict{Symbol,Any}(:n_before => 100); info=filter_info)
+        filter_info = SMLMAnalysis.FilterInfo(100, 80, 0.5)
+        step_info = SMLMAnalysis.StepInfo(1, cfg, 0.5, Dict{Symbol,Any}(:n_before => 100); info=filter_info)
         @test step_info.info !== nothing
-        @test step_info.info isa FilterInfo
+        @test step_info.info isa SMLMAnalysis.FilterInfo
         @test step_info.info.n_before == 100
         @test step_info.info.n_after == 80
         @test step_info.elapsed_s == 0.5
 
-        # Test StepInfo without info
-        step_info2 = StepInfo(2, cfg, 0.3, Dict{Symbol,Any}())
+        # Test SMLMAnalysis.StepInfo without info
+        step_info2 = SMLMAnalysis.StepInfo(2, cfg, 0.3, Dict{Symbol,Any}())
         @test step_info2.info === nothing
 
         # Test native info structs
         # Back-compat 7-arg constructor (defaults selected_source_indices to nothing)
-        di = DetectFitInfo([], [], 2, 1000, 950, 5000, 1.5)
+        di = SMLMAnalysis.DetectFitInfo([], [], 2, 1000, 950, 5000, 1.5)
         @test di.n_datasets == 2
         @test di.n_rois == 1000
         @test di.n_fits == 950
         @test di.selected_source_indices === nothing
 
+        @test di.n_nonfinite == 0
+
         # Full 8-arg constructor with provenance
-        di_sel = DetectFitInfo([], [], 3, 500, 450, 1000, 0.5, [1, 3, 5])
+        di_sel = SMLMAnalysis.DetectFitInfo([], [], 3, 500, 450, 1000, 0.5, [1, 3, 5])
         @test di_sel.selected_source_indices == [1, 3, 5]
         @test di_sel.n_datasets == 3
+        @test di_sel.n_nonfinite == 0
 
-        dfi = DensityFilterInfo(1000, 800, 5, 0.3)
+        # _drop_nonfinite_emitters: drops emitters with a NaN/Inf in any AbstractFloat field.
+        e_ok = SMLMAnalysis.Emitter2DFit(1.0, 1.0, 100.0, 5.0, 0.01, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, 1)
+        e_nan_y = SMLMAnalysis.Emitter2DFit(1.0, NaN, 100.0, 5.0, 0.01, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, 2)
+        e_inf_photons = SMLMAnalysis.Emitter2DFit(1.0, 1.0, Inf, 5.0, 0.01, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, 3)
+        kept, n_dropped = SMLMAnalysis._drop_nonfinite_emitters([e_ok, e_nan_y, e_inf_photons])
+        @test kept == [e_ok]
+        @test n_dropped == 2
+
+        dfi = SMLMAnalysis.DensityFilterInfo(1000, 800, 5, 0.3)
         @test dfi.n_before == 1000
         @test dfi.threshold == 5
+
+        # densityfilter's per-point query radius n_sigma*sqrt(σ_i^2+max_σ^2) is an
+        # exact upper bound for the pair test dist < n_sigma*sqrt(σ_i^2+σ_j^2) it
+        # gates on, so switching the KD-tree query from a single global radius to a
+        # per-point one must not change which emitters survive. Cross-check against
+        # an independent brute-force count of that same pair test.
+        cam = IdealCamera(64, 64, 0.1)
+        xs = [0.0, 0.05, 0.0, 0.05, 5.0]
+        ys = [0.0, 0.0, 0.05, 0.05, 5.0]
+        σs = [0.01, 0.01, 0.01, 0.05, 0.2]
+        emitters = [SMLMAnalysis.Emitter2DFit(xs[i], ys[i], 1000.0, 10.0, σs[i], σs[i], 0.0, 1.0, 1.0, i, 1, 0, i) for i in 1:5]
+        smld_df = SMLMAnalysis.BasicSMLD(emitters, cam, 1, 1, Dict{String,Any}())
+        cfg_df = DensityFilterConfig(n_sigma=3.0, min_neighbors=1)
+        filtered_df, _ = SMLMAnalysis.densityfilter_step(smld_df, cfg_df)
+
+        σ = [sqrt(e.σ_x^2 + e.σ_y^2) for e in emitters]
+        expected_counts = zeros(Int, 5)
+        for i in 1:5, j in 1:5
+            i == j && continue
+            dist = sqrt((emitters[i].x - emitters[j].x)^2 + (emitters[i].y - emitters[j].y)^2)
+            dist < cfg_df.n_sigma * sqrt(σ[i]^2 + σ[j]^2) && (expected_counts[i] += 1)
+        end
+        @test length(filtered_df.emitters) == count(>=(cfg_df.min_neighbors), expected_counts)
+
+        # Non-finite σ is rejected up front rather than silently propagating.
+        bad_emitters = [SMLMAnalysis.Emitter2DFit(0.0, 0.0, 1000.0, 10.0, NaN, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, 1)]
+        smld_bad = SMLMAnalysis.BasicSMLD(bad_emitters, cam, 1, 1, Dict{String,Any}())
+        @test_throws ArgumentError SMLMAnalysis.densityfilter_step(smld_bad, cfg_df)
+
+        # IntensityFilter: non-finite photons rejected up front. Needs >=100
+        # emitters, otherwise the step's own "too few emitters" early return
+        # would skip the check before it is reached.
+        many = [SMLMAnalysis.Emitter2DFit(0.01i, 0.01i, 1000.0, 10.0, 0.01, 0.01, 0.0, 1.0, 1.0, i, 1, 0, i) for i in 2:100]
+        bad_photon = SMLMAnalysis.Emitter2DFit(0.5, 0.5, NaN, 10.0, 0.01, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, 1)
+        smld_ifbad = SMLMAnalysis.BasicSMLD(vcat([bad_photon], many), cam, 1, 1, Dict{String,Any}())
+        @test_throws ArgumentError SMLMAnalysis.intensityfilter_step(smld_ifbad, IntensityFilterConfig())
+
+        # psf_sigma: an explicit (lo, hi) — including a 0.0 lower bound — is
+        # always applied, unlike :auto's "skip when degenerate" behavior.
+        mkem_sigma(σ, i) = GaussMLE.Emitter2DFitSigma{Float64}(
+            0.0, 0.0, 1000.0, 5.0, σ, 0.01, 0.01, 0.0, 20.0, 0.5, 0.002, 1.0, 1, 1, 0, i)
+        smld_ps = SMLMAnalysis.BasicSMLD([mkem_sigma(0.05, 1), mkem_sigma(0.3, 2)], cam, 1, 1, Dict{String,Any}())
+        filtered_ps, _ = SMLMAnalysis.filter_step(smld_ps, FilterConfig(psf_sigma=(0.0, 0.1)))
+        @test length(filtered_ps.emitters) == 1
+        @test filtered_ps.emitters[1].σ == 0.05
     end
 
     @testset "analyze dispatch" begin
@@ -109,11 +230,16 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test hasmethod(analyze, Tuple{Vector{<:AbstractArray{<:Real,3}}, DetectFitConfig})
         @test hasmethod(analyze, Tuple{AbstractArray{<:Real,3}, DetectFitConfig})
         @test hasmethod(analyze, Tuple{DetectFitConfig})
-        @test hasmethod(analyze, Tuple{BasicSMLD, FilterConfig})
-        @test hasmethod(analyze, Tuple{BasicSMLD, FrameConnectConfig})
-        @test hasmethod(analyze, Tuple{BasicSMLD, DriftConfig})
-        @test hasmethod(analyze, Tuple{BasicSMLD, DensityFilterConfig})
-        @test hasmethod(analyze, Tuple{BasicSMLD, RenderConfig})
+        @test hasmethod(analyze, Tuple{SMLMAnalysis.BasicSMLD, FilterConfig})
+        @test hasmethod(analyze, Tuple{SMLMAnalysis.BasicSMLD, FrameConnectConfig})
+        @test hasmethod(analyze, Tuple{SMLMAnalysis.BasicSMLD, DriftConfig})
+        @test hasmethod(analyze, Tuple{SMLMAnalysis.BasicSMLD, DensityFilterConfig})
+        @test hasmethod(analyze, Tuple{SMLMAnalysis.BasicSMLD, RenderConfig})
+
+        # analyze(data, config::AnalysisConfig) with a data type _normalize_data
+        # doesn't recognize (e.g. a String — data is never itself a file path;
+        # use `nothing` with a file-based DetectFitConfig instead).
+        @test_throws ArgumentError analyze("some/path.h5", AnalysisConfig(camera=IdealCamera(8, 8, 0.1)))
 
         # Verify old step function names are not exported
         @test !isdefined(Main, :detectfit)
@@ -132,11 +258,19 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test cfg2.boxer.boxsize == 7
         @test cfg2.fitter.psf_model isa GaussianXYNBS
 
+        # _inject_camera (AnalysisConfig pipeline path): pixel_size/qe on the
+        # DetectFitConfig would be silently ignored (the pipeline camera always
+        # wins), so it's rejected instead of accepted-and-dropped.
+        @test SMLMAnalysis._inject_camera(cfg, cam).camera === cam    # no pixel_size/qe: fine
+        @test_throws ArgumentError SMLMAnalysis._inject_camera(DetectFitConfig(pixel_size=0.1), cam)
+        @test_throws ArgumentError SMLMAnalysis._inject_camera(DetectFitConfig(qe=0.9), cam)
+        @test SMLMAnalysis._inject_camera(DetectFitConfig(camera=cam, pixel_size=0.1), cam).camera === cam  # camera already set: unchanged
+
         # DetectFitConfig.datasets selection field
         @test cfg.datasets === nothing                          # default is no selection
         cfg_range = DetectFitConfig(datasets=1:19)
         @test cfg_range.datasets == 1:19
-        @test cfg_range.datasets isa UnitRange{Int}
+        @test cfg_range.datasets isa Vector{Int}   # concrete field type: any AbstractVector{Int} is accepted but stored as Vector{Int}
         cfg_sparse = DetectFitConfig(datasets=[1, 2, 3, 5, 7])
         @test cfg_sparse.datasets == [1, 2, 3, 5, 7]
         @test cfg_sparse.datasets isa Vector{Int}
@@ -146,8 +280,37 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test SMLMAnalysis._select_sources(src, nothing) === src
         @test SMLMAnalysis._select_sources(src, [1, 3, 5]) == [src[1], src[3], src[5]]
         @test SMLMAnalysis._select_sources(src, 2:4) == src[2:4]
-        @test_throws ErrorException SMLMAnalysis._select_sources(src, [1, 6])
-        @test_throws ErrorException SMLMAnalysis._select_sources(src, [0, 1])
+        @test_throws ArgumentError SMLMAnalysis._select_sources(src, [1, 6])
+        @test_throws ArgumentError SMLMAnalysis._select_sources(src, [0, 1])
+
+        # No kwargs... catch-all on step analyze() methods: a misspelled keyword
+        # must raise MethodError, not silently vanish into a kwargs sink.
+        smld_empty = SMLMAnalysis.BasicSMLD(SMLMAnalysis.Emitter2DFit{Float64}[], cam, 1, 1, Dict{String,Any}())
+        @test_throws MethodError analyze(smld_empty, FilterConfig(); bogus_kwarg=1)
+    end
+
+    @testset "Verbosity/Checkpoint validation" begin
+        cam = IdealCamera(64, 64, 0.1)
+
+        # Valid levels round-trip through AnalysisConfig / MultiTargetConfig construction.
+        @test AnalysisConfig(camera=cam, verbose=Verbosity.SILENT, checkpoint=Checkpoint.NONE).verbose == Verbosity.SILENT
+        @test AnalysisConfig(camera=cam, verbose=Verbosity.DEBUG, checkpoint=Checkpoint.ALL).checkpoint == Checkpoint.ALL
+        @test MultiTargetConfig(labels=[:A], outdir="x", verbose=Verbosity.DEBUG).verbose == Verbosity.DEBUG
+
+        # Out-of-range verbose/checkpoint must raise ArgumentError at construction.
+        @test_throws ArgumentError AnalysisConfig(camera=cam, verbose=-1)
+        @test_throws ArgumentError AnalysisConfig(camera=cam, verbose=Verbosity.DEBUG + 1)
+        @test_throws ArgumentError AnalysisConfig(camera=cam, checkpoint=-1)
+        @test_throws ArgumentError AnalysisConfig(camera=cam, checkpoint=Checkpoint.ALL + 1)
+        @test_throws ArgumentError MultiTargetConfig(labels=[:A], outdir="x", verbose=-1)
+        @test_throws ArgumentError MultiTargetConfig(labels=[:A], outdir="x", verbose=Verbosity.DEBUG + 1)
+
+        # Same validation at the _run_pipeline entry point, for direct calls that
+        # bypass AnalysisConfig entirely.
+        steps = SMLMAnalysis.AbstractSMLMConfig[]
+        @test_throws ArgumentError SMLMAnalysis._run_pipeline(nothing, steps, cam, nothing, -1)
+        @test_throws ArgumentError SMLMAnalysis._run_pipeline(nothing, steps, cam, nothing, Verbosity.STANDARD, -1)
+        @test_throws ArgumentError SMLMAnalysis._run_pipeline(nothing, steps, cam, nothing, Verbosity.STANDARD, Checkpoint.ALL + 1)
     end
 
     @testset "CalibrationConfig re-export" begin
@@ -167,21 +330,21 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
     end
 
     @testset "Info struct subtypes" begin
-        # All info structs should be AbstractSMLMInfo subtypes
-        @test StepInfo <: AbstractSMLMInfo
-        @test DetectFitInfo <: AbstractSMLMInfo
-        @test FilterInfo <: AbstractSMLMInfo
-        @test DensityFilterInfo <: AbstractSMLMInfo
-        @test CompositeRenderInfo <: AbstractSMLMInfo
-        @test CrossAlignInfo <: AbstractSMLMInfo
-        @test AnalysisInfo <: AbstractSMLMInfo
+        # All info structs should be SMLMAnalysis.AbstractSMLMInfo subtypes
+        @test SMLMAnalysis.StepInfo <: SMLMAnalysis.AbstractSMLMInfo
+        @test SMLMAnalysis.DetectFitInfo <: SMLMAnalysis.AbstractSMLMInfo
+        @test SMLMAnalysis.FilterInfo <: SMLMAnalysis.AbstractSMLMInfo
+        @test SMLMAnalysis.DensityFilterInfo <: SMLMAnalysis.AbstractSMLMInfo
+        @test SMLMAnalysis.CompositeRenderInfo <: SMLMAnalysis.AbstractSMLMInfo
+        @test SMLMAnalysis.CrossAlignInfo <: SMLMAnalysis.AbstractSMLMInfo
+        @test SMLMAnalysis.AnalysisInfo <: SMLMAnalysis.AbstractSMLMInfo
     end
 
     @testset "Multi-target step types" begin
         # Type hierarchy
-        @test AbstractMultiTargetStep <: AbstractSMLMConfig
-        @test CompositeRenderConfig <: AbstractMultiTargetStep
-        @test CrossAlignConfig <: AbstractMultiTargetStep
+        @test SMLMAnalysis.AbstractMultiTargetStep <: SMLMAnalysis.AbstractSMLMConfig
+        @test CompositeRenderConfig <: SMLMAnalysis.AbstractMultiTargetStep
+        @test CrossAlignConfig <: SMLMAnalysis.AbstractMultiTargetStep
 
         # CompositeRenderConfig defaults
         cr = CompositeRenderConfig()
@@ -217,8 +380,8 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test SMLMAnalysis.step_name(ca) == "crossalign"
 
         # analyze dispatch methods exist for multi-target steps
-        @test hasmethod(analyze, Tuple{Vector{<:BasicSMLD}, CompositeRenderConfig})
-        @test hasmethod(analyze, Tuple{Vector{<:BasicSMLD}, CrossAlignConfig})
+        @test hasmethod(analyze, Tuple{Vector{<:SMLMAnalysis.BasicSMLD}, CompositeRenderConfig})
+        @test hasmethod(analyze, Tuple{Vector{<:SMLMAnalysis.BasicSMLD}, CrossAlignConfig})
 
         # MultiTargetConfig with steps vector
         mt = MultiTargetConfig(
@@ -275,22 +438,22 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         cam = IdealCamera(64, 64, 0.1)
         N = 1500
         xs = 1.0 .+ 4.4 .* rand(rng, N); ys = 1.0 .+ 4.4 .* rand(rng, N)
-        mk(dx, dy) = BasicSMLD([Emitter2DFit{Float64}(xs[i] + dx, ys[i] + dy, 1000.0, 10.0,
+        mk(dx, dy) = SMLMAnalysis.BasicSMLD([SMLMAnalysis.Emitter2DFit{Float64}(xs[i] + dx, ys[i] + dy, 1000.0, 10.0,
                                     0.01, 0.01, 50.0, 2.0; frame=1 + (i % 10)) for i in 1:N],
                                cam, 10, 1, Dict{String,Any}())
         a, b = mk(0.0, 0.0), mk(0.08, -0.05)
         labels = [:A, :B]
         (state, si) = analyze([a, b], CrossAlignConfig();
-            outdir=nothing, step_number=1, verbose=0, colors=[:cyan, :magenta], labels=labels)
+            outdir=nothing, step_number=1, verbose=0)
         meanxy(s) = (sum(e.x for e in s.emitters) / N, sum(e.y for e in s.emitters) / N)
         off(s1, s2) = hypot((meanxy(s2) .- meanxy(s1))...)
         @test off(state[1], state[2]) < 0.010          # known ~94 nm offset removed to < 10 nm
 
-        channels = Dict{Symbol,AnalysisResult}(:A => AnalysisResult(a, a, nothing),
-                                               :B => AnalysisResult(b, b, nothing))
+        channels = Dict{Symbol,SMLMAnalysis.AnalysisResult}(:A => SMLMAnalysis.AnalysisResult(a, a, nothing),
+                                               :B => SMLMAnalysis.AnalysisResult(b, b, nothing))
         mktempdir() do dir
             SMLMAnalysis._finalize_channels!(channels, state, labels, dir; verbose=0)
-            mtr = MultiTargetResult(labels, state, channels, [si], dir)
+            mtr = SMLMAnalysis.MultiTargetResult(labels, state, channels, [si], dir)
             @test mtr[:B].smld === mtr.smlds[2] === state[2]
             @test mtr[:B].smld_connected === b                # pre-alignment data kept
             saved = load_smld(joinpath(dir, "smld_B.h5"))
@@ -301,8 +464,8 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         # A state that is not one SMLD per label is a contract violation: throw
         # rather than silently leave the channel results alone (a caller that
         # continued on to _write_composite_readme! would otherwise BoundsError).
-        ch2 = Dict{Symbol,AnalysisResult}(:A => AnalysisResult(a, nothing, nothing),
-                                          :B => AnalysisResult(b, nothing, nothing))
+        ch2 = Dict{Symbol,SMLMAnalysis.AnalysisResult}(:A => SMLMAnalysis.AnalysisResult(a, nothing, nothing),
+                                          :B => SMLMAnalysis.AnalysisResult(b, nothing, nothing))
         mktempdir() do dir
             @test_throws ArgumentError SMLMAnalysis._finalize_channels!(ch2, state[1:1], labels, dir; verbose=0)
             @test ch2[:B].smld === b
@@ -310,13 +473,13 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
 
             # Right length, but an untyped Vector{Any} container: rejected even
             # though its actual elements are BasicSMLDs -- _write_composite_readme!
-            # requires Vector{<:BasicSMLD}, so this would otherwise MethodError
+            # requires Vector{<:SMLMAnalysis.BasicSMLD}, so this would otherwise MethodError
             # there instead of failing loudly here.
             @test_throws ArgumentError SMLMAnalysis._finalize_channels!(ch2, Any[state[1], state[2]], labels, dir; verbose=0)
 
-            # A view is an AbstractVector{<:BasicSMLD} but not a Vector -- same
+            # A view is an AbstractVector{<:SMLMAnalysis.BasicSMLD} but not a Vector -- same
             # rejection, for the same reason (_write_composite_readme! requires
-            # exactly Vector{<:BasicSMLD}).
+            # exactly Vector{<:SMLMAnalysis.BasicSMLD}).
             @test_throws ArgumentError SMLMAnalysis._finalize_channels!(ch2, view(state, 1:2), labels, dir; verbose=0)
         end
     end
@@ -340,7 +503,7 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         cells_b = [CP(shiftpts(cells_a[1].outer, dx, dy),
                       [shiftpts(h, dx, dy) for h in cells_a[1].holes])]
 
-        mkgeom(ddx, ddy, md) = BasicSMLD([Emitter2DFit{Float64}(xs[i] + ddx, ys[i] + ddy, 1000.0,
+        mkgeom(ddx, ddy, md) = SMLMAnalysis.BasicSMLD([SMLMAnalysis.Emitter2DFit{Float64}(xs[i] + ddx, ys[i] + ddy, 1000.0,
                                     10.0, 0.01, 0.01, 50.0, 2.0; frame=1 + (i % 10)) for i in 1:N],
                                cam, 10, 1, md)
         a = mkgeom(0.0, 0.0, Dict{String,Any}("edge_outer_polygon" => outer_a, "edge_cells" => cells_a))
@@ -387,12 +550,12 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         # dropped, with one @warn per channel.
         CP = SMLMAnalysis.SMLMClustering.CellPolygon
         cam = IdealCamera(16, 16, 0.1)
-        em = [Emitter2DFit{Float64}(0.1i, 0.1i, 1000.0, 5.0, 0.01, 0.01, 20.0, 0.5; frame=i) for i in 1:3]
+        em = [SMLMAnalysis.Emitter2DFit{Float64}(0.1i, 0.1i, 1000.0, 5.0, 0.01, 0.01, 20.0, 0.5; frame=i) for i in 1:3]
         outer = NTuple{2,Float64}[(1.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0)]
         hole = NTuple{2,Float64}[(1.5, 1.5), (2.0, 1.5), (2.0, 2.0)]
         md = Dict{String,Any}("edge_outer_polygon" => outer, "edge_cells" => [CP(outer, [hole])])
-        ref = BasicSMLD(em, cam, 3, 1, Dict{String,Any}())
-        chan = BasicSMLD(em, cam, 3, 1, deepcopy(md))
+        ref = SMLMAnalysis.BasicSMLD(em, cam, 3, 1, Dict{String,Any}())
+        chan = SMLMAnalysis.BasicSMLD(em, cam, 3, 1, deepcopy(md))
         aligned = [ref, chan]
 
         info = SMLMDriftCorrection.AlignInfo(
@@ -421,7 +584,7 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             x, y, 1000.0, 5.0, 0.13,
             0.01, 0.012, 0.003, 20.0, 0.5, 0.002,
             0.4, 1, 1, 0, i)
-        mksmld(xs, ys, cam) = BasicSMLD(
+        mksmld(xs, ys, cam) = SMLMAnalysis.BasicSMLD(
             [mkem(xs[i], ys[i], i) for i in eachindex(xs)],
             cam, 1, 1, Dict{String,Any}())
 
@@ -512,14 +675,14 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         nrow, ncol, nfr = 6, 8, 3
         img = [1000r + 10c + f for r in 1:nrow, c in 1:ncol, f in 1:nfr]
         roi_x, roi_y = 3:6, 2:4        # columns, rows
-        cropped = crop_images(img, roi_x, roi_y)
+        cropped = SMLMAnalysis.crop_images(img, roi_x, roi_y)
         @test size(cropped) == (length(roi_y), length(roi_x), nfr)
         @test cropped == img[roi_y, roi_x, :]
         @test cropped[1, 1, 1] == 1000 * first(roi_y) + 10 * first(roi_x) + 1
 
         # crop_camera uses the same convention: roi_x → x-edges, roi_y → y-edges.
         cam = IdealCamera(ncol, nrow, 0.1)   # IdealCamera(nx=cols, ny=rows, px)
-        cc = crop_camera(cam, roi_x, roi_y)
+        cc = SMLMAnalysis.crop_camera(cam, roi_x, roi_y)
         @test cc.pixel_edges_x == cam.pixel_edges_x[first(roi_x):last(roi_x)+1]
         @test cc.pixel_edges_y == cam.pixel_edges_y[first(roi_y):last(roi_y)+1]
         @test length(cc.pixel_edges_x) - 1 == length(roi_x)   # x pixel count = #cols
@@ -551,7 +714,7 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
                     0.01, 0.012, 0.003, 20.0, 0.5, 0.002,  # σ_x, σ_y, σ_xy, σ_photons, σ_bg, σ_σ
                     0.4, i, 1, 0, i)                        # pvalue, frame, dataset, track_id, id
                   for i in 1:5]
-            smld = BasicSMLD(es, cam, 10, 1, Dict{String,Any}())
+            smld = SMLMAnalysis.BasicSMLD(es, cam, 10, 1, Dict{String,Any}())
             path = joinpath(dir, "sigma.h5")
             save_smld(path, smld)
             loaded = load_smld(path)
@@ -571,7 +734,7 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
                     0.01, 0.012, 0.003, 20.0, 0.5,           # σ_x, σ_y, σ_xy, σ_photons, σ_bg
                     0.002, 0.0021, 0.4, i, 1, 0, i)          # σ_σx, σ_σy, pvalue, frame, dataset, track_id, id
                   for i in 1:4]
-            smld_xy = BasicSMLD(exy, cam, 10, 1, Dict{String,Any}())
+            smld_xy = SMLMAnalysis.BasicSMLD(exy, cam, 10, 1, Dict{String,Any}())
             pxy = joinpath(dir, "sigmaxy.h5")
             save_smld(pxy, smld_xy)
             loaded_xy = load_smld(pxy)
@@ -597,31 +760,37 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
 
     @testset "GaussMLE emitter types + abstract-eltype round-trip" begin
         # Regression coverage for the AbstractEmitter type-erasure + serialization fix:
-        #  - _with_dataset must handle EVERY advertised GaussMLE emitter type
-        #    (GaussianXYNB → Emitter2DFitGaussMLE, AstigmaticXYZNB → Emitter3DFitGaussMLE),
-        #    or detectfit throws a MethodError the moment those fitters are used.
+        #  - detectfit sets each emitter's dataset field by mutating it in place
+        #    (all advertised emitter types are mutable structs, so this needs no
+        #    per-type dispatch — unlike the old positional-reconstruction
+        #    `_with_dataset`, removed once every type was confirmed mutable), for
+        #    EVERY advertised GaussMLE emitter type (GaussianXYNB → Emitter2DFitGaussMLE,
+        #    AstigmaticXYZNB → Emitter3DFitGaussMLE) as well as the standard ones.
         #  - save_smld/load_smld must round-trip those types and the standard-3D
         #    off-diagonal covariances, AND must key off the concrete emitter even when
-        #    the SMLD is typed BasicSMLD{T,AbstractEmitter} (as the pre-narrowing
-        #    pipeline produced) rather than degrading to Emitter2DFit and dropping σ.
+        #    the SMLD is typed SMLMAnalysis.BasicSMLD{T,AbstractEmitter} (as the pre-narrowing
+        #    pipeline produced) rather than degrading to SMLMAnalysis.Emitter2DFit and dropping σ.
         cam = IdealCamera(8, 8, 0.1)
         T = Float64
 
-        # _with_dataset must not MethodError for the fixed-width / astigmatic types.
+        # Setting .dataset in place must work for the fixed-width / astigmatic types
+        # and leave every other field untouched.
         e2g = GaussMLE.Emitter2DFitGaussMLE{T}(0.1, 0.2, 1000.0, 5.0,
                 0.01, 0.012, 0.003, 20.0, 0.5, 0.4, 1, 1, 0, 1)
         e3g = GaussMLE.Emitter3DFitGaussMLE{T}(0.1, 0.2, 0.3, 1000.0, 5.0,
                 0.01, 0.012, 0.02, 0.003, 0.001, 0.002, 20.0, 0.5, 0.4, 1, 1, 0, 1)
-        @test SMLMAnalysis._with_dataset(e2g, 7).dataset == 7
-        @test SMLMAnalysis._with_dataset(e2g, 7).σ_xy ≈ 0.003
-        @test SMLMAnalysis._with_dataset(e3g, 7).dataset == 7
-        @test SMLMAnalysis._with_dataset(e3g, 7).σ_yz ≈ 0.002
+        e2g.dataset = 7
+        @test e2g.dataset == 7
+        @test e2g.σ_xy ≈ 0.003
+        e3g.dataset = 7
+        @test e3g.dataset == 7
+        @test e3g.σ_yz ≈ 0.002
 
         mktempdir() do dir
             # Emitter2DFitGaussMLE (GaussianXYNB) round-trip.
             g2 = [GaussMLE.Emitter2DFitGaussMLE{T}(0.1i, 0.2i, 1000.0 + i, 5.0,
                     0.01, 0.012, 0.003, 20.0, 0.5, 0.4, i, 1, 0, i) for i in 1:4]
-            s2 = BasicSMLD(g2, cam, 10, 1, Dict{String,Any}())
+            s2 = SMLMAnalysis.BasicSMLD(g2, cam, 10, 1, Dict{String,Any}())
             p2 = joinpath(dir, "g2.h5"); save_smld(p2, s2); l2 = load_smld(p2)
             @test eltype(l2.emitters) <: GaussMLE.Emitter2DFitGaussMLE
             for (a, b) in zip(s2.emitters, l2.emitters), f in fieldnames(GaussMLE.Emitter2DFitGaussMLE)
@@ -631,35 +800,35 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             # Emitter3DFitGaussMLE (AstigmaticXYZNB) round-trip: z + full covariance.
             g3 = [GaussMLE.Emitter3DFitGaussMLE{T}(0.1i, 0.2i, 0.3i, 1000.0 + i, 5.0,
                     0.01, 0.012, 0.02, 0.003, 0.001, 0.002, 20.0, 0.5, 0.4, i, 1, 0, i) for i in 1:4]
-            s3 = BasicSMLD(g3, cam, 10, 1, Dict{String,Any}())
+            s3 = SMLMAnalysis.BasicSMLD(g3, cam, 10, 1, Dict{String,Any}())
             p3 = joinpath(dir, "g3.h5"); save_smld(p3, s3); l3 = load_smld(p3)
             @test eltype(l3.emitters) <: GaussMLE.Emitter3DFitGaussMLE
             @test l3.emitters[2].z ≈ 0.6
             @test l3.emitters[2].σ_xz ≈ 0.001
             @test l3.emitters[2].σ_yz ≈ 0.002
 
-            # Standard Emitter3DFit: off-diagonal covariances σ_xz/σ_yz survive
+            # Standard SMLMAnalysis.Emitter3DFit: off-diagonal covariances σ_xz/σ_yz survive
             # (they were never written before this fix).
-            e3 = [Emitter3DFit{T}(0.1i, 0.2i, 0.3i, 1000.0 + i, 5.0,
+            e3 = [SMLMAnalysis.Emitter3DFit{T}(0.1i, 0.2i, 0.3i, 1000.0 + i, 5.0,
                     0.01, 0.012, 0.02, 20.0, 0.5;
                     σ_xy=0.003, σ_xz=0.001, σ_yz=0.002, frame=i, dataset=1, id=i) for i in 1:4]
-            s3s = BasicSMLD(e3, cam, 10, 1, Dict{String,Any}())
+            s3s = SMLMAnalysis.BasicSMLD(e3, cam, 10, 1, Dict{String,Any}())
             p3s = joinpath(dir, "e3.h5"); save_smld(p3s, s3s); l3s = load_smld(p3s)
-            @test eltype(l3s.emitters) <: Emitter3DFit
+            @test eltype(l3s.emitters) <: SMLMAnalysis.Emitter3DFit
             @test l3s.emitters[2].σ_xz ≈ 0.001
             @test l3s.emitters[2].σ_yz ≈ 0.002
 
             # Abstract-eltype SMLD (as the pipeline produced before narrowing):
             # save_smld must reload it as concrete Emitter2DFitSigma, NOT degrade to
-            # Emitter2DFit and drop the PSF-width σ.
-            abs_v = AbstractEmitter[GaussMLE.Emitter2DFitSigma{T}(
+            # SMLMAnalysis.Emitter2DFit and drop the PSF-width σ.
+            abs_v = SMLMAnalysis.AbstractEmitter[GaussMLE.Emitter2DFitSigma{T}(
                         0.1i, 0.2i, 1000.0 + i, 5.0, 0.13,
                         0.01, 0.012, 0.003, 20.0, 0.5, 0.002,
                         0.4, i, 1, 0, i) for i in 1:4]
-            @test eltype(abs_v) == AbstractEmitter
-            s_abs = BasicSMLD(abs_v, cam, 10, 1, Dict{String,Any}())
+            @test eltype(abs_v) == SMLMAnalysis.AbstractEmitter
+            s_abs = SMLMAnalysis.BasicSMLD(abs_v, cam, 10, 1, Dict{String,Any}())
             pabs = joinpath(dir, "abs.h5"); save_smld(pabs, s_abs); labs = load_smld(pabs)
-            @test eltype(labs.emitters) <: GaussMLE.Emitter2DFitSigma   # NOT Emitter2DFit
+            @test eltype(labs.emitters) <: GaussMLE.Emitter2DFitSigma   # NOT SMLMAnalysis.Emitter2DFit
             @test labs.emitters[2].σ ≈ 0.13                             # PSF-width σ preserved
             @test labs.emitters[2].σ_xy ≈ 0.003
         end
@@ -668,18 +837,18 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
     @testset "step checkpoint is versioned HDF5" begin
         # _save_step_smld writes through save_smld; load_smld must read it back unchanged.
         cam = IdealCamera(16, 16, 0.1)
-        em = [Emitter2DFit{Float64}(0.1i, 0.2i, 1000.0 + i, 5.0, 0.01, 0.012, 20.0, 0.5;
+        em = [SMLMAnalysis.Emitter2DFit{Float64}(0.1i, 0.2i, 1000.0 + i, 5.0, 0.01, 0.012, 20.0, 0.5;
                                     frame=i, dataset=1 + (i % 2)) for i in 1:6]
-        smld = BasicSMLD(em, cam, 6, 2, Dict{String,Any}())
+        smld = SMLMAnalysis.BasicSMLD(em, cam, 6, 2, Dict{String,Any}())
         dm = SMLMDriftCorrection.LegendrePolynomial(smld; degree=2)
         mktempdir() do dir
             p = SMLMAnalysis._save_step_smld(joinpath(dir, "03_driftcorrect"), smld;
                                              filename="smld_corrected.h5", drift_model=dm)
             @test p == joinpath(dir, "03_driftcorrect", "smld_corrected.h5") && isfile(p)
             s2 = load_smld(p)
-            @test s2.emitters isa Vector{Emitter2DFit{Float64}}
+            @test s2.emitters isa Vector{SMLMAnalysis.Emitter2DFit{Float64}}
             @test all(getfield(a, f) == getfield(b, f) for (a, b) in zip(em, s2.emitters)
-                      for f in fieldnames(Emitter2DFit{Float64}))
+                      for f in fieldnames(SMLMAnalysis.Emitter2DFit{Float64}))
             @test (s2.n_frames, s2.n_datasets) == (6, 2)
             @test s2.camera.pixel_edges_x == cam.pixel_edges_x
             @test s2.metadata["drift_correction"]["model_type"] == "LegendrePolynomial"
@@ -696,13 +865,13 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
                  CP(sq(7.0, 2.0), [sq(7.5, 0.2)])]
         outer = sq(0.0, 4.0)
         cam = IdealCamera(16, 16, 0.1)
-        em = [Emitter2DFit{Float64}(0.1i, 0.1i, 1000.0, 5.0, 0.01, 0.01, 20.0, 0.5; frame=i) for i in 1:3]
+        em = [SMLMAnalysis.Emitter2DFit{Float64}(0.1i, 0.1i, 1000.0, 5.0, 0.01, 0.01, 20.0, 0.5; frame=i) for i in 1:3]
         cellkey(cs) = [(c.outer, c.holes) for c in cs]   # CellPolygon has no ==; compare its fields
         mktempdir() do dir
             md = Dict{String,Any}("edge_cells" => cells, "edge_outer_polygon" => outer,
                                   "empty_cells" => CP[], "empty_polygon" => NTuple{2,Float64}[])
             p = joinpath(dir, "geom.h5")
-            save_smld(p, BasicSMLD(em, cam, 3, 1, md))
+            save_smld(p, SMLMAnalysis.BasicSMLD(em, cam, 3, 1, md))
             m2 = load_smld(p).metadata
             @test m2["edge_outer_polygon"] == outer
             @test m2["edge_outer_polygon"] isa Vector{NTuple{2,Float64}}
@@ -803,20 +972,130 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         @test p_hat0 < 0.02
     end
 
+    @testset "intensity-filter spatial binning matches the reference scan" begin
+        # Reference implementation: origin/main's _spatial_bin_rates, an O(n_bins²·n)
+        # per-bin scan against the exact half-open edges (see git show
+        # origin/main:src/steps/intensityfilter.jl). SMLMAnalysis._spatial_bin_rates
+        # computes each emitter's bin directly via _bin_index instead of scanning, so
+        # this pins the single-pass version to the scan's exact edge comparisons —
+        # including the float-rounding cases a floor-division guess gets wrong.
+        function ref_spatial_bin_rates(xs, ys, photons, cfg)
+            n_bins = cfg.n_bins
+            min_count = cfg.min_bin_count
+            pct = cfg.rate_percentile
+
+            x_min, x_max = extrema(xs)
+            y_min, y_max = extrema(ys)
+
+            dx = (x_max - x_min) / n_bins
+            dy = (y_max - y_min) / n_bins
+            dx == 0 && (dx = 1.0)
+            dy == 0 && (dy = 1.0)
+
+            centers_x = Float64[]
+            centers_y = Float64[]
+            rates = Float64[]
+            counts = Int[]
+            rate_grid = fill(NaN, n_bins, n_bins)
+
+            for ix in 1:n_bins, iy in 1:n_bins
+                bx_lo = x_min + (ix - 1) * dx
+                bx_hi = ix == n_bins ? x_max + eps(x_max) : x_min + ix * dx
+                by_lo = y_min + (iy - 1) * dy
+                by_hi = iy == n_bins ? y_max + eps(y_max) : y_min + iy * dy
+
+                bin_photons = Float64[]
+                for i in eachindex(xs)
+                    if bx_lo <= xs[i] < bx_hi && by_lo <= ys[i] < by_hi
+                        push!(bin_photons, photons[i])
+                    end
+                end
+
+                if length(bin_photons) >= min_count
+                    rate = quantile(bin_photons, pct)
+                    push!(centers_x, (bx_lo + min(bx_hi, x_max)) / 2)
+                    push!(centers_y, (by_lo + min(by_hi, y_max)) / 2)
+                    push!(rates, rate)
+                    push!(counts, length(bin_photons))
+                    rate_grid[ix, iy] = rate
+                end
+            end
+
+            x_edges = range(x_min, x_max, length=n_bins+1)
+            y_edges = range(y_min, y_max, length=n_bins+1)
+
+            return (centers_x=centers_x, centers_y=centers_y, rates=rates, counts=counts,
+                    rate_grid=rate_grid, x_edges=x_edges, y_edges=y_edges)
+        end
+
+        # rate_grid carries NaN in unfilled bins; isequal (not ==) is the correct
+        # "identical field-by-field" check since NaN == NaN is false but
+        # isequal(NaN, NaN) is true — a bare == would fail even when the two
+        # implementations agree exactly.
+        function check_matches_reference(xs, ys, photons, cfg)
+            ref = ref_spatial_bin_rates(xs, ys, photons, cfg)
+            got = SMLMAnalysis._spatial_bin_rates(xs, ys, photons, cfg)
+            @test isequal(ref, got)
+        end
+
+        # (a) Interior-edge float rounding: extrema (1.0, 2.0), 10 bins → dx=0.1;
+        # x=1.2 lands in bin 3 under exact edge comparison, but a naive
+        # floor((x-x_min)/dx)+1 guess can drift to bin 2 on this input.
+        cfg_a = IntensityFilterConfig(n_bins=10, min_bin_count=1)
+        xs_a = [1.0, 1.2, 2.0, 1.5, 1.3, 1.7, 1.9, 1.05, 1.85, 1.45]
+        ys_a = collect(range(0.0, 1.0, length=10))
+        photons_a = collect(100.0:100.0:1000.0)
+        check_matches_reference(xs_a, ys_a, photons_a, cfg_a)
+        @test SMLMAnalysis._bin_index(1.2, 1.0, 2.0, 0.1, 10) == 3
+
+        # (b) Constant x: x_min == x_max forces dx = 1.0 (the /0 guard), which must
+        # still clip bin centers to min(bx_hi, x_max).
+        cfg_b = IntensityFilterConfig(n_bins=4, min_bin_count=1)
+        xs_b = fill(5.0, 12)
+        ys_b = collect(range(0.0, 3.0, length=12))
+        photons_b = collect(10.0:10.0:120.0)
+        check_matches_reference(xs_b, ys_b, photons_b, cfg_b)
+
+        # (c) Constant y: same, on the other axis.
+        xs_c = collect(range(0.0, 3.0, length=12))
+        ys_c = fill(-2.0, 12)
+        check_matches_reference(xs_c, ys_c, photons_b, cfg_b)
+
+        # (d) Points exactly on interior edges x_min + k*dx (k = 0..n_bins), plus a
+        # repeated x_max point ((e) the max point) to confirm the widened last-bin
+        # edge still claims it rather than dropping it as out-of-range.
+        cfg_d = IntensityFilterConfig(n_bins=10, min_bin_count=1)
+        xs_d = vcat(collect(0.0:1.0:10.0), 10.0)   # 0,1,...,10, and a second 10.0
+        ys_d = collect(range(0.0, 5.0, length=length(xs_d)))
+        photons_d = collect(1.0:length(xs_d))
+        check_matches_reference(xs_d, ys_d, photons_d, cfg_d)
+
+        # (f) ~20 random seeded clouds.
+        rng_bins = MersenneTwister(20260926)
+        for _ in 1:20
+            n = rand(rng_bins, 40:200)
+            xs_r = rand(rng_bins, n) .* 10 .- 3
+            ys_r = rand(rng_bins, n) .* 6 .+ 1
+            photons_r = rand(rng_bins, n) .* 900 .+ 100
+            cfg_r = IntensityFilterConfig(n_bins=rand(rng_bins, (4, 5, 8, 10)), min_bin_count=1)
+            check_matches_reference(xs_r, ys_r, photons_r, cfg_r)
+        end
+    end
+
     @testset "stepinfo/stepinfos accessors" begin
         # Build StepInfos directly; FilterConfig → name "filter" (repeated),
         # DensityFilterConfig → name "densityfilter" (unique).
-        si_a = StepInfo(1, FilterConfig(), 0.1, Dict{Symbol,Any}(); info=FilterInfo(100, 90, 0.1))
-        si_b = StepInfo(2, DensityFilterConfig(), 0.2, Dict{Symbol,Any}(); info=DensityFilterInfo(90, 80, 5, 0.2))
-        si_c = StepInfo(3, FilterConfig(), 0.3, Dict{Symbol,Any}(); info=FilterInfo(200, 150, 0.3))
-        steps = StepInfo[si_a, si_b, si_c]
+        si_a = SMLMAnalysis.StepInfo(1, FilterConfig(), 0.1, Dict{Symbol,Any}(); info=SMLMAnalysis.FilterInfo(100, 90, 0.1))
+        si_b = SMLMAnalysis.StepInfo(2, DensityFilterConfig(), 0.2, Dict{Symbol,Any}(); info=SMLMAnalysis.DensityFilterInfo(90, 80, 5, 0.2))
+        si_c = SMLMAnalysis.StepInfo(3, FilterConfig(), 0.3, Dict{Symbol,Any}(); info=SMLMAnalysis.FilterInfo(200, 150, 0.3))
+        steps = SMLMAnalysis.StepInfo[si_a, si_b, si_c]
 
-        for info in (AnalysisInfo(1.0, steps),
-                     MultiTargetInfo(1.0, Dict{Symbol,AnalysisInfo}(), steps))
-            # Symbol and String name lookup return the same StepInfo
+        for info in (SMLMAnalysis.AnalysisInfo(1.0, steps),
+                     SMLMAnalysis.MultiTargetInfo(1.0, Dict{Symbol,SMLMAnalysis.AnalysisInfo}(), steps))
+            # Symbol and String name lookup return the same SMLMAnalysis.StepInfo
             @test stepinfo(info, :densityfilter) === si_b
             @test stepinfo(info, "densityfilter") === si_b
-            @test stepinfo(info, :densityfilter).info isa DensityFilterInfo
+            @test stepinfo(info, :densityfilter).info isa SMLMAnalysis.DensityFilterInfo
 
             # Repeated name: stepinfo returns the FIRST, stepinfos returns ALL in order
             @test stepinfo(info, :filter) === si_a
@@ -824,8 +1103,9 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test stepinfos(info, :filter) == [si_a, si_c]
             @test [si.number for si in stepinfos(info, "filter")] == [1, 3]
 
-            # Missing name: stepinfo throws KeyError, stepinfos returns empty
-            @test_throws KeyError stepinfo(info, :nope)
+            # Missing name: stepinfo throws ArgumentError listing available names,
+            # stepinfos returns empty
+            @test_throws ArgumentError stepinfo(info, :nope)
             @test isempty(stepinfos(info, :nope))
         end
     end
@@ -859,6 +1139,13 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
 
             # track=false (default) gitignores the namespaced skill dir.
             @test occursin(".claude/skills/smlma-ecosystem/", read(joinpath(dir, ".gitignore"), String))
+
+            # The rewritten .gitignore follows the umask, like a direct `write`
+            # would — not the fixed 0600 a mktemp-created temp carries over
+            # (the bug _replace_atomically's private-temp-dir + write() path avoids).
+            control = joinpath(dir, "control.txt")
+            write(control, "control")
+            @test filemode(joinpath(dir, ".gitignore")) & 0o777 == filemode(control) & 0o777
 
             # Doctor: freshly installed, not stale.
             st = agent_guide_status(dir = dir)
@@ -1013,12 +1300,15 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             @test !ispath(joinpath(dir, "smlm-agent-guide"))    # bundle never written
         end
 
-        # _write_atomic: a failed write (destination is a directory, refused outright)
-        # must leave no stray temp file behind.
+        # agent_guide's writes now go through _replace_atomically (src/io/atomic.jl),
+        # same as save_smld: a failed write (destination is a directory, refused
+        # outright) must leave no stray temp file behind.
         mktempdir() do dir
             mkpath(joinpath(dir, "somedir"))
-            @test_throws ArgumentError SMLMAnalysis._write_atomic(joinpath(dir, "somedir"), "x")
-            @test readdir(dir) == ["somedir"]   # no stray .somedir.tmp-<pid>
+            @test_throws ArgumentError SMLMAnalysis._replace_atomically(joinpath(dir, "somedir")) do tmp
+                write(tmp, "x")
+            end
+            @test readdir(dir) == ["somedir"]   # no stray temp file
         end
 
         if Sys.isunix()
@@ -1307,7 +1597,7 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
                 g["Gain"] = gain_stored
             end
 
-            cal = load_mic_h5_calibration_for_scmos(path)
+            cal = SMLMAnalysis.load_mic_h5_calibration_for_scmos(path)
             @test all(cal.readnoise .≈ 1.0f0)
             @test all(cal.gain .≈ 0.5f0)     # e⁻/ADU = 1/gain_stored
             @test all(cal.offset .≈ 100.0f0)
@@ -1319,16 +1609,34 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         end
     end
 
+    @testset "load_mic_h5 warns on an unreadable data block" begin
+        # Data002 is a group without its nested dataset, so _resolve_data_path
+        # throws for it — load_mic_h5 must @warn (naming the block and the error)
+        # and skip it, rather than the previous bare `catch; continue`.
+        mktempdir() do dir
+            path = joinpath(dir, "corrupt.h5")
+            SMLMAnalysis.HDF5.h5open(path, "w") do f
+                g = SMLMAnalysis.HDF5.create_group(f, "Channel01/Zposition001")
+                g["Data001"] = rand(Float32, 4, 4, 3)
+                SMLMAnalysis.HDF5.create_group(g, "Data002")
+            end
+            @test_logs (:warn, r"load_mic_h5: skipping unreadable data block \"Data002\"") match_mode=:any load_mic_h5(path)
+            images, dataset_indices = load_mic_h5(path)
+            @test size(images, 3) == 3
+            @test all(==(1), dataset_indices)
+        end
+    end
+
     @testset "atomic saves refuse a directory destination" begin
-        # Saves go through _replace_atomically: temp file + rename(2). rename fails on a
-        # directory destination rather than deleting it (and everything inside it), so
-        # save_smld and save_pipeline_state must throw and leave the directory intact.
-        # The exception type differs by Julia version, so only a throw is asserted.
+        # save_smld goes through _replace_atomically: temp file + rename(2). rename
+        # fails on a directory destination rather than deleting it (and everything
+        # inside it), so it must throw and leave the directory intact. The exception
+        # type differs by Julia version, so only a throw is asserted.
         cam = IdealCamera(8, 8, 0.1)
         T = Float64
-        es = [Emitter2DFit{T}(0.1i, 0.2i, 1000.0 + i, 5.0, 0.01, 0.012, 20.0, 0.5, 0.4, i, 1, 0, i)
+        es = [SMLMAnalysis.Emitter2DFit{T}(0.1i, 0.2i, 1000.0 + i, 5.0, 0.01, 0.012, 20.0, 0.5, 0.4, i, 1, 0, i)
               for i in 1:3]
-        smld = BasicSMLD(es, cam, 10, 1, Dict{String,Any}())
+        smld = SMLMAnalysis.BasicSMLD(es, cam, 10, 1, Dict{String,Any}())
 
         mktempdir() do dir
             # save_smld: destination is a directory, not a file.
@@ -1349,19 +1657,6 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             save_smld(good, smld)
             @test isfile(good)
             @test isempty(filter(f -> f ∉ ("out.h5", "good.h5"), readdir(dir)))
-
-            # save_pipeline_state: same refusal guard, tested directly rather than via
-            # a full pipeline run (AnalysisResult is cheap to construct by hand; a full
-            # analyze() run is not).
-            result = AnalysisResult(smld, nothing, nothing)
-            target2 = joinpath(dir, "ckpt.jld2")
-            mkdir(target2)
-            inner2 = joinpath(target2, "keepme.txt")
-            write(inner2, "do not delete me")
-            @test_throws Exception save_pipeline_state(target2, result)
-            @test isdir(target2)
-            @test read(inner2, String) == "do not delete me"
-            @test isempty(filter(f -> f != "keepme.txt", readdir(target2)))
         end
 
         # Race: a directory appears at the destination after the isdir pre-check.
@@ -1376,6 +1671,23 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
             end
             @test read(joinpath(p, "keep"), String) == "k"
             @test readdir(dir) == ["out.h5"]
+        end
+
+        # The writer's temp path lives in a directory only we can enter (POSIX), so
+        # no other user sharing the destination directory can pre-place a symlink at it.
+        if !Sys.iswindows()
+            mktempdir() do dir
+                p = joinpath(dir, "out.txt")
+                SMLMAnalysis._replace_atomically(p) do tmp
+                    @test dirname(tmp) != dir
+                    @test dirname(dirname(tmp)) == dir
+                    @test filemode(dirname(tmp)) & 0o777 == 0o700
+                    @test !ispath(tmp)
+                    write(tmp, "x")
+                end
+                @test read(p, String) == "x"
+                @test readdir(dir) == ["out.txt"]
+            end
         end
 
         # A failing writer leaves no temp behind and never touches the destination.
@@ -1432,12 +1744,12 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         # cheaply on every CI run, not just in the local thorough tier.
         Random.seed!(1)
         cam = IdealCamera(32, 32, 0.1)
-        sim = StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 2)
-        (_, si) = simulate(sim;
-            pattern  = Nmer2D(n = 8, d = 0.05),
-            molecule = GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
+        sim = SMLMAnalysis.StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 2)
+        (_, si) = SMLMAnalysis.simulate(sim;
+            pattern  = SMLMAnalysis.Nmer2D(n = 8, d = 0.05),
+            molecule = SMLMAnalysis.GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
             camera   = cam)
-        images = [gen_images(si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
+        images = [SMLMAnalysis.gen_images(si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
                               dataset = d, bg = 20.0, poisson_noise = true)[1] for d in 1:2]
 
         cfg = AnalysisConfig(
@@ -1453,8 +1765,14 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         t = @elapsed (result, info) = analyze(images, cfg)
         @info "upstream API smoke (tiny data) wall time" seconds=t
 
-        @test result isa AnalysisResult
+        @test result isa SMLMAnalysis.AnalysisResult
         @test length(result.smld.emitters) >= 1
+
+        # stepinfo: by name, by config type, and the not-found ArgumentError.
+        @test stepinfo(info, :driftcorrect).name == "driftcorrect"
+        @test stepinfo(info, DriftConfig).name == "driftcorrect"
+        @test_throws ArgumentError stepinfo(info, :nosuchstep)
+        @test_throws ArgumentError stepinfo(info, SMLMAnalysis.CrossAlignConfig)
     end
 end
 
@@ -1467,12 +1785,12 @@ if SMLM_TEST_FULL
             # but as an assertable test rather than a build-time smoke run.
             Random.seed!(1)
             cam = IdealCamera(32, 32, 0.1)
-            sim = StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 1)
-            (_, si) = simulate(sim;
-                pattern  = Nmer2D(n = 8, d = 0.05),
-                molecule = GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
+            sim = SMLMAnalysis.StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 1)
+            (_, si) = SMLMAnalysis.simulate(sim;
+                pattern  = SMLMAnalysis.Nmer2D(n = 8, d = 0.05),
+                molecule = SMLMAnalysis.GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
                 camera   = cam)
-            (imgs, _) = gen_images(si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
+            (imgs, _) = SMLMAnalysis.gen_images(si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
                 dataset = 1, bg = 20.0, poisson_noise = true)
 
             cfg = AnalysisConfig(
@@ -1485,9 +1803,9 @@ if SMLM_TEST_FULL
             )
             (result, info) = analyze([imgs], cfg)
 
-            @test result isa AnalysisResult
-            @test info isa AnalysisInfo
-            @test result.smld isa BasicSMLD
+            @test result isa SMLMAnalysis.AnalysisResult
+            @test info isa SMLMAnalysis.AnalysisInfo
+            @test result.smld isa SMLMAnalysis.BasicSMLD
             @test length(result.smld.emitters) > 0
             @test length(info.step_infos) == 3
             @test info.elapsed_s >= 0
@@ -1530,12 +1848,12 @@ if SMLM_TEST_FULL
             # provenance, every saved SMLD loadable and non-empty, and a render PNG.
             Random.seed!(1)
             cam = IdealCamera(64, 64, 0.1)
-            sim = StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 500, ndatasets = 2)
-            (_, si) = simulate(sim;
-                pattern  = Nmer2D(n = 8, d = 0.05),
-                molecule = GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
+            sim = SMLMAnalysis.StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 500, ndatasets = 2)
+            (_, si) = SMLMAnalysis.simulate(sim;
+                pattern  = SMLMAnalysis.Nmer2D(n = 8, d = 0.05),
+                molecule = SMLMAnalysis.GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
                 camera   = cam)
-            images = [gen_images(si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
+            images = [SMLMAnalysis.gen_images(si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
                                   dataset = d, bg = 20.0, poisson_noise = true)[1] for d in 1:2]
 
             outdir = mktempdir()
@@ -1592,7 +1910,7 @@ if SMLM_TEST_FULL
             # A multi-target channel is always raw images (or a file path) that goes
             # through its own DetectFitConfig -- analyze(channels, MultiTargetConfig)
             # has no path for already-localized data (steps=[] leaves _run_pipeline's
-            # state a raw image Vector, never a BasicSMLD, so it errors "Pipeline
+            # state a raw image Vector, never a SMLMAnalysis.BasicSMLD, so it errors "Pipeline
             # produced no SMLD"). So this drives a tiny simulated 2-channel run
             # end-to-end -- the multi-target analogue of "upstream API smoke" above --
             # to catch a regression where the orchestrator stops calling
@@ -1603,17 +1921,17 @@ if SMLM_TEST_FULL
             dx_true = 0.1
             gen_channel(seed, dx, dy) = begin
                 Random.seed!(seed)
-                sim = StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 1)
-                (_, si) = simulate(sim;
-                    pattern  = Nmer2D(n = 8, d = 0.05),
-                    molecule = GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
+                sim = SMLMAnalysis.StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 1)
+                (_, si) = SMLMAnalysis.simulate(sim;
+                    pattern  = SMLMAnalysis.Nmer2D(n = 8, d = 0.05),
+                    molecule = SMLMAnalysis.GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
                     camera   = cam)
                 model = deepcopy(si.smld_model)
                 for e in model.emitters
                     e.x += dx
                     e.y += dy
                 end
-                (imgs, _) = gen_images(model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
+                (imgs, _) = SMLMAnalysis.gen_images(model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
                     dataset = 1, bg = 20.0, poisson_noise = true)
                 [imgs]
             end
@@ -1636,7 +1954,7 @@ if SMLM_TEST_FULL
             )
             (result, info) = analyze([(images_a, chan_cfg()), (images_b, chan_cfg())], mt)
 
-            @test result isa MultiTargetResult
+            @test result isa SMLMAnalysis.MultiTargetResult
             for label in (:A, :B)
                 p = joinpath(outdir, "smld_$(label).h5")
                 @test isfile(p)

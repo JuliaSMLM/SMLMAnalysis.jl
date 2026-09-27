@@ -1,24 +1,26 @@
 """
 Drift correction step - uses SMLMDriftCorrection.DriftConfig directly.
 
-No wrapper config -- the upstream DriftConfig is used as a pipeline step.
-Intershift warnings are always checked and emitted at PROGRESS verbosity.
+No wrapper config -- the upstream DriftConfig is used as a pipeline step
+(the `DriftConfig` alias itself lives in SMLMAnalysis.jl, next to the other
+upstream aliases). Intershift warnings are always checked and emitted at
+PROGRESS verbosity.
 """
-
-# Alias for convenience (like RenderConfig pattern)
-const DriftConfig = SMLMDriftCorrection.DriftConfig
 
 # Override step_name to keep backward-compatible output directory naming
 step_name(::SMLMDriftCorrection.DriftConfig) = "driftcorrect"
 
 """
-    driftcorrect_step(smld, cfg; outdir, step_number, verbose) -> (corrected_smld, DriftInfo)
+    driftcorrect_step(smld, cfg; outdir, step_number, verbose) -> (corrected_smld, DriftInfo, summary)
 
 Run drift correction on `smld`, returning the corrected SMLD as the primary
-result, plus the upstream DriftInfo.
+result, the upstream DriftInfo, and a `summary` NamedTuple
+(`drift_model`, `n_datasets`, `inter_shifts`, `max_intershift`, `max_drift`) so
+`analyze` below does not have to recompute the drift-summary numbers it needs
+for the pipeline's `StepInfo`.
 
 # Returns
-`(corrected_smld, DriftInfo)`
+`(corrected_smld, DriftInfo, summary)`
 """
 function driftcorrect_step(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig;
                            outdir::Union{String,Nothing}=nothing,
@@ -78,37 +80,32 @@ function driftcorrect_step(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig
     end
 
     v >= Verbosity.PROGRESS && @info "  -> max drift $(round(max_drift, digits=1))nm, inter-shift $(round(max_intershift, digits=1))nm ($(round(t, digits=2))s)"
-    (corrected_smld, drift_info)
+    summary = (drift_model=drift_model, n_datasets=n_datasets_val, inter_shifts=inter_shifts,
+               max_intershift=max_intershift, max_drift=max_drift)
+    (corrected_smld, drift_info, summary)
 end
 
 """
-    analyze(smld, cfg::SMLMDriftCorrection.DriftConfig; kwargs...) -> (corrected_smld, StepInfo)
+    analyze(smld, cfg::SMLMDriftCorrection.DriftConfig; outdir, step_number, verbose, checkpoint) -> (corrected_smld, StepInfo)
 
 Run drift correction on localizations.
 """
 function analyze(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig;
                  outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
+                 checkpoint::Int=Checkpoint.EXPENSIVE)
     n_frames = smld.n_frames
-    t = @elapsed (corrected, drift_info) = driftcorrect_step(smld, cfg;
+    t = @elapsed (corrected, drift_info, ds) = driftcorrect_step(smld, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose, checkpoint=checkpoint)
 
-    # Build summary (needs smld.n_frames for max_drift calculation)
-    drift_model = drift_info.model
-    n_datasets_val = drift_model.ndatasets
-    inter_shifts = _calc_inter_shifts(drift_model)
-    max_intershift = n_datasets_val > 1 ? maximum(inter_shifts[2:end]) : 0.0
-    max_drift = _calc_max_drift(drift_model, n_frames)
     converged = hasproperty(drift_info, :converged) ? drift_info.converged : nothing
     iterations = hasproperty(drift_info, :iterations) ? drift_info.iterations : nothing
-
     entropy = hasproperty(drift_info, :entropy) ? drift_info.entropy : nothing
     backend = hasproperty(drift_info, :backend) ? drift_info.backend : nothing
 
     summary = Dict{Symbol,Any}(
-        :max_drift_nm => round(max_drift, digits=1),
-        :max_intershift_nm => round(max_intershift, digits=1),
-        :n_datasets => n_datasets_val,
+        :max_drift_nm => round(ds.max_drift, digits=1),
+        :max_intershift_nm => round(ds.max_intershift, digits=1),
+        :n_datasets => ds.n_datasets,
         :n_frames => n_frames,
         :dataset_mode => cfg.dataset_mode,
         :quality => cfg.quality,

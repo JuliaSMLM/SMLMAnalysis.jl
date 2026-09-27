@@ -208,7 +208,9 @@ function _write_reference!(refdir::AbstractString, e)
     p = joinpath(refdir, e.name * ".md")
     content = string("<!-- $(e.name) v$(e.version) — copied from $(e.source) $_REF_STAMP. ",
                       "Do not edit; re-run to refresh. -->\n\n", e.text)
-    _write_atomic(p, content)
+    _replace_atomically(p) do tmp
+        write(tmp, content)
+    end
     p
 end
 
@@ -271,7 +273,9 @@ function _ensure_gitignored!(root::AbstractString, patterns)
     isempty(buf) || (buf *= '\n')
     buf *= "# SMLMAnalysis agent guide — installed with track=false (install_agent_guide)\n"
     buf *= join(todo, '\n') * '\n'
-    _write_atomic(gi, buf)
+    _replace_atomically(gi) do tmp
+        write(tmp, buf)
+    end
     gi
 end
 
@@ -289,12 +293,16 @@ function _upsert_agents_block!(path::AbstractString, block::AbstractString)
     e = findfirst(_AGENTS_END, raw)
     if b !== nothing && e !== nothing && first(e) > first(b)
         newraw = raw[1:prevind(raw, first(b))] * managed * raw[nextind(raw, last(e)):end]
-        _write_atomic(path, newraw)
+        _replace_atomically(path) do tmp
+            write(tmp, newraw)
+        end
     else
         buf = raw
         isempty(buf) || endswith(buf, '\n') || (buf *= '\n')
         isempty(buf) || (buf *= '\n')
-        _write_atomic(path, buf * managed * '\n')
+        _replace_atomically(path) do tmp
+            write(tmp, buf * managed * '\n')
+        end
     end
     path
 end
@@ -328,7 +336,9 @@ function _remove_agents_block!(path::AbstractString)
     post = raw[nextind(raw, last(e)):end]
     endswith(pre, "\n\n") && (pre = chop(pre))
     startswith(post, "\n") && (post = chop(post; head = 1, tail = 0))
-    _write_atomic(path, pre * post)
+    _replace_atomically(path) do tmp
+        write(tmp, pre * post)
+    end
     true
 end
 
@@ -352,30 +362,6 @@ function _expand_home(dir::AbstractString)
     return expanduser(d)
 end
 
-# Write via mktemp (unpredictable name, created fresh — never a guessable path an
-# attacker could pre-place a symlink/hardlink at) + rename, so an existing hardlink at
-# `path` is replaced as a directory entry rather than truncated in place (which would
-# overwrite whatever inode the user's link points at). Refuses outright to write
-# through a symlink, or onto any existing non-regular-file path (e.g. a directory).
-# The swap is a bare rename(2), never a recursive delete: it fails on a directory
-# destination rather than removing it. On any failure the temp file is removed so a
-# failed write never leaves stray temp files behind.
-function _write_atomic(path::AbstractString, content::AbstractString)
-    islink(path) && throw(ArgumentError("$path is a symlink; refusing to write through it"))
-    (ispath(path) && !isfile(path)) &&
-        throw(ArgumentError("$path exists and is not a regular file; refusing to replace it"))
-    (tmp, io) = mktemp(dirname(path))
-    try
-        write(io, content)
-        close(io)
-        Base.Filesystem.rename(tmp, path)
-    catch
-        close(io)
-        rm(tmp; force = true)
-        rethrow()
-    end
-    path
-end
 
 # Reason a (target, stamp, refdir) triple must not be mutated or trusted, or nothing.
 function _unsafe_reason(target, stamp, refdir)
@@ -503,7 +489,9 @@ function install_agent_guide(; tool::Symbol = :claude,
         for e in entries
             _write_reference!(refdir, e)
         end
-        _write_atomic(wrapper, _skill_text(entries))
+        _replace_atomically(wrapper) do tmp
+            write(tmp, _skill_text(entries))
+        end
         gitignore && _ensure_gitignored!(dir, ["/.claude/skills/$_SKILL_DIRNAME/"])
         return target
     else # :codex
@@ -529,7 +517,9 @@ function install_agent_guide(; tool::Symbol = :claude,
         for e in entries
             _write_reference!(refdir, e)
         end
-        _write_atomic(guide, string("<!-- ", _stamp_inline(), " -->\n\n", _render_guide(entries, "reference")))
+        _replace_atomically(guide) do tmp
+            write(tmp, string("<!-- ", _stamp_inline(), " -->\n\n", _render_guide(entries, "reference")))
+        end
         agents = joinpath(dirname(target), "AGENTS.md")
         _upsert_agents_block!(agents, _codex_block())
         gitignore && _ensure_gitignored!(dir, ["/$_CODEX_BUNDLE/"])

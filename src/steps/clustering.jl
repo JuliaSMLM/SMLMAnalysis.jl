@@ -33,7 +33,7 @@ _step_summary(info::SMLMClustering.ClusterStatisticsInfo) = Dict{Symbol,Any}(
 )
 
 """
-    analyze(smld, cfg::AbstractClusterConfig; kwargs...) -> (smld_out, StepInfo)
+    analyze(smld, cfg::AbstractClusterConfig; outdir, step_number, verbose, checkpoint) -> (smld_out, StepInfo)
 
 Label each localization with a cluster id via SMLMClustering. The backend is
 selected by the concrete type of `cfg` (`DBSCANConfig`, `HDBSCANConfig`,
@@ -44,7 +44,7 @@ details and per-backend configuration.
 """
 function analyze(smld::BasicSMLD, cfg::SMLMClustering.AbstractClusterConfig;
                  outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
+                 checkpoint::Int=Checkpoint.EXPENSIVE)
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
     v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_locs=length(smld.emitters)
@@ -65,7 +65,7 @@ function analyze(smld::BasicSMLD, cfg::SMLMClustering.AbstractClusterConfig;
 end
 
 """
-    analyze(smld, cfg::AbstractStatisticsConfig; kwargs...) -> (smld, StepInfo)
+    analyze(smld, cfg::AbstractStatisticsConfig; outdir, step_number, verbose, checkpoint) -> (smld, StepInfo)
 
 Compute a read-only spatial statistic via SMLMClustering — e.g. Hopkins
 clustering tendency (`HopkinsConfig`) or Voronoi density
@@ -75,7 +75,7 @@ and any per-emitter/per-dataset vectors live in the step's `ClusterStatisticsInf
 """
 function analyze(smld::BasicSMLD, cfg::SMLMClustering.AbstractStatisticsConfig;
                  outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
+                 checkpoint::Int=Checkpoint.EXPENSIVE)
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
     v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_locs=length(smld.emitters)
