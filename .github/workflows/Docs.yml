@@ -1,12 +1,11 @@
-# The documentation build, split out of CI.yml unchanged when CI moved to the lab's shared
-# workflow (admiral decision 0011). Docs rules are package-standard topic 7, not yet decided.
+# The documentation build, split out of CI.yml when CI moved to the lab's shared workflow.
+# Admiral decision 0011: docs build on pushes to main and tags only, not on pull requests.
 name: Docs
 on:
   push:
     branches:
       - main
     tags: ['*']
-  pull_request:
   workflow_dispatch:
 concurrency:
   # Skip intermediate builds: always.
@@ -16,7 +15,10 @@ concurrency:
 jobs:
   docs:
     name: Documentation
+    # Inert while there is no pull_request trigger; keeps drafts unbuilt if one is added back.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       actions: write # needed to allow julia-actions/cache to proactively delete old caches that it has created
       contents: write
