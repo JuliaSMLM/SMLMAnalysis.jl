@@ -99,6 +99,17 @@ using Statistics
     smld_ifbad = SMLMAnalysis.BasicSMLD(vcat([bad_photon], many), cam, 1, 1, Dict{String, Any}())
     @test_throws ArgumentError SMLMAnalysis.intensityfilter_step(smld_ifbad, IntensityFilterConfig())
 
+    # Regression: a NaN x (not just a NaN σ/photons) must throw ArgumentError
+    # up front, not InexactError from floor(Int, NaN) deep in _bin_index /
+    # the KD-tree query.
+    bad_x = SMLMAnalysis.Emitter2DFit(NaN, 0.0, 1000.0, 10.0, 0.01, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, 1)
+    smld_df_bad_x = SMLMAnalysis.BasicSMLD([bad_x], cam, 1, 1, Dict{String, Any}())
+    @test_throws ArgumentError SMLMAnalysis.densityfilter_step(smld_df_bad_x, cfg_df)
+
+    bad_x_if = SMLMAnalysis.Emitter2DFit(NaN, 0.5, 1000.0, 10.0, 0.01, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, 1)
+    smld_if_bad_x = SMLMAnalysis.BasicSMLD(vcat([bad_x_if], many), cam, 1, 1, Dict{String, Any}())
+    @test_throws ArgumentError SMLMAnalysis.intensityfilter_step(smld_if_bad_x, IntensityFilterConfig())
+
     # psf_sigma: an explicit (lo, hi) — including a 0.0 lower bound — is
     # always applied, unlike :auto's "skip when degenerate" behavior.
     mkem_sigma(σ, i) = GaussMLE.Emitter2DFitSigma{Float64}(

@@ -94,16 +94,10 @@ function _filter_by_density(smld::BasicSMLD, cfg::DensityFilterConfig)
 
     n == 0 && return smld, Int[], 0
 
+    _require_finite("densityfilter", emitters, (:x, :y, :σ_x, :σ_y))
+
     n_sigma = cfg.n_sigma
     σ = [sqrt(e.σ_x^2 + e.σ_y^2) for e in emitters]
-    n_nonfinite = count(!isfinite, σ)
-    n_nonfinite > 0 && throw(
-        ArgumentError(
-            "densityfilter: $n_nonfinite localization(s) have a non-finite σ (from σ_x/σ_y); " *
-                "this can happen with data loaded via `load_smld` from an upstream fit that produced " *
-                "NaN/Inf. Drop or fix these localizations before density filtering."
-        )
-    )
     max_σ = maximum(σ)
 
     coords = zeros(2, n)

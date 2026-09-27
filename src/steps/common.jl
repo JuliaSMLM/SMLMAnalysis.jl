@@ -6,6 +6,29 @@ Common helper functions shared across analysis steps.
 _step_summary(::SMLMData.AbstractSMLMInfo) = Dict{Symbol, Any}()
 
 """
+    _require_finite(step::AbstractString, emitters, fields::Tuple)
+
+Throw `ArgumentError` naming the first field (in `fields` order) that has any
+non-finite value across `emitters`, and how many localizations are affected.
+Shared by the filter steps' NaN guards, so a non-finite value in any field
+they read (not just the one field each step originally checked) fails with a
+clear message instead of an obscure error further downstream (e.g.
+`InexactError` in `_bin_index` from a NaN `x`/`y`).
+"""
+function _require_finite(step::AbstractString, emitters, fields::Tuple)
+    for field in fields
+        n_nonfinite = count(e -> !isfinite(getfield(e, field)), emitters)
+        n_nonfinite > 0 && throw(
+            ArgumentError(
+                "$step: $n_nonfinite localization(s) have a non-finite $field; " *
+                    "check the upstream fit that produced this input."
+            )
+        )
+    end
+    return nothing
+end
+
+"""
     _calculate_mode(values; n_bins=100)
 
 Calculate the mode of a distribution using histogram binning.
