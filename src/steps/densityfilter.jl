@@ -99,6 +99,15 @@ function _filter_by_density(smld::BasicSMLD, cfg::DensityFilterConfig)
     n_sigma = cfg.n_sigma
     σ = [sqrt(e.σ_x^2 + e.σ_y^2) for e in emitters]
     max_σ = maximum(σ)
+    # A finite σ_x/σ_y can still overflow once squared. Every query radius and pair
+    # threshold below is at most n_sigma * sqrt(2 * max_σ^2), so checking that bound
+    # covers them all.
+    isfinite(n_sigma * sqrt(2 * max_σ^2)) || throw(
+        ArgumentError(
+            "densityfilter: σ_x/σ_y too large to compute neighbour radii (largest σ = $max_σ); " *
+                "check the upstream fit that produced this input."
+        )
+    )
 
     coords = zeros(2, n)
     for i in 1:n

@@ -83,6 +83,9 @@ function intensityfilter_step(
     emitters = smld.emitters
     n_before = length(emitters)
 
+    # Before the small-input shortcut, so the same input is rejected at any size.
+    _require_finite("intensityfilter", emitters, (:x, :y, :photons))
+
     # Edge case: too few emitters to estimate field
     if n_before < 100
         v >= Verbosity.PROGRESS && @warn "  → Too few emitters ($n_before < 100), skipping intensity filter"
@@ -94,8 +97,6 @@ function intensityfilter_step(
     end
 
     t_total = @elapsed begin
-        _require_finite("intensityfilter", emitters, (:x, :y, :photons))
-
         xs = [e.x for e in emitters]
         ys = [e.y for e in emitters]
         photons = [e.photons for e in emitters]

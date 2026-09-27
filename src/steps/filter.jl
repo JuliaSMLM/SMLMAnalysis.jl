@@ -102,23 +102,24 @@ function analyze(
     return (filtered, StepInfo(step_number, cfg, t, _step_summary(filter_info); info = filter_info))
 end
 
+# The (lo, hi) range test FilterConfig applies. A NaN fails it, so the fit overlay
+# (_fit_box_color) uses the same predicate to colour exactly what the filter rejects.
+_in_range(v, (lo, hi)) = lo <= v <= hi
+
 function _filter_smld(smld::BasicSMLD, cfg::FilterConfig)
     emitters = smld.emitters
     mask = trues(length(emitters))
 
     if cfg.photons !== nothing
-        lo, hi = cfg.photons
-        mask .&= [lo <= e.photons <= hi for e in emitters]
+        mask .&= [_in_range(e.photons, cfg.photons) for e in emitters]
     end
 
     if cfg.precision !== nothing
-        lo, hi = cfg.precision
-        mask .&= [lo <= max(e.σ_x, e.σ_y) <= hi for e in emitters]
+        mask .&= [_in_range(max(e.σ_x, e.σ_y), cfg.precision) for e in emitters]
     end
 
     if cfg.pvalue !== nothing
-        lo, hi = cfg.pvalue
-        mask .&= [lo <= e.pvalue <= hi for e in emitters]
+        mask .&= [_in_range(e.pvalue, cfg.pvalue) for e in emitters]
     end
 
     # 3D-only axial filters; no-op on 2D SMLDs (emitters without z / σ_z). Warn once
@@ -665,16 +666,13 @@ end
 """Determine box color based on FilterConfig thresholds. All-nothing filters = all green."""
 function _fit_box_color(e, cfg::FilterConfig, psf_bounds)
     if cfg.photons !== nothing
-        e.photons < cfg.photons[1] && return :red
-        e.photons > cfg.photons[2] && return :red
+        _in_range(e.photons, cfg.photons) || return :red
     end
     if cfg.precision !== nothing
-        max(e.σ_x, e.σ_y) > cfg.precision[2] && return :orange
-        max(e.σ_x, e.σ_y) < cfg.precision[1] && return :orange
+        _in_range(max(e.σ_x, e.σ_y), cfg.precision) || return :orange
     end
     if cfg.pvalue !== nothing
-        e.pvalue < cfg.pvalue[1] && return :purple
-        e.pvalue > cfg.pvalue[2] && return :purple
+        _in_range(e.pvalue, cfg.pvalue) || return :purple
     end
     if psf_bounds !== nothing
         if psf_bounds.kind === :iso
