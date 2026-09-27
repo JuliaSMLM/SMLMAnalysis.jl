@@ -46,11 +46,17 @@ Then `using SMLMAnalysis` as above.
 
 ## Verifying the install
 
-A quick end-to-end check on simulated data (runs as-is; the simulation verbs are
-re-exported from SMLMSim):
+A quick end-to-end check on simulated data (the simulation verbs come from
+SMLMSim, which you'll need to add separately — it's a dependency of
+SMLMAnalysis, but Julia environments don't inherit dependencies, so it must
+also be a direct dependency of yours to `using` it):
 
 ```julia
+using Pkg
+Pkg.add("SMLMSim")
+
 using SMLMAnalysis
+using SMLMSim
 
 # Simulate a small 8-mer sample and synthesize its camera frames
 cam = IdealCamera(64, 64, 0.1)                          # 64×64 px, 100 nm pixels

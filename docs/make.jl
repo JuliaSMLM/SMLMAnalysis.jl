@@ -3,6 +3,21 @@ using Documenter
 
 DocMeta.setdocmeta!(SMLMAnalysis, :DocTestSetup, :(using SMLMAnalysis); recursive=true)
 
+# Non-exported SMLMAnalysis-owned result/info structs and extension hooks that are
+# documented explicitly (api/index.md, api/steps.md, api/io.md) via `SMLMAnalysis.Name`
+# `@docs` blocks. Excluded from api/internals.md's `@autodocs Public=false` block below
+# so Documenter doesn't see the same docstring twice ("duplicate docs" error).
+const DOCUMENTED_ELSEWHERE = Set(Any[
+    SMLMAnalysis.AnalysisResult, SMLMAnalysis.AnalysisInfo, SMLMAnalysis.StepInfo,
+    SMLMAnalysis.DetectFitInfo, SMLMAnalysis.FilterInfo, SMLMAnalysis.IntensityFilterInfo,
+    SMLMAnalysis.DensityFilterInfo, SMLMAnalysis.BaGoLInfo,
+    SMLMAnalysis.MultiTargetResult, SMLMAnalysis.MultiTargetInfo,
+    SMLMAnalysis.AbstractMultiTargetStep,
+    SMLMAnalysis.CompositeRenderInfo, SMLMAnalysis.CrossAlignInfo, SMLMAnalysis.CrossCorrInfo,
+    SMLMAnalysis.step_name, SMLMAnalysis.step_outdir,
+])
+not_documented_elsewhere(x) = !(x in DOCUMENTED_ELSEWHERE)
+
 makedocs(;
     # Include the upstream packages so @docs of re-exported/aliased symbols
     # (FrameConnectConfig, DriftConfig, RenderConfig, BaGoLConfig, the cluster

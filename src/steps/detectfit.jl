@@ -53,7 +53,7 @@ localizations via GaussMLE in a single step, with per-dataset processing.
     dataset_frames::Union{Vector{UnitRange{Int}}, Nothing} = nothing
 
     # Dataset selection: subset of resolved source slots to include
-    datasets::Union{AbstractVector{Int}, Nothing} = nothing
+    datasets::Union{Vector{Int}, Nothing} = nothing
 
     # H5 format: :auto (detect), :smart (SMART microscope), :mic (MATLAB Instrument Control)
     h5_format::Symbol = :auto
@@ -66,6 +66,16 @@ localizations via GaussMLE in a single step, with per-dataset processing.
     # DEBUG-verbosity detection frame movies: realtime playback fps (= 1/exposure_s) for the
     # per-gallery-frame MP4s written under <step>/frame_movies/. nothing -> 20 fps fallback.
     movie_fps::Union{Float64, Nothing} = nothing
+
+    # `datasets` accepts any AbstractVector{Int} at the call site (e.g. a UnitRange
+    # like `1:19`) but is stored as a concrete Vector{Int} so the field type isn't
+    # the abstract AbstractVector{Int}.
+    function DetectFitConfig(boxer, fitter, camera, path, paths, dataset_frames,
+                              datasets, h5_format, pixel_size, qe, movie_fps)
+        new(boxer, fitter, camera, path, paths, dataset_frames,
+            datasets === nothing ? nothing : collect(Int, datasets),
+            h5_format, pixel_size, qe, movie_fps)
+    end
 end
 
 # BasicSMLD stores a single scalar `n_frames` (= max over datasets), but downstream
@@ -83,6 +93,23 @@ function _warn_unequal_frame_counts(frames_per_dataset::Vector{Int}, verbose::In
         "per-dataset frame math (drift normalization, localizations-per-frame plot) ",
         "assumes equal-length datasets and may misplace frames.")
     return
+end
+
+"""
+    _drop_nonfinite_emitters(emitters) -> (kept, n_dropped)
+
+Drop every emitter with a non-finite value (NaN/Inf) in any of its `AbstractFloat`
+fields (x, y, photons, bg, σ_x, σ_y, ...). GaussMLE can produce non-finite fit
+results on an ill-conditioned ROI; keeping them poisons every downstream step that
+assumes finite floats (rendering, filtering, drift correction).
+"""
+function _drop_nonfinite_emitters(emitters::AbstractVector)
+    isfinite_emitter(e) = all(fieldnames(typeof(e))) do f
+        val = getfield(e, f)
+        !(val isa AbstractFloat) || isfinite(val)
+    end
+    kept = filter(isfinite_emitter, emitters)
+    return kept, length(emitters) - length(kept)
 end
 
 """
@@ -133,8 +160,11 @@ function _detectfit_core(image_stacks, camera::SMLMData.AbstractCamera, cfg::Det
                          outdir::Union{String,Nothing}, dir::Union{String,Nothing},
                          v::Int, checkpoint::Int, n_datasets_val::Int,
                          selected_indices::Union{Vector{Int},Nothing})
-    # Process each dataset
-    all_emitters = AbstractEmitter[]
+    # Process each dataset. Each dataset's fit yields an already-concretely-typed
+    # emitter vector (BasicSMLD{T,E} is parametric); collect those per-dataset
+    # vectors and vcat once at the end instead of pushing into an AbstractEmitter[]
+    # and narrowing it back to a concrete type afterwards.
+    emitter_batches = []
     n_frames_per_dataset = 0
     frames_per_dataset = Int[]   # actual per-dataset frame counts (equal-length check)
     total_rois = 0
@@ -211,10 +241,12 @@ function _detectfit_core(image_stacks, camera::SMLMData.AbstractCamera, cfg::Det
             end
             frame_offset += n_frames_ds
 
-            # Set dataset field and append
+            # Set dataset field in place (all emitter types are mutable) and
+            # accumulate this dataset's already-concretely-typed vector.
             for e in smld_ds.emitters
-                push!(all_emitters, _with_dataset(e, ds))
+                e.dataset = ds
             end
+            push!(emitter_batches, smld_ds.emitters)
         end
 
         # Assemble sample data for overlay plots
@@ -231,9 +263,17 @@ function _detectfit_core(image_stacks, camera::SMLMData.AbstractCamera, cfg::Det
         end
     end
 
-    # Create combined SMLD. Zero fits across every dataset is treated as a hard
-    # error (rather than an empty SMLD) because it almost always signals a
-    # misconfiguration that would silently poison every downstream step.
+    # Concatenate the per-dataset (already concretely-typed) emitter vectors. A
+    # single fitter yields one concrete emitter type across every dataset, so this
+    # vcat produces a concrete Vector{E} directly -- no AbstractEmitter[] narrowing
+    # step needed. Keeping BasicSMLD{T,AbstractEmitter} would erase that concrete
+    # type, breaking type-stable dispatch and making save_smld mislabel the file so
+    # a reload degrades to base Emitter2DFit (dropping the PSF-width σ).
+    all_emitters = isempty(emitter_batches) ? AbstractEmitter[] : reduce(vcat, emitter_batches)
+
+    # Zero fits across every dataset is treated as a hard error (rather than an
+    # empty SMLD) because it almost always signals a misconfiguration that would
+    # silently poison every downstream step.
     if isempty(all_emitters)
         error("detectfit: no localizations found across all $n_datasets_val dataset(s) " *
               "($total_rois ROIs detected, 0 fits). Common causes: detection threshold too " *
@@ -243,16 +283,15 @@ function _detectfit_core(image_stacks, camera::SMLMData.AbstractCamera, cfg::Det
 
     _warn_unequal_frame_counts(frames_per_dataset, v)
 
-    # Narrow the accumulated AbstractEmitter[] to its concrete element type before
-    # building the SMLD. A single fitter yields one concrete emitter type; keeping
-    # BasicSMLD{T,AbstractEmitter} would erase it, breaking type-stable dispatch and
-    # making save_smld mislabel the file so a reload degrades to base Emitter2DFit
-    # (dropping the PSF-width σ). Empty stays as-is (handled by the n==0 paths).
-    emitters = isempty(all_emitters) ? all_emitters : identity.(all_emitters)
+    emitters, n_nonfinite = _drop_nonfinite_emitters(all_emitters)
+    n_nonfinite > 0 && @warn "detectfit: dropped $n_nonfinite emitter(s) with a non-finite " *
+        "fit result (NaN/Inf in x, y, photons, bg, or σ); check BoxerConfig/GaussMLEConfig " *
+        "or an ill-conditioned ROI."
+
     smld = BasicSMLD(emitters, camera, n_frames_per_dataset, n_datasets_val, Dict{String,Any}())
 
     detect_info = DetectFitInfo(all_boxes_info, all_fit_info,
-        n_datasets_val, total_rois, total_fits, n_frames_per_dataset, t, selected_indices)
+        n_datasets_val, total_rois, total_fits, n_frames_per_dataset, t, selected_indices, n_nonfinite)
 
     if dir !== nothing
         _save_detectfit_outputs!(dir, outdir, smld, camera, cfg, v, t, total_rois, total_fits,
@@ -295,7 +334,7 @@ function detectfit(camera::SMLMData.AbstractCamera, cfg::DetectFitConfig;
                    step_number::Int=1,
                    verbose::Int=Verbosity.STANDARD,
                    checkpoint::Int=Checkpoint.EXPENSIVE)
-    (cfg.path !== nothing || cfg.paths !== nothing) || error("File-based detectfit requires path or paths in config")
+    (cfg.path !== nothing || cfg.paths !== nothing) || throw(ArgumentError("File-based detectfit requires path or paths in config"))
     sources = _resolve_file_sources(cfg)
 
     # Apply dataset selection (Option C: uniform across all source modes)
@@ -323,9 +362,23 @@ end
     _inject_camera(cfg::DetectFitConfig, camera::AbstractCamera) -> DetectFitConfig
 
 Inject camera into DetectFitConfig if not already set. Used by AnalysisConfig pipeline.
+
+Throws `ArgumentError` if `cfg.pixel_size`/`cfg.qe` were also set: in an `AnalysisConfig`
+pipeline the camera always comes from `AnalysisConfig.camera`, so `_auto_camera`'s MIC-H5
+auto-build (which those fields drive) never runs and they would otherwise be silently
+ignored. Build the camera with `build_camera_from_mic_h5(path; pixel_size, qe)` and pass
+it to `AnalysisConfig(...; camera=...)` instead.
 """
 function _inject_camera(cfg::DetectFitConfig, camera::SMLMData.AbstractCamera)
     cfg.camera !== nothing && return cfg
+    if cfg.pixel_size !== nothing || cfg.qe != 1.0
+        throw(ArgumentError(
+            "DetectFitConfig.pixel_size/qe have no effect in an AnalysisConfig pipeline: " *
+            "the camera comes from AnalysisConfig.camera, not from DetectFitConfig's own " *
+            "auto-camera build. Build it yourself with " *
+            "build_camera_from_mic_h5(path; pixel_size=$(cfg.pixel_size), qe=$(cfg.qe)) " *
+            "and pass it as AnalysisConfig(...; camera=...)."))
+    end
     DetectFitConfig(; camera=camera, [f => getfield(cfg, f) for f in fieldnames(DetectFitConfig) if f != :camera]...)
 end
 
@@ -340,12 +393,12 @@ function _auto_camera(cfg::DetectFitConfig)
     if cfg.pixel_size !== nothing
         h5_path = cfg.path !== nothing ? cfg.path :
                   cfg.paths !== nothing ? cfg.paths[1] :
-                  error("Auto-camera requires path or paths in DetectFitConfig")
+                  throw(ArgumentError("Auto-camera requires path or paths in DetectFitConfig"))
         format = cfg.h5_format == :auto ? _detect_h5_format(h5_path) : cfg.h5_format
-        format == :mic || error("Auto-camera from H5 only supported for :mic format, got :$format")
+        format == :mic || throw(ArgumentError("Auto-camera from H5 only supported for :mic format, got :$format"))
         return build_camera_from_mic_h5(h5_path; pixel_size=cfg.pixel_size, qe=cfg.qe)
     end
-    error("DetectFitConfig requires camera or pixel_size for auto-camera from MIC H5")
+    throw(ArgumentError("DetectFitConfig requires camera or pixel_size for auto-camera from MIC H5"))
 end
 
 # ============================================================
@@ -356,39 +409,45 @@ _step_summary(info::DetectFitInfo) = Dict{Symbol,Any}(
     :n_datasets => info.n_datasets,
     :n_rois => info.n_rois,
     :n_fits => info.n_fits,
-    :n_frames_per_dataset => info.n_frames_per_dataset
+    :n_frames_per_dataset => info.n_frames_per_dataset,
+    :n_nonfinite => info.n_nonfinite
 )
 
 """
-    analyze(data, cfg::DetectFitConfig; kwargs...) -> (smld, StepInfo)
+    analyze(data, cfg::DetectFitConfig; outdir, step_number, verbose, checkpoint) -> (smld, StepInfo)
 
 Run combined detection and fitting. Camera must be set in `cfg.camera`.
 """
 function analyze(data::Vector{<:AbstractArray{<:Real,3}}, cfg::DetectFitConfig;
                  outdir=nothing, step_number::Int=1, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
+                 checkpoint::Int=Checkpoint.EXPENSIVE)
     camera = _auto_camera(cfg)
     t = @elapsed (smld, detect_info) = detectfit(data, camera, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose, checkpoint=checkpoint)
     (smld, StepInfo(step_number, cfg, t, _step_summary(detect_info); info=detect_info))
 end
 
-function analyze(images::AbstractArray{<:Real,3}, cfg::DetectFitConfig; kwargs...)
-    analyze([images], cfg; kwargs...)
+function analyze(images::AbstractArray{<:Real,3}, cfg::DetectFitConfig;
+                 outdir=nothing, step_number::Int=1, verbose::Int=Verbosity.STANDARD,
+                 checkpoint::Int=Checkpoint.EXPENSIVE)
+    analyze([images], cfg; outdir=outdir, step_number=step_number, verbose=verbose, checkpoint=checkpoint)
 end
 
 """File-based dispatch for pipeline use: `analyze(nothing, DetectFitConfig(path=...))`.
 Routes to file-based `analyze(cfg::DetectFitConfig)` when no data is provided."""
-analyze(::Nothing, cfg::DetectFitConfig; kwargs...) = analyze(cfg; kwargs...)
+analyze(::Nothing, cfg::DetectFitConfig;
+        outdir=nothing, step_number::Int=1, verbose::Int=Verbosity.STANDARD,
+        checkpoint::Int=Checkpoint.EXPENSIVE) =
+    analyze(cfg; outdir=outdir, step_number=step_number, verbose=verbose, checkpoint=checkpoint)
 
 """
-    analyze(cfg::DetectFitConfig; kwargs...) -> (smld, StepInfo)
+    analyze(cfg::DetectFitConfig; outdir, step_number, verbose, checkpoint) -> (smld, StepInfo)
 
 File-based detection and fitting. Requires `cfg.path` or `cfg.paths` and `cfg.camera`.
 """
 function analyze(cfg::DetectFitConfig;
                  outdir=nothing, step_number::Int=1, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
+                 checkpoint::Int=Checkpoint.EXPENSIVE)
     camera = _auto_camera(cfg)
     t = @elapsed (smld, detect_info) = detectfit(camera, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose, checkpoint=checkpoint)
@@ -426,7 +485,7 @@ function _resolve_file_sources(cfg::DetectFitConfig)
     end
 
     # Must have single path
-    cfg.path === nothing && error("Must specify path or paths")
+    cfg.path === nothing && throw(ArgumentError("Must specify path or paths"))
 
     # Detect format
     format = cfg.h5_format == :auto ? _detect_h5_format(cfg.path) : cfg.h5_format
@@ -455,7 +514,7 @@ function _select_sources(sources::AbstractVector, sel::Union{AbstractVector{Int}
     sel === nothing && return sources
     n = length(sources)
     for i in sel
-        (1 <= i <= n) || error("DetectFitConfig.datasets contains index $i, valid range is 1:$n")
+        (1 <= i <= n) || throw(ArgumentError("DetectFitConfig.datasets contains index $i, valid range is 1:$n"))
     end
     sources[sel]
 end
@@ -488,7 +547,7 @@ function _load_source(source, v)
             return images[:, :, source.frame_range]
         end
     else
-        error("Unknown H5 format: $(source.format)")
+        throw(ArgumentError("Unknown H5 format: $(source.format)"))
     end
 end
 

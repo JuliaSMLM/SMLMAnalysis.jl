@@ -25,6 +25,7 @@ import Pkg
 Pkg.activate(@__DIR__)
 
 using SMLMAnalysis
+using SMLMSim
 using MicroscopePSFs
 using Statistics
 

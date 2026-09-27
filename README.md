@@ -141,7 +141,7 @@ for (i, cfg) in enumerate(steps)
 end
 ```
 
-Each step defines `analyze(input, ::MyConfig)` and returns `(result, StepInfo)`. Adding a step means defining a config type, implementing `analyze()` for it, and exporting -- it works immediately in both config-driven and step-by-step workflows.
+Each step defines `analyze(state, cfg::MyConfig; outdir, step_number, verbose, checkpoint) -> (state, StepInfo)`. Adding a step means defining a config type, implementing `analyze()` for it, and exporting -- it works immediately in both config-driven and step-by-step workflows. See [Extending the Pipeline](https://JuliaSMLM.github.io/SMLMAnalysis.jl/dev/workflows/extending/) for the full contract.
 
 Steps from upstream packages (`DriftConfig`, `FrameConnectConfig`, `RenderConfig`) are re-exported and dispatch directly to their source implementations.
 

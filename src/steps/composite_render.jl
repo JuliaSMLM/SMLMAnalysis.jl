@@ -35,8 +35,6 @@ Configuration for a composite multi-channel render in the multi-target pipeline.
     scalebar_color::Symbol = :white
 end
 
-step_name(::CompositeRenderConfig) = "compositerender"
-
 """
     composite_render_step(smlds, cfg; outdir, step_number, verbose, colors) -> (smlds, CompositeRenderInfo)
 
@@ -108,13 +106,14 @@ _step_summary(info::CompositeRenderInfo) = Dict{Symbol,Any}(
 )
 
 """
-    analyze(smlds::Vector{BasicSMLD}, cfg::CompositeRenderConfig; kwargs...) -> (smlds, StepInfo)
+    analyze(smlds::Vector{BasicSMLD}, cfg::CompositeRenderConfig; outdir, step_number, verbose, colors) -> (smlds, StepInfo)
 
-Multi-target dispatch: composite render. SMLDs pass through.
+Multi-target dispatch: composite render. SMLDs pass through. `colors` is the
+only multi-target keyword this step reads (it does not use `labels`).
 """
 function analyze(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CompositeRenderConfig;
                  outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 colors::Vector{Symbol}=Symbol[], kwargs...)
+                 colors::Vector{Symbol}=Symbol[])
     t = @elapsed (smlds, cr_info) = composite_render_step(smlds, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose, colors=colors)
     (smlds, StepInfo(step_number, cfg, t, _step_summary(cr_info); info=cr_info))

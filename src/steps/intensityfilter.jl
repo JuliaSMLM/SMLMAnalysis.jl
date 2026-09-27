@@ -93,6 +93,10 @@ function intensityfilter_step(smld::BasicSMLD, cfg::IntensityFilterConfig;
         xs = [e.x for e in emitters]
         ys = [e.y for e in emitters]
         photons = [e.photons for e in emitters]
+        n_nonfinite = count(!isfinite, photons)
+        n_nonfinite > 0 && throw(ArgumentError(
+            "intensityfilter: $n_nonfinite emitter(s) have non-finite photons; " *
+            "check the upstream fit that produced this input before intensity filtering."))
 
         # Global rate estimate (high percentile = upper bound of single-emitter emission)
         lambda_global = max(1.0, quantile(photons, cfg.rate_percentile))
@@ -149,13 +153,13 @@ function _step_summary(info::IntensityFilterInfo)
 end
 
 """
-    analyze(smld, cfg::IntensityFilterConfig; kwargs...) -> (filtered_smld, StepInfo)
+    analyze(smld, cfg::IntensityFilterConfig; outdir, step_number, verbose, checkpoint) -> (filtered_smld, StepInfo)
 
 Filter localizations by intensity-based multi-emitter rejection.
 """
 function analyze(smld::BasicSMLD, cfg::IntensityFilterConfig;
                  outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE, kwargs...)
+                 checkpoint::Int=Checkpoint.EXPENSIVE)
     t = @elapsed (filtered, if_info) = intensityfilter_step(smld, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose)
 
@@ -212,56 +216,44 @@ function _estimate_excitation_field(xs, ys, photons, lambda_global, cfg::Intensi
 end
 
 """
-    _compute_bin_stat(xs, ys, values, cfg, stat_fn) -> Matrix{Float64}
+    _bin_index(v, v_min, v_max, dv, n_bins) -> Int
 
-Bin emitters spatially and compute `stat_fn(bin_values)` per bin.
-Returns `n_bins × n_bins` grid in Makie convention: `grid[ix, iy]` maps to
-`(x_centers[ix], y_centers[iy])` when used with `heatmap!(ax, x_centers, y_centers, grid)`.
-
-This is the fundamental convention: first array index = x-axis (horizontal),
-second = y-axis (vertical). Julia arrays are (row, col) = (y, x) in image
-convention, but Makie's heatmap maps first index to x. So we store as [ix, iy].
+1-based bin index for `v` under the half-open edge convention
+`[v_min+(i-1)*dv, v_min+i*dv)`, with the last bin's upper edge widened to
+`v_max+eps(v_max)` — the same edges the original per-bin scan compared
+against. Computes a floor-division guess and corrects it against those exact
+edges (stepping down/up while it lands outside them), so it reproduces the
+original scan's half-open edge comparisons bit-for-bit despite float
+roundoff. Returns `0` if no bin contains `v` (matches the original: such an
+emitter fell in no bin and was dropped).
 """
-function _compute_bin_stat(xs, ys, values, cfg::IntensityFilterConfig, stat_fn)
-    n_bins = cfg.n_bins
-    min_count = cfg.min_bin_count
-
-    x_min, x_max = extrema(xs)
-    y_min, y_max = extrema(ys)
-
-    dx = (x_max - x_min) / n_bins
-    dy = (y_max - y_min) / n_bins
-    dx == 0 && (dx = 1.0)
-    dy == 0 && (dy = 1.0)
-
-    grid = fill(NaN, n_bins, n_bins)
-
-    for ix in 1:n_bins, iy in 1:n_bins
-        bx_lo = x_min + (ix - 1) * dx
-        bx_hi = ix == n_bins ? x_max + eps(x_max) : x_min + ix * dx
-        by_lo = y_min + (iy - 1) * dy
-        by_hi = iy == n_bins ? y_max + eps(y_max) : y_min + iy * dy
-
-        bin_vals = Float64[]
-        for i in eachindex(xs)
-            if bx_lo <= xs[i] < bx_hi && by_lo <= ys[i] < by_hi
-                push!(bin_vals, values[i])
-            end
-        end
-
-        if length(bin_vals) >= min_count
-            grid[ix, iy] = stat_fn(bin_vals)
-        end
+function _bin_index(v, v_min, v_max, dv, n_bins)
+    lo(i) = v_min + (i - 1) * dv
+    hi(i) = i == n_bins ? v_max + eps(v_max) : v_min + i * dv
+    i = clamp(floor(Int, (v - v_min) / dv) + 1, 1, n_bins)
+    while i > 1 && v < lo(i)
+        i -= 1
     end
-
-    grid
+    while i < n_bins && v >= hi(i)
+        i += 1
+    end
+    return (lo(i) <= v < hi(i)) ? i : 0
 end
 
 """
     _spatial_bin_rates(xs, ys, photons, cfg)
 
-Bin emitters spatially and compute `rate_percentile` of photons per bin.
+Bin emitters spatially and compute `rate_percentile` of photons per bin, in a
+single pass over the emitters — each emitter's `(ix, iy)` bin is computed
+directly from its coordinates via `_bin_index`, rather than scanning every
+emitter once per bin (the previous `_compute_bin_stat` was an unused,
+near-identical O(n_bins²·n) twin of this; merged away). Bin edges/centers are
+still derived from `extrema(xs)`/`extrema(ys)`, and `_bin_index` reproduces the
+original scan's half-open edge comparisons exactly, so results are unchanged.
+
 Returns named tuple with `centers_x`, `centers_y`, `rates`, `counts`, and grid info.
+`rate_grid` is stored `[ix, iy]` (Makie's `heatmap!` convention: first index is
+the x-axis), matching `(x_centers[ix], y_centers[iy])`.
 """
 function _spatial_bin_rates(xs, ys, photons, cfg::IntensityFilterConfig)
     n_bins = cfg.n_bins
@@ -276,6 +268,15 @@ function _spatial_bin_rates(xs, ys, photons, cfg::IntensityFilterConfig)
     dx == 0 && (dx = 1.0)
     dy == 0 && (dy = 1.0)
 
+    # Single pass: bucket each emitter's photon count into its (ix, iy) bin.
+    bins = [Float64[] for _ in 1:n_bins, _ in 1:n_bins]
+    for i in eachindex(xs)
+        ix = _bin_index(xs[i], x_min, x_max, dx, n_bins)
+        iy = _bin_index(ys[i], y_min, y_max, dy, n_bins)
+        (ix == 0 || iy == 0) && continue
+        push!(bins[ix, iy], photons[i])
+    end
+
     centers_x = Float64[]
     centers_y = Float64[]
     rates = Float64[]
@@ -284,19 +285,12 @@ function _spatial_bin_rates(xs, ys, photons, cfg::IntensityFilterConfig)
     rate_grid = fill(NaN, n_bins, n_bins)
 
     for ix in 1:n_bins, iy in 1:n_bins
-        bx_lo = x_min + (ix - 1) * dx
-        bx_hi = ix == n_bins ? x_max + eps(x_max) : x_min + ix * dx
-        by_lo = y_min + (iy - 1) * dy
-        by_hi = iy == n_bins ? y_max + eps(y_max) : y_min + iy * dy
-
-        bin_photons = Float64[]
-        for i in eachindex(xs)
-            if bx_lo <= xs[i] < bx_hi && by_lo <= ys[i] < by_hi
-                push!(bin_photons, photons[i])
-            end
-        end
-
+        bin_photons = bins[ix, iy]
         if length(bin_photons) >= min_count
+            bx_lo = x_min + (ix - 1) * dx
+            bx_hi = ix == n_bins ? x_max + eps(x_max) : x_min + ix * dx
+            by_lo = y_min + (iy - 1) * dy
+            by_hi = iy == n_bins ? y_max + eps(y_max) : y_min + iy * dy
             rate = quantile(bin_photons, pct)
             push!(centers_x, (bx_lo + min(bx_hi, x_max)) / 2)
             push!(centers_y, (by_lo + min(by_hi, y_max)) / 2)

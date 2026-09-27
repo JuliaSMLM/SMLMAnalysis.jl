@@ -9,6 +9,12 @@ KDTree range queries with Ripley's isotropic edge correction.
 - g(r) > 1: spatial clustering / co-localization
 - g(r) = 1: random (CSR)
 - g(r) < 1: exclusion / anti-correlation
+
+Each channel's density normalizes against its OWN camera's whole pixel-edge FOV area
+(`(x_max-x_min)*(y_max-y_min)`), not the localizations' actual spatial extent. When the
+sample occupies only part of the FOV (e.g. a small cell in a large field), the true local
+density is higher than this FOV-wide estimate, so even CSR data confined to that
+sub-region will read g(r) > 1 rather than tending to 1.
 """
 
 """
@@ -29,8 +35,6 @@ Configuration for pair cross-correlation g(r) between two channels.
     channels::Tuple{Int,Int} = (1, 2)
 end
 
-step_name(::CrossCorrConfig) = "crosscorr"
-
 """
     crosscorr_step(smlds, cfg; outdir, step_number, verbose, labels) -> (smlds, CrossCorrInfo)
 
@@ -46,8 +50,8 @@ function crosscorr_step(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossCorrConfi
 
     ch_a, ch_b = cfg.channels
     (1 <= ch_a <= length(smlds) && 1 <= ch_b <= length(smlds)) ||
-        error("CrossCorrConfig channels ($ch_a, $ch_b) out of range for $(length(smlds)) channels")
-    ch_a != ch_b || error("CrossCorrConfig channels must be different (got $ch_a, $ch_b)")
+        throw(ArgumentError("CrossCorrConfig channels ($ch_a, $ch_b) out of range for $(length(smlds)) channels"))
+    ch_a != ch_b || throw(ArgumentError("CrossCorrConfig channels must be different (got $ch_a, $ch_b)"))
 
     label_a = length(labels) >= ch_a ? labels[ch_a] : Symbol("Ch$ch_a")
     label_b = length(labels) >= ch_b ? labels[ch_b] : Symbol("Ch$ch_b")
@@ -96,13 +100,14 @@ _step_summary(info::CrossCorrInfo) = Dict{Symbol,Any}(
 )
 
 """
-    analyze(smlds::Vector{BasicSMLD}, cfg::CrossCorrConfig; kwargs...) -> (smlds, StepInfo)
+    analyze(smlds::Vector{BasicSMLD}, cfg::CrossCorrConfig; outdir, step_number, verbose, labels) -> (smlds, StepInfo)
 
-Multi-target dispatch: pair cross-correlation. SMLDs pass through.
+Multi-target dispatch: pair cross-correlation. SMLDs pass through. `labels` is
+the only multi-target keyword this step reads (it does not use `colors`).
 """
 function analyze(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossCorrConfig;
                  outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 labels::Vector{Symbol}=Symbol[], kwargs...)
+                 labels::Vector{Symbol}=Symbol[])
     t = @elapsed (smlds, cc_info) = crosscorr_step(smlds, cfg;
         outdir=outdir, step_number=step_number, verbose=verbose, labels=labels)
     (smlds, StepInfo(step_number, cfg, t, _step_summary(cc_info); info=cc_info))

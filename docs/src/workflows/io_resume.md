@@ -5,9 +5,8 @@ CurrentModule = SMLMAnalysis
 # I/O & Resume
 
 This page covers getting data in and results out: importing raw microscope
-acquisitions, saving and reloading localizations, persisting full pipeline state
-for cross-session resume, and the per-step checkpoints that let you iterate on
-later steps without re-running expensive ones.
+acquisitions, saving and reloading localizations, and the per-step checkpoints
+that let you iterate on later steps without re-running expensive ones.
 
 ## Saving and loading localizations (HDF5)
 
@@ -34,32 +33,6 @@ available emitter fields:
 
 ```julia
 smld_info("results.h5")
-```
-
-## Saving and resuming full pipeline state (JLD2)
-
-HDF5 holds one `BasicSMLD`. To snapshot the **whole** pipeline — final SMLD, the
-raw SMLD, the frame-connected tracks, the drift model, and step provenance — use
-the JLD2-backed [`save_pipeline_state`](@ref) / [`load_pipeline_state`](@ref):
-
-```julia
-(result, info) = analyze(image_stacks, config)
-save_pipeline_state("output/pipeline.jld2", result;
-                    step_infos = info.step_infos,
-                    camera     = config.camera)
-```
-
-`load_pipeline_state` returns a `NamedTuple` you can read fields from or feed back
-into [`analyze`](@ref) to continue from where you left off:
-
-```julia
-state = load_pipeline_state("output/pipeline.jld2")
-state.smld             # final BasicSMLD
-state.smld_connected   # frame-connected tracks (or nothing)
-state.drift_model      # fitted drift model (or nothing)
-state.step_infos       # Vector{StepInfo}
-
-(smld, _) = analyze(state.smld, FilterConfig(photons = (300.0, Inf)))
 ```
 
 ## Step checkpoints during a run

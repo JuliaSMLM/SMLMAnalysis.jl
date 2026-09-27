@@ -548,12 +548,9 @@ function _construct_emitters(
     pvalue,
     frame, dataset, track_id, id
 )
-    # Try to get GaussMLE emitter types if available
-    GaussMLEEmitterTypes = _get_gaussmle_emitter_types()
-
-    if emitter_type_str == "Emitter2DFitSigmaXY" && psf_sigma_x !== nothing && GaussMLEEmitterTypes !== nothing
+    if emitter_type_str == "Emitter2DFitSigmaXY" && psf_sigma_x !== nothing
         # GaussMLE anisotropic PSF type
-        Emitter2DFitSigmaXY = GaussMLEEmitterTypes.Emitter2DFitSigmaXY
+        Emitter2DFitSigmaXY = GaussMLE.Emitter2DFitSigmaXY
         return [Emitter2DFitSigmaXY{T}(
             T(x[i]), T(y[i]),
             T(photons[i]), T(bg[i]),
@@ -567,9 +564,9 @@ function _construct_emitters(
             Int(frame[i]), Int(dataset[i]), Int(track_id[i]), Int(id[i])
         ) for i in 1:n]
 
-    elseif emitter_type_str == "Emitter2DFitSigma" && psf_sigma !== nothing && GaussMLEEmitterTypes !== nothing
+    elseif emitter_type_str == "Emitter2DFitSigma" && psf_sigma !== nothing
         # GaussMLE isotropic PSF type
-        Emitter2DFitSigma = GaussMLEEmitterTypes.Emitter2DFitSigma
+        Emitter2DFitSigma = GaussMLE.Emitter2DFitSigma
         return [Emitter2DFitSigma{T}(
             T(x[i]), T(y[i]),
             T(photons[i]), T(bg[i]),
@@ -582,9 +579,9 @@ function _construct_emitters(
             Int(frame[i]), Int(dataset[i]), Int(track_id[i]), Int(id[i])
         ) for i in 1:n]
 
-    elseif emitter_type_str == "Emitter2DFitGaussMLE" && GaussMLEEmitterTypes !== nothing
+    elseif emitter_type_str == "Emitter2DFitGaussMLE"
         # GaussMLE fixed-width 2D type (GaussianXYNB)
-        Emitter2DFitGaussMLE = GaussMLEEmitterTypes.Emitter2DFitGaussMLE
+        Emitter2DFitGaussMLE = GaussMLE.Emitter2DFitGaussMLE
         return [Emitter2DFitGaussMLE{T}(
             T(x[i]), T(y[i]), T(photons[i]), T(bg[i]),
             T(σ_x[i]), T(σ_y[i]),
@@ -594,9 +591,9 @@ function _construct_emitters(
             Int(frame[i]), Int(dataset[i]), Int(track_id[i]), Int(id[i])
         ) for i in 1:n]
 
-    elseif emitter_type_str == "Emitter3DFitGaussMLE" && GaussMLEEmitterTypes !== nothing
+    elseif emitter_type_str == "Emitter3DFitGaussMLE"
         # GaussMLE astigmatic 3D type (AstigmaticXYZNB)
-        Emitter3DFitGaussMLE = GaussMLEEmitterTypes.Emitter3DFitGaussMLE
+        Emitter3DFitGaussMLE = GaussMLE.Emitter3DFitGaussMLE
         return [Emitter3DFitGaussMLE{T}(
             T(x[i]), T(y[i]), T(z[i]), T(photons[i]), T(bg[i]),
             T(σ_x[i]), T(σ_y[i]), T(σ_z[i]),
@@ -646,48 +643,19 @@ end
 Internal: Create empty emitter vector of appropriate type.
 """
 function _empty_emitters(emitter_type_str::String, T::Type, is_3d::Bool)
-    GaussMLEEmitterTypes = _get_gaussmle_emitter_types()
-
-    if emitter_type_str == "Emitter2DFitSigmaXY" && GaussMLEEmitterTypes !== nothing
-        return GaussMLEEmitterTypes.Emitter2DFitSigmaXY{T}[]
-    elseif emitter_type_str == "Emitter2DFitSigma" && GaussMLEEmitterTypes !== nothing
-        return GaussMLEEmitterTypes.Emitter2DFitSigma{T}[]
-    elseif emitter_type_str == "Emitter2DFitGaussMLE" && GaussMLEEmitterTypes !== nothing
-        return GaussMLEEmitterTypes.Emitter2DFitGaussMLE{T}[]
-    elseif emitter_type_str == "Emitter3DFitGaussMLE" && GaussMLEEmitterTypes !== nothing
-        return GaussMLEEmitterTypes.Emitter3DFitGaussMLE{T}[]
+    if emitter_type_str == "Emitter2DFitSigmaXY"
+        return GaussMLE.Emitter2DFitSigmaXY{T}[]
+    elseif emitter_type_str == "Emitter2DFitSigma"
+        return GaussMLE.Emitter2DFitSigma{T}[]
+    elseif emitter_type_str == "Emitter2DFitGaussMLE"
+        return GaussMLE.Emitter2DFitGaussMLE{T}[]
+    elseif emitter_type_str == "Emitter3DFitGaussMLE"
+        return GaussMLE.Emitter3DFitGaussMLE{T}[]
     elseif is_3d
         return Emitter3DFit{T}[]
     else
         return Emitter2DFit{T}[]
     end
-end
-
-"""
-    _get_gaussmle_emitter_types()
-
-Internal: Try to get GaussMLE emitter types if the package is loaded.
-Returns nothing if GaussMLE is not available.
-"""
-function _get_gaussmle_emitter_types()
-    try
-        # Check if GaussMLE is loaded
-        if isdefined(Main, :GaussMLE)
-            return Main.GaussMLE
-        end
-        # Check if loaded in SMLMAnalysis
-        if isdefined(@__MODULE__, :GaussMLE)
-            return GaussMLE
-        end
-        # Try to get from package extensions or parent module
-        for m in values(Base.loaded_modules)
-            if nameof(m) == :GaussMLE
-                return m
-            end
-        end
-    catch
-    end
-    return nothing
 end
 
 """

@@ -16,7 +16,7 @@ it operates on a `Vector{BasicSMLD}` (one SMLD per color/target), not a single
 SMLD, and is dispatched accordingly.
 
 ```julia
-analyze(smlds, CompositeRenderConfig(zoom = 20))   # smlds::Vector{BasicSMLD}
+analyze(smlds, CompositeRenderConfig(zoom = 20))   # smlds::Vector{SMLMData.BasicSMLD}
 #   → (smlds, StepInfo)        # SMLDs pass through unmodified; image goes to disk
 ```
 

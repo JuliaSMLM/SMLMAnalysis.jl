@@ -8,11 +8,6 @@ The SMART microscope stores data in HDF5 files with structure:
 - /Main/stage_XXX: Stage position data
 """
 
-using HDF5
-using SMLMData
-
-export load_smart_h5, load_smart_h5_info
-
 """
     load_smart_h5_info(filepath::String)
 
@@ -76,30 +71,6 @@ function load_smart_h5(filepath::String; frame_range=nothing)
         else
             return data[:, :, frame_range]
         end
-    end
-end
-
-"""
-    load_smart_h5_frame(filepath::String, frame::Int)
-
-Load a single frame from a SMART microscope HDF5 file.
-
-# Arguments
-- `filepath::String`: Path to the HDF5 file
-- `frame::Int`: Frame number to load (1-indexed)
-
-# Returns
-- `frame_data::Matrix{UInt16}`: Single frame image
-
-# Example
-```julia
-frame1 = load_smart_h5_frame("data/experiment.h5", 1)
-```
-"""
-function load_smart_h5_frame(filepath::String, frame::Int)
-    HDF5.h5open(filepath, "r") do file
-        data = file["Main/data"]
-        return data[:, :, frame]
     end
 end
 
