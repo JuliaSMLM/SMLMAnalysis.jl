@@ -1,7 +1,25 @@
-# https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
+# Lab Dependabot config (admiral decision 0011); replaces CompatHelper. Copy to
+# .github/dependabot.yml unchanged. Weekly; one pull request per dependency across every
+# Julia environment in the repo (the package, and docs/, test/, test/<group>/ when present).
 version: 2
 updates:
   - package-ecosystem: "github-actions"
-    directory: "/" # Location of package manifests
+    directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+  - package-ecosystem: "julia"
+    directories:
+      - "/"
+      - "/*"
+      - "/test/*"
+    schedule:
+      interval: "weekly"
+    groups:
+      julia:
+        group-by: dependency-name
+        patterns:
+          - "*"
