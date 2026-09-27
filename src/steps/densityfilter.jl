@@ -34,14 +34,16 @@ Filter localizations by neighbor density. Returns `(filtered_smld, DensityFilter
 # Returns
 `(filtered_smld, DensityFilterInfo)`
 """
-function densityfilter_step(smld::BasicSMLD, cfg::DensityFilterConfig;
-                            outdir::Union{String,Nothing}=nothing,
-                            step_number::Int=0,
-                            verbose::Int=Verbosity.STANDARD)
+function densityfilter_step(
+        smld::BasicSMLD, cfg::DensityFilterConfig;
+        outdir::Union{String, Nothing} = nothing,
+        step_number::Int = 0,
+        verbose::Int = Verbosity.STANDARD
+    )
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
 
-    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_sigma=cfg.n_sigma min_neighbors=cfg.min_neighbors
+    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_sigma = cfg.n_sigma min_neighbors = cfg.min_neighbors
 
     n_before = length(smld.emitters)
     t = @elapsed (filtered, neighbor_counts, threshold) = _filter_by_density(smld, cfg)
@@ -52,11 +54,11 @@ function densityfilter_step(smld::BasicSMLD, cfg::DensityFilterConfig;
         _save_densityfilter_outputs!(dir, cfg, v, t, neighbor_counts, threshold, n_before, n_after)
     end
 
-    v >= Verbosity.PROGRESS && @info "  → $n_rejected rejected (threshold=$threshold) ($(round(t, digits=2))s)"
-    (filtered, DensityFilterInfo(n_before, n_after, threshold, t))
+    v >= Verbosity.PROGRESS && @info "  → $n_rejected rejected (threshold=$threshold) ($(round(t, digits = 2))s)"
+    return (filtered, DensityFilterInfo(n_before, n_after, threshold, t))
 end
 
-_step_summary(info::DensityFilterInfo) = Dict{Symbol,Any}(
+_step_summary(info::DensityFilterInfo) = Dict{Symbol, Any}(
     :n_before => info.n_before,
     :n_after => info.n_after,
     :n_rejected => info.n_before - info.n_after,
@@ -68,18 +70,22 @@ _step_summary(info::DensityFilterInfo) = Dict{Symbol,Any}(
 
 Filter localizations by neighbor density.
 """
-function analyze(smld::BasicSMLD, cfg::DensityFilterConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE)
-    t = @elapsed (filtered, df_info) = densityfilter_step(smld, cfg;
-        outdir=outdir, step_number=step_number, verbose=verbose)
+function analyze(
+        smld::BasicSMLD, cfg::DensityFilterConfig;
+        outdir = nothing, step_number::Int = 0, verbose::Int = Verbosity.STANDARD,
+        checkpoint::Int = Checkpoint.EXPENSIVE
+    )
+    t = @elapsed (filtered, df_info) = densityfilter_step(
+        smld, cfg;
+        outdir = outdir, step_number = step_number, verbose = verbose
+    )
 
     if checkpoint >= Checkpoint.ALL
         dir = step_outdir(outdir, step_number, cfg)
-        _save_step_smld(dir, filtered; filename="smld_density.h5")
+        _save_step_smld(dir, filtered; filename = "smld_density.h5")
     end
 
-    (filtered, StepInfo(step_number, cfg, t, _step_summary(df_info); info=df_info))
+    return (filtered, StepInfo(step_number, cfg, t, _step_summary(df_info); info = df_info))
 end
 
 function _filter_by_density(smld::BasicSMLD, cfg::DensityFilterConfig)
@@ -91,10 +97,13 @@ function _filter_by_density(smld::BasicSMLD, cfg::DensityFilterConfig)
     n_sigma = cfg.n_sigma
     σ = [sqrt(e.σ_x^2 + e.σ_y^2) for e in emitters]
     n_nonfinite = count(!isfinite, σ)
-    n_nonfinite > 0 && throw(ArgumentError(
-        "densityfilter: $n_nonfinite localization(s) have a non-finite σ (from σ_x/σ_y); " *
-        "this can happen with data loaded via `load_smld` from an upstream fit that produced " *
-        "NaN/Inf. Drop or fix these localizations before density filtering."))
+    n_nonfinite > 0 && throw(
+        ArgumentError(
+            "densityfilter: $n_nonfinite localization(s) have a non-finite σ (from σ_x/σ_y); " *
+                "this can happen with data loaded via `load_smld` from an upstream fit that produced " *
+                "NaN/Inf. Drop or fix these localizations before density filtering."
+        )
+    )
     max_σ = maximum(σ)
 
     coords = zeros(2, n)
@@ -134,7 +143,7 @@ function _filter_by_density(smld::BasicSMLD, cfg::DensityFilterConfig)
     keep = neighbor_counts .>= threshold
     filtered = emitters[keep]
 
-    BasicSMLD(filtered, smld.camera, smld.n_frames, smld.n_datasets, smld.metadata), neighbor_counts, threshold
+    return BasicSMLD(filtered, smld.camera, smld.n_frames, smld.n_datasets, smld.metadata), neighbor_counts, threshold
 end
 
 """
@@ -160,8 +169,8 @@ function _valley_threshold(counts::Vector{Int})
 
     # Smooth histogram with simple moving average (window=3)
     smoothed = Float64.(hist)
-    for i in 2:(length(hist)-1)
-        smoothed[i] = (hist[i-1] + hist[i] + hist[i+1]) / 3
+    for i in 2:(length(hist) - 1)
+        smoothed[i] = (hist[i - 1] + hist[i] + hist[i + 1]) / 3
     end
 
     # Find the rightmost significant peak (clustered population):
@@ -222,20 +231,22 @@ diagnostic figure so both mark the same peak.
 """
 function _rightmost_significant_peak(smoothed::AbstractVector{<:Real}, peak_threshold::Real)
     for i in length(smoothed):-1:3
-        smoothed[i] >= smoothed[i-1] || continue
-        smoothed[i] >= get(smoothed, i+1, 0.0) || continue
+        smoothed[i] >= smoothed[i - 1] || continue
+        smoothed[i] >= get(smoothed, i + 1, 0.0) || continue
         smoothed[i] >= peak_threshold && return i
     end
     return 1
 end
 
-function _save_densityfilter_outputs!(dir::String, cfg::DensityFilterConfig, v::Int, t::Float64,
-                                      neighbor_counts::Vector{Int}, threshold::Int, n_before::Int, n_after::Int)
+function _save_densityfilter_outputs!(
+        dir::String, cfg::DensityFilterConfig, v::Int, t::Float64,
+        neighbor_counts::Vector{Int}, threshold::Int, n_before::Int, n_after::Int
+    )
     mkpath(dir)
     _save_config!(dir, cfg)
     _save_info!(dir, DensityFilterInfo(n_before, n_after, threshold, t))
 
-    if v >= Verbosity.STANDARD
+    return if v >= Verbosity.STANDARD
         _write_densityfilter_stats(dir, cfg, n_before, n_after, threshold, t)
         _save_densityfilter_figures(dir, neighbor_counts, threshold, cfg)
     end
@@ -243,17 +254,17 @@ end
 
 function _write_densityfilter_stats(dir, cfg, n_before, n_after, threshold, t)
     n_rejected = n_before - n_after
-    pct_rejected = n_before == 0 ? 0.0 : round(100 * n_rejected / n_before, digits=1)
+    pct_rejected = n_before == 0 ? 0.0 : round(100 * n_rejected / n_before, digits = 1)
 
     filepath = joinpath(dir, "stats.md")
-    open(filepath, "w") do io
+    return open(filepath, "w") do io
         println(io, "# Density Filter Statistics\n")
         println(io, "## Summary")
         println(io, "- **Input**: $n_before")
         println(io, "- **Output**: $n_after")
         println(io, "- **Rejected**: $n_rejected ($pct_rejected%)")
         println(io, "- **Threshold**: $threshold neighbors")
-        println(io, "- **Time**: $(round(t, digits=2))s")
+        println(io, "- **Time**: $(round(t, digits = 2))s")
         println(io, "")
         println(io, "## Parameters")
         println(io, "- n_sigma: $(cfg.n_sigma)")
@@ -273,8 +284,8 @@ function _save_densityfilter_figures(dir, neighbor_counts, threshold, cfg)
 
     # Find peak for visualization
     smoothed = Float64.(hist_bins)
-    for i in 2:(length(hist_bins)-1)
-        smoothed[i] = (hist_bins[max(1,i-1)] + hist_bins[i] + hist_bins[min(end,i+1)]) / 3
+    for i in 2:(length(hist_bins) - 1)
+        smoothed[i] = (hist_bins[max(1, i - 1)] + hist_bins[i] + hist_bins[min(end, i + 1)]) / 3
     end
 
     # Find rightmost significant peak (same routine the threshold uses, so the
@@ -285,40 +296,47 @@ function _save_densityfilter_figures(dir, neighbor_counts, threshold, cfg)
 
     method_str = cfg.min_neighbors == :auto ? "auto: valley method" : "manual"
 
-    fig = Figure(size=(800, 500))
-    ax = Axis(fig[1, 1],
+    fig = Figure(size = (800, 500))
+    ax = Axis(
+        fig[1, 1],
         xlabel = "Number of Neighbors (within $(cfg.n_sigma)σ)",
         ylabel = "Count",
         title = "Neighbor Count Distribution (threshold = $threshold ($method_str))"
     )
 
     # Draw histogram bars
-    barplot!(ax, 0:max_neighbor, hist_bins, color=:steelblue)
+    barplot!(ax, 0:max_neighbor, hist_bins, color = :steelblue)
 
     # Draw line from origin to peak (showing valley search region)
     if cfg.min_neighbors == :auto && peak_idx > 1
-        lines!(ax, [0, peak_idx - 1], [hist_bins[1], peak_val],
-            color=:orange, linewidth=2, linestyle=:solid, label="Search region")
+        lines!(
+            ax, [0, peak_idx - 1], [hist_bins[1], peak_val],
+            color = :orange, linewidth = 2, linestyle = :solid, label = "Search region"
+        )
     end
 
     # Draw threshold
-    vlines!(ax, [threshold - 0.5], color=:red, linestyle=:dash, linewidth=2, label="Threshold ($threshold)")
+    vlines!(ax, [threshold - 0.5], color = :red, linestyle = :dash, linewidth = 2, label = "Threshold ($threshold)")
 
     # Add legend with stats
     n_rejected = sum(hist_bins[1:min(threshold, length(hist_bins))])
     n_kept = sum(hist_bins) - n_rejected
-    pct_rejected = round(100 * n_rejected / sum(hist_bins), digits=1)
+    pct_rejected = round(100 * n_rejected / sum(hist_bins), digits = 1)
 
-    Legend(fig[1, 2], ax, "Method",
-        framevisible=true,
-        padding=(10, 10, 10, 10))
+    Legend(
+        fig[1, 2], ax, "Method",
+        framevisible = true,
+        padding = (10, 10, 10, 10)
+    )
 
     # Add stats text
-    text!(ax, 0.95, 0.95,
-        text="Threshold: $threshold neighbors\nRejected: $n_rejected ($pct_rejected%)\nKept: $n_kept",
-        align=(:right, :top),
-        space=:relative,
-        fontsize=12)
+    text!(
+        ax, 0.95, 0.95,
+        text = "Threshold: $threshold neighbors\nRejected: $n_rejected ($pct_rejected%)\nKept: $n_kept",
+        align = (:right, :top),
+        space = :relative,
+        fontsize = 12
+    )
 
-    save(joinpath(dir, "neighbor_histogram.png"), fig)
+    return save(joinpath(dir, "neighbor_histogram.png"), fig)
 end

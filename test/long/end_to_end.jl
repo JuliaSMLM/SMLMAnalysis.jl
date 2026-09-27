@@ -15,19 +15,25 @@ using Statistics
     Random.seed!(1)
     cam = IdealCamera(32, 32, 0.1)
     sim = SMLMAnalysis.StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 1)
-    (_, si) = SMLMAnalysis.simulate(sim;
-        pattern  = SMLMAnalysis.Nmer2D(n = 8, d = 0.05),
+    (_, si) = SMLMAnalysis.simulate(
+        sim;
+        pattern = SMLMAnalysis.Nmer2D(n = 8, d = 0.05),
         molecule = SMLMAnalysis.GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
-        camera   = cam)
-    (imgs, _) = SMLMAnalysis.gen_images(si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
-        dataset = 1, bg = 20.0, poisson_noise = true)
+        camera = cam
+    )
+    (imgs, _) = SMLMAnalysis.gen_images(
+        si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
+        dataset = 1, bg = 20.0, poisson_noise = true
+    )
 
     cfg = AnalysisConfig(
-        DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
-                        fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)),
+        DetectFitConfig(
+            boxer = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
+            fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)
+        ),
         FilterConfig(photons = (100.0, Inf)),
         RenderConfig(zoom = 10);
-        camera  = cam,
+        camera = cam,
         verbose = Verbosity.SILENT,
     )
     (result, info) = analyze([imgs], cfg)
@@ -59,11 +65,15 @@ using Statistics
     # Multi-dataset detectfit: exercises the per-dataset loop (dataset field,
     # per-dataset frame numbering, n_datasets tracking) that the in-memory and
     # file-based paths share. Reuse the same stack as two datasets.
-    (smld2, si2) = analyze([imgs, imgs],
-        DetectFitConfig(camera = cam,
-                        boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
-                        fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu));
-        verbose = Verbosity.SILENT)
+    (smld2, si2) = analyze(
+        [imgs, imgs],
+        DetectFitConfig(
+            camera = cam,
+            boxer = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
+            fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)
+        );
+        verbose = Verbosity.SILENT
+    )
     @test si2.info.n_datasets == 2
     @test smld2.n_datasets == 2
     @test smld2.n_frames == size(imgs, 3)          # equal-length → per-dataset count
@@ -78,17 +88,25 @@ end
     Random.seed!(1)
     cam = IdealCamera(64, 64, 0.1)
     sim = SMLMAnalysis.StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 500, ndatasets = 2)
-    (_, si) = SMLMAnalysis.simulate(sim;
-        pattern  = SMLMAnalysis.Nmer2D(n = 8, d = 0.05),
+    (_, si) = SMLMAnalysis.simulate(
+        sim;
+        pattern = SMLMAnalysis.Nmer2D(n = 8, d = 0.05),
         molecule = SMLMAnalysis.GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
-        camera   = cam)
-    images = [SMLMAnalysis.gen_images(si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
-                          dataset = d, bg = 20.0, poisson_noise = true)[1] for d in 1:2]
+        camera = cam
+    )
+    images = [
+        SMLMAnalysis.gen_images(
+            si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
+            dataset = d, bg = 20.0, poisson_noise = true
+        )[1] for d in 1:2
+    ]
 
     outdir = mktempdir()
     cfg = AnalysisConfig(
-        DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
-                        fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)),
+        DetectFitConfig(
+            boxer = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
+            fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)
+        ),
         FilterConfig(photons = (100.0, Inf)),
         FrameConnectConfig(max_frame_gap = 2),
         DriftConfig(degree = 1),
@@ -100,8 +118,10 @@ end
 
     # Numbered step directories only -- outdir also holds a top-level
     # .cache/ (checkpoint cache, see common.jl cache_dir) that isn't a step.
-    step_dirs = filter(f -> isdir(f) && occursin(r"^\d\d_", basename(f)),
-                        readdir(outdir; join=true))
+    step_dirs = filter(
+        f -> isdir(f) && occursin(r"^\d\d_", basename(f)),
+        readdir(outdir; join = true)
+    )
     @test length(step_dirs) == length(cfg.steps)
 
     tomls = String[]
@@ -151,25 +171,31 @@ end
     gen_channel(seed, dx, dy) = begin
         Random.seed!(seed)
         sim = SMLMAnalysis.StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 1)
-        (_, si) = SMLMAnalysis.simulate(sim;
-            pattern  = SMLMAnalysis.Nmer2D(n = 8, d = 0.05),
+        (_, si) = SMLMAnalysis.simulate(
+            sim;
+            pattern = SMLMAnalysis.Nmer2D(n = 8, d = 0.05),
             molecule = SMLMAnalysis.GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
-            camera   = cam)
+            camera = cam
+        )
         model = deepcopy(si.smld_model)
         for e in model.emitters
             e.x += dx
             e.y += dy
         end
-        (imgs, _) = SMLMAnalysis.gen_images(model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
-            dataset = 1, bg = 20.0, poisson_noise = true)
+        (imgs, _) = SMLMAnalysis.gen_images(
+            model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
+            dataset = 1, bg = 20.0, poisson_noise = true
+        )
         [imgs]
     end
     images_a = gen_channel(11, 0.0, 0.0)
     images_b = gen_channel(11, dx_true, 0.0)
 
     chan_cfg() = AnalysisConfig(
-        DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
-                        fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)),
+        DetectFitConfig(
+            boxer = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
+            fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)
+        ),
         FilterConfig(photons = (100.0, Inf)),
         FrameConnectConfig(max_frame_gap = 2);
         camera = cam,
@@ -178,7 +204,7 @@ end
     outdir = mktempdir()
     mt = MultiTargetConfig(
         labels = [:A, :B],
-        steps  = [CrossAlignConfig(align = AlignConfig(method = :fft))],
+        steps = [CrossAlignConfig(align = AlignConfig(method = :fft))],
         outdir = outdir,
     )
     (result, info) = analyze([(images_a, chan_cfg()), (images_b, chan_cfg())], mt)

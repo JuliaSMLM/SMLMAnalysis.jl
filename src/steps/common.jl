@@ -14,7 +14,7 @@ Returns the center of the most populated bin.
 Uses a median-centered range (median ± 3×MAD) to avoid outlier peaks
 at large fitted PSF sigma pulling the mode away from the true peak.
 """
-function _calculate_mode(values::Vector{T}; n_bins=100) where T<:Real
+function _calculate_mode(values::Vector{T}; n_bins = 100) where {T <: Real}
     isempty(values) && return zero(T)
 
     valid = filter(x -> isfinite(x) && x > 0, values)
@@ -29,7 +29,7 @@ function _calculate_mode(values::Vector{T}; n_bins=100) where T<:Real
     hi = med + 3 * mad_val
     lo >= hi && return med
 
-    edges = range(lo, hi, length=n_bins+1)
+    edges = range(lo, hi, length = n_bins + 1)
     counts = zeros(Int, n_bins)
 
     for v in valid
@@ -40,7 +40,7 @@ function _calculate_mode(values::Vector{T}; n_bins=100) where T<:Real
     end
 
     mode_idx = argmax(counts)
-    T((edges[mode_idx] + edges[mode_idx+1]) / 2)
+    return T((edges[mode_idx] + edges[mode_idx + 1]) / 2)
 end
 
 """
@@ -48,13 +48,13 @@ end
 
 Calculate figure size for grid overlay plots based on data aspect ratio.
 """
-function _grid_figure_size(data; n_cols=4, n_rows=3, panel_height=200)
+function _grid_figure_size(data; n_cols = 4, n_rows = 3, panel_height = 200)
     data_height, data_width = size(data, 1), size(data, 2)
     data_aspect = data_width / data_height
     panel_width = round(Int, panel_height * data_aspect)
     fig_width = panel_width * n_cols + 100
     fig_height = panel_height * n_rows + 150
-    (fig_width, fig_height)
+    return (fig_width, fig_height)
 end
 
 """
@@ -68,10 +68,12 @@ shared "boxes on the raw data" diagnostic style — detectfit (`detection_overla
 The box-geometry is passed as plain arrays so non-ROIBatch callers use the identical
 renderer; see the `roi_batch` convenience method below.
 """
-function _save_box_overlay(dir, filename, images, x_corners, y_corners, frame_indices, box_size,
-                           box_colors; title_prefix="Frame", frame_labels=nothing, suptitle=nothing)
+function _save_box_overlay(
+        dir, filename, images, x_corners, y_corners, frame_indices, box_size,
+        box_colors; title_prefix = "Frame", frame_labels = nothing, suptitle = nothing
+    )
     n_frames = size(images, 3)
-    sample = [round(Int, x) for x in range(1, n_frames, length=min(12, n_frames))]
+    sample = [round(Int, x) for x in range(1, n_frames, length = min(12, n_frames))]
     display_labels = frame_labels !== nothing ? frame_labels : sample
 
     # Contrast stretch: dark background, spot cores retain structure
@@ -80,30 +82,32 @@ function _save_box_overlay(dir, filename, images, x_corners, y_corners, frame_in
     pmin = Float64(quantile(sample_data, 0.25))    # Below background -> solid black
     pmax = Float64(quantile(sample_data, 0.9995))  # Above most spot peaks -> preserve core detail
 
-    fig = Figure(size=_grid_figure_size(images))
+    fig = Figure(size = _grid_figure_size(images))
     if suptitle !== nothing
-        Label(fig[0, 1:4], suptitle, fontsize=11)
+        Label(fig[0, 1:4], suptitle, fontsize = 11)
     end
 
     for (idx, frame_num) in enumerate(sample)
         row = div(idx - 1, 4) + 1
         col = mod(idx - 1, 4) + 1
 
-        ax = Axis(fig[row, col], title="$title_prefix $(display_labels[idx])", aspect=DataAspect(), yreversed=true)
-        heatmap!(ax, images[:, :, frame_num]', colormap=:grays, colorrange=(pmin, pmax))
+        ax = Axis(fig[row, col], title = "$title_prefix $(display_labels[idx])", aspect = DataAspect(), yreversed = true)
+        heatmap!(ax, images[:, :, frame_num]', colormap = :grays, colorrange = (pmin, pmax))
 
         frame_mask = frame_indices .== frame_num
         if any(frame_mask)
             for (x, y, c) in zip(x_corners[frame_mask], y_corners[frame_mask], box_colors[frame_mask])
-                lines!(ax, [x, x+box_size, x+box_size, x, x],
-                          [y, y, y+box_size, y+box_size, y],
-                    color=c, linewidth=0.5)
+                lines!(
+                    ax, [x, x + box_size, x + box_size, x, x],
+                    [y, y, y + box_size, y + box_size, y],
+                    color = c, linewidth = 0.5
+                )
             end
         end
         hidedecorations!(ax)
     end
 
-    save(joinpath(dir, filename), fig)
+    return save(joinpath(dir, filename), fig)
 end
 
 """
@@ -113,8 +117,10 @@ ROIBatch convenience (detectfit/filter): unpack `x_corners`/`y_corners`/`frame_i
 and delegate to the core renderer above. Behavior unchanged for existing callers.
 """
 function _save_box_overlay(dir, filename, images, roi_batch, box_colors; kwargs...)
-    _save_box_overlay(dir, filename, images, roi_batch.x_corners, roi_batch.y_corners,
-                      roi_batch.frame_indices, roi_batch.roi_size, box_colors; kwargs...)
+    return _save_box_overlay(
+        dir, filename, images, roi_batch.x_corners, roi_batch.y_corners,
+        roi_batch.frame_indices, roi_batch.roi_size, box_colors; kwargs...
+    )
 end
 
 """
@@ -140,7 +146,7 @@ function _estimate_bleaching_rate(frame_counts::Vector{Int})
 
     window = min(50, length(valid_counts) ÷ 10)
     if window > 1
-        smoothed = [mean(valid_counts[max(1, i-window):min(end, i+window)]) for i in 1:length(valid_counts)]
+        smoothed = [mean(valid_counts[max(1, i - window):min(end, i + window)]) for i in 1:length(valid_counts)]
     else
         smoothed = Float64.(valid_counts)
     end
@@ -162,7 +168,7 @@ function _estimate_bleaching_rate(frame_counts::Vector{Int})
     sum_xy = sum(x_lin .* y_lin)
     sum_x2 = sum(x_lin .^ 2)
     denom = n * sum_x2 - sum_x^2
-    abs(denom) < 1e-10 && return nothing
+    abs(denom) < 1.0e-10 && return nothing
 
     slope = (n * sum_xy - sum_x * sum_y) / denom
     intercept = (sum_y - slope * sum_x) / n
@@ -179,11 +185,13 @@ function _estimate_bleaching_rate(frame_counts::Vector{Int})
         a, b, k = p
         (k <= 0 || a < 0 || b < 0) && return Inf
         pred = a .+ b .* exp.(-k .* t)
-        sum((smoothed .- pred) .^ 2)
+        return sum((smoothed .- pred) .^ 2)
     end
 
-    result = Optim.optimize(cost, [a0, b0, k0], Optim.NelderMead(),
-                            Optim.Options(iterations=5000, g_tol=1e-8))
+    result = Optim.optimize(
+        cost, [a0, b0, k0], Optim.NelderMead(),
+        Optim.Options(iterations = 5000, g_tol = 1.0e-8)
+    )
 
     a_fit, b_fit, k_fit = Optim.minimizer(result)
     (k_fit <= 0 || a_fit < 0 || b_fit < 0) && return nothing
@@ -202,8 +210,10 @@ function _estimate_bleaching_rate(frame_counts::Vector{Int})
     ss_tot = sum((smoothed .- mean(smoothed)) .^ 2)
     r_squared = ss_tot > 0 ? 1 - ss_res / ss_tot : 0.0
 
-    (k_bleach=k_fit, N_0=b_fit, offset=a_fit, half_life=half_life, r_squared=r_squared,
-     valid_frames=valid_frames, smoothed=smoothed)
+    return (
+        k_bleach = k_fit, N_0 = b_fit, offset = a_fit, half_life = half_life, r_squared = r_squared,
+        valid_frames = valid_frames, smoothed = smoothed,
+    )
 end
 
 """
@@ -215,9 +225,11 @@ multi-dataset SMLDs.
 
 Used by detectfit (raw fits) and filter (post-filter fits) steps.
 """
-function _save_loc_per_frame(dir::String, smld::BasicSMLD;
-                              filename::String="localizations_per_frame.png",
-                              title::String="Localizations per Frame")
+function _save_loc_per_frame(
+        dir::String, smld::BasicSMLD;
+        filename::String = "localizations_per_frame.png",
+        title::String = "Localizations per Frame"
+    )
     emitters = smld.emitters
     isempty(emitters) && return nothing
 
@@ -233,34 +245,40 @@ function _save_loc_per_frame(dir::String, smld::BasicSMLD;
 
     bleach_result = _estimate_bleaching_rate(frame_counts)
 
-    fig = Figure(size=(900, 400))
-    ax = Axis(fig[1, 1], xlabel="Absolute Frame", ylabel="Localizations", title=title)
-    lines!(ax, 1:n_total, frame_counts, color=(:blue, 0.5), linewidth=0.5, label="Raw")
+    fig = Figure(size = (900, 400))
+    ax = Axis(fig[1, 1], xlabel = "Absolute Frame", ylabel = "Localizations", title = title)
+    lines!(ax, 1:n_total, frame_counts, color = (:blue, 0.5), linewidth = 0.5, label = "Raw")
 
     if bleach_result !== nothing
-        lines!(ax, bleach_result.valid_frames, bleach_result.smoothed,
-               color=:blue, linewidth=1.5, label="Smoothed")
+        lines!(
+            ax, bleach_result.valid_frames, bleach_result.smoothed,
+            color = :blue, linewidth = 1.5, label = "Smoothed"
+        )
 
-        k = round(bleach_result.k_bleach, sigdigits=3)
-        tau = round(bleach_result.half_life, digits=0)
+        k = round(bleach_result.k_bleach, sigdigits = 3)
+        tau = round(bleach_result.half_life, digits = 0)
         a = round(Int, bleach_result.offset)
-        R2 = round(bleach_result.r_squared, digits=3)
+        R2 = round(bleach_result.r_squared, digits = 3)
         fit_frames = 1:n_total
         fit_counts = bleach_result.N_0 .* exp.(-bleach_result.k_bleach .* fit_frames) .+ bleach_result.offset
-        lines!(ax, fit_frames, fit_counts, color=:red, linewidth=2, linestyle=:dash,
-               label="Fit: k=$k/frame, t1/2=$(Int(tau)), a=$a, R^2=$R2")
+        lines!(
+            ax, fit_frames, fit_counts, color = :red, linewidth = 2, linestyle = :dash,
+            label = "Fit: k=$k/frame, t1/2=$(Int(tau)), a=$a, R^2=$R2"
+        )
 
-        hlines!(ax, [bleach_result.offset], color=(:red, 0.3), linestyle=:dot, linewidth=1)
+        hlines!(ax, [bleach_result.offset], color = (:red, 0.3), linestyle = :dot, linewidth = 1)
     else
-        hlines!(ax, [mean(frame_counts)], color=:red, linestyle=:dash,
-                label="mean ($(round(mean(frame_counts), digits=1)))")
+        hlines!(
+            ax, [mean(frame_counts)], color = :red, linestyle = :dash,
+            label = "mean ($(round(mean(frame_counts), digits = 1)))"
+        )
     end
 
-    axislegend(ax, position=:rt, framevisible=false, labelsize=10)
+    axislegend(ax, position = :rt, framevisible = false, labelsize = 10)
 
     if smld.n_datasets > 1
         for ds in 2:smld.n_datasets
-            vlines!(ax, [(ds - 1) * n_frames + 0.5], color=(:gray, 0.5), linestyle=:dash)
+            vlines!(ax, [(ds - 1) * n_frames + 0.5], color = (:gray, 0.5), linestyle = :dash)
         end
     end
 
@@ -282,20 +300,20 @@ Returns `(plan, abs_frames)`:
 - `plan::Dict{Int, Vector{Int}}`: dataset index → local frame indices to capture
 - `abs_frames::Vector{Int}`: absolute frame numbers for display labels (in order)
 """
-function _plan_sample_frames(ds_frame_counts::Vector{Int}, n_samples::Int=12)
+function _plan_sample_frames(ds_frame_counts::Vector{Int}, n_samples::Int = 12)
     total = sum(ds_frame_counts)
-    total == 0 && return Dict{Int,Vector{Int}}(), Int[]
+    total == 0 && return Dict{Int, Vector{Int}}(), Int[]
 
     n = min(n_samples, total)
-    abs_targets = unique([round(Int, x) for x in range(1, total, length=n)])
+    abs_targets = unique([round(Int, x) for x in range(1, total, length = n)])
 
     cumulative = cumsum(ds_frame_counts)
-    plan = Dict{Int,Vector{Int}}()
+    plan = Dict{Int, Vector{Int}}()
     abs_frames = Int[]
 
     for abs_frame in abs_targets
         ds = findfirst(c -> abs_frame <= c, cumulative)
-        local_frame = ds == 1 ? abs_frame : abs_frame - cumulative[ds-1]
+        local_frame = ds == 1 ? abs_frame : abs_frame - cumulative[ds - 1]
         if !haskey(plan, ds)
             plan[ds] = Int[]
         end
@@ -303,7 +321,7 @@ function _plan_sample_frames(ds_frame_counts::Vector{Int}, n_samples::Int=12)
         push!(abs_frames, abs_frame)
     end
 
-    (plan, abs_frames)
+    return (plan, abs_frames)
 end
 
 # ============================================================
@@ -316,15 +334,15 @@ end
 Compute output directory for a step: `outdir/02_filter/`.
 Returns nothing if outdir is nothing.
 """
-function step_outdir(outdir::Union{String,Nothing}, step_number::Int, cfg::SMLMData.AbstractSMLMConfig)
+function step_outdir(outdir::Union{String, Nothing}, step_number::Int, cfg::SMLMData.AbstractSMLMConfig)
     outdir === nothing && return nothing
-    joinpath(outdir, "$(lpad(step_number, 2, '0'))_$(step_name(cfg))")
+    return joinpath(outdir, "$(lpad(step_number, 2, '0'))_$(step_name(cfg))")
 end
 
 """Save step config to `config.toml` in the step output directory."""
 function _save_config!(dir::String, cfg::SMLMData.AbstractSMLMConfig)
     filepath = joinpath(dir, "config.toml")
-    open(filepath, "w") do io
+    return open(filepath, "w") do io
         println(io, "# $(nameof(typeof(cfg)))")
         println(io, "type = \"$(nameof(typeof(cfg)))\"")
         _write_config_fields!(io, cfg)
@@ -359,12 +377,14 @@ function _toml_value(v)::String
     if v isa AbstractString
         # Multi-pair `replace` matches simultaneously (each source char examined once),
         # so backslash-escaping doesn't re-escape the backslashes it introduces.
-        s = replace(String(v),
-                    "\\" => "\\\\",
-                    "\"" => "\\\"",
-                    "\n" => "\\n",
-                    "\t" => "\\t",
-                    "\r" => "\\r")
+        s = replace(
+            String(v),
+            "\\" => "\\\\",
+            "\"" => "\\\"",
+            "\n" => "\\n",
+            "\t" => "\\t",
+            "\r" => "\\r"
+        )
         return "\"" * s * "\""
     elseif v isa Symbol
         return _toml_value(String(v))
@@ -398,7 +418,7 @@ file, needs it.
 # field names like `σ_loc`) must be written as a quoted key or the file won't parse.
 _toml_key(k) = (s = string(k); occursin(r"^[A-Za-z0-9_-]+$", s) ? s : "\"" * escape_string(s) * "\"")
 
-function _write_config_fields!(io::IO, cfg; section::String="", table_prefix::String="")
+function _write_config_fields!(io::IO, cfg; section::String = "", table_prefix::String = "")
     for f in fieldnames(typeof(cfg))
         v = getfield(cfg, f)
         v isa SMLMData.AbstractCamera && continue
@@ -411,13 +431,14 @@ function _write_config_fields!(io::IO, cfg; section::String="", table_prefix::St
             path = section == "" ? [string(f)] : [split(section, '.')..., string(f)]
             println(io, "\n[$(table_prefix)$(join(_toml_key.(path), '.'))]")
             println(io, "type = \"$(nameof(typeof(v)))\"")
-            _write_config_fields!(io, v; section=key, table_prefix=table_prefix)
+            _write_config_fields!(io, v; section = key, table_prefix = table_prefix)
         else
             # Every scalar value goes through _toml_value for valid TOML
             # (escaped strings, tuple/range/vector arrays, inf/nan floats).
             println(io, "$(_toml_key(f)) = $(_toml_value(v))")
         end
     end
+    return
 end
 
 """
@@ -432,9 +453,9 @@ are `nothing` (the key is absent, matching `config.toml`).
 When `section` is empty, writes a fresh file with type header.
 When `section` is provided, appends a `[section]` block.
 """
-function _save_info!(dir::String, info; section::String="")
+function _save_info!(dir::String, info; section::String = "")
     filepath = joinpath(dir, "info.toml")
-    open(filepath, section == "" ? "w" : "a") do io
+    return open(filepath, section == "" ? "w" : "a") do io
         if section == ""
             println(io, "# Upstream package info")
             println(io, "type = \"$(nameof(typeof(info)))\"")
@@ -452,13 +473,13 @@ end
 function _write_info_field!(io::IO, name::Symbol, v::Number)
     # Bool <: Number, so this method also handles true/false. _toml_value maps
     # Inf/NaN floats to TOML inf/nan (a raw `Inf` would otherwise be invalid TOML).
-    println(io, "$(_toml_key(name)) = $(_toml_value(v))")
+    return println(io, "$(_toml_key(name)) = $(_toml_value(v))")
 end
 function _write_info_field!(io::IO, name::Symbol, v::String)
-    println(io, "$(_toml_key(name)) = $(_toml_value(v))")
+    return println(io, "$(_toml_key(name)) = $(_toml_value(v))")
 end
 function _write_info_field!(io::IO, name::Symbol, v::Symbol)
-    println(io, "$(_toml_key(name)) = $(_toml_value(v))")
+    return println(io, "$(_toml_key(name)) = $(_toml_value(v))")
 end
 function _write_info_field!(io::IO, ::Symbol, ::Nothing)
     # Omit the key entirely, exactly as the config writer does for `nothing` fields.
@@ -467,7 +488,7 @@ function _write_info_field!(io::IO, ::Symbol, ::Nothing)
 end
 function _write_info_field!(io::IO, name::Symbol, v::Tuple)
     # Only write tuples of scalars; _toml_value escapes/renders each element as valid TOML.
-    if all(x -> x isa Union{Number, Bool, String, Symbol}, v)
+    return if all(x -> x isa Union{Number, Bool, String, Symbol}, v)
         println(io, "$(_toml_key(name)) = $(_toml_value(v))")
     end
     # Skip tuples containing complex types
@@ -497,9 +518,11 @@ drift model is stored as its coefficients and comes back from `load_smld` as a
 
 No-op if `dir` is nothing.
 """
-function _save_step_smld(dir::Union{String,Nothing}, smld::BasicSMLD;
-                          filename::String="smld.h5",
-                          kwargs...)
+function _save_step_smld(
+        dir::Union{String, Nothing}, smld::BasicSMLD;
+        filename::String = "smld.h5",
+        kwargs...
+    )
     dir === nothing && return nothing
     mkpath(dir)   # ensure the step dir exists (some steps gate their own mkpath behind verbosity)
     path = joinpath(dir, filename)
@@ -516,14 +539,14 @@ end
 
 Returns `joinpath(outdir, ".cache")` or nothing if outdir is nothing.
 """
-cache_dir(outdir::Union{String,Nothing}) = outdir === nothing ? nothing : joinpath(outdir, ".cache")
+cache_dir(outdir::Union{String, Nothing}) = outdir === nothing ? nothing : joinpath(outdir, ".cache")
 
 """
     save_cache(outdir, filename; kwargs...)
 
 Save data to `outdir/.cache/filename` via JLD2. No-op if outdir is nothing.
 """
-function save_cache(outdir::Union{String,Nothing}, filename::String; kwargs...)
+function save_cache(outdir::Union{String, Nothing}, filename::String; kwargs...)
     outdir === nothing && return nothing
     dir = cache_dir(outdir)
     mkpath(dir)
@@ -537,11 +560,11 @@ end
 
 Load data from `outdir/.cache/filename` via JLD2. Returns nothing if missing or outdir is nothing.
 """
-function load_cache(outdir::Union{String,Nothing}, filename::String)
+function load_cache(outdir::Union{String, Nothing}, filename::String)
     outdir === nothing && return nothing
     dir = cache_dir(outdir)
     dir === nothing && return nothing
     path = joinpath(dir, filename)
     isfile(path) || return nothing
-    JLD2.load(path)
+    return JLD2.load(path)
 end

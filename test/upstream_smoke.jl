@@ -16,16 +16,24 @@ using Statistics
     Random.seed!(1)
     cam = IdealCamera(32, 32, 0.1)
     sim = SMLMAnalysis.StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 2)
-    (_, si) = SMLMAnalysis.simulate(sim;
-        pattern  = SMLMAnalysis.Nmer2D(n = 8, d = 0.05),
+    (_, si) = SMLMAnalysis.simulate(
+        sim;
+        pattern = SMLMAnalysis.Nmer2D(n = 8, d = 0.05),
         molecule = SMLMAnalysis.GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
-        camera   = cam)
-    images = [SMLMAnalysis.gen_images(si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
-                          dataset = d, bg = 20.0, poisson_noise = true)[1] for d in 1:2]
+        camera = cam
+    )
+    images = [
+        SMLMAnalysis.gen_images(
+            si.smld_model, SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13);
+            dataset = d, bg = 20.0, poisson_noise = true
+        )[1] for d in 1:2
+    ]
 
     cfg = AnalysisConfig(
-        DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
-                        fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)),
+        DetectFitConfig(
+            boxer = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
+            fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)
+        ),
         FilterConfig(photons = (100.0, Inf)),
         FrameConnectConfig(max_frame_gap = 2),
         DriftConfig(degree = 1),
@@ -34,7 +42,7 @@ using Statistics
         outdir = mktempdir(),
     )
     t = @elapsed (result, info) = analyze(images, cfg)
-    @info "upstream API smoke (tiny data) wall time" seconds=t
+    @info "upstream API smoke (tiny data) wall time" seconds = t
 
     @test result isa SMLMAnalysis.AnalysisResult
     @test length(result.smld.emitters) >= 1
