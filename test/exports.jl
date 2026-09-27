@@ -38,6 +38,7 @@ end
         :IdealCamera, :SCMOSCamera,
         :save_smld, :load_smld, :smld_info, :load_smart_h5, :load_smart_h5_info,
         :smart_h5_to_array, :load_mic_h5, :load_mic_h5_info, :load_mic_h5_block,
+        :load_mic_h5_calibration, :load_mic_h5_calibration_for_scmos,
         :build_camera_from_mic_h5,
         :install_agent_guide, :uninstall_agent_guide, :agent_guide_status,
     ]

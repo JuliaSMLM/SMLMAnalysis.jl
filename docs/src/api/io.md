@@ -41,6 +41,8 @@ smart_h5_to_array
 load_mic_h5
 load_mic_h5_info
 load_mic_h5_block
+load_mic_h5_calibration
+load_mic_h5_calibration_for_scmos
 build_camera_from_mic_h5
 ```
 
