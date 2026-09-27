@@ -101,17 +101,30 @@ function _warn_unequal_frame_counts(frames_per_dataset::Vector{Int}, verbose::In
 end
 
 """
+Fields whose value must be finite for an emitter to survive `_drop_nonfinite_emitters`
+(checked only if the concrete emitter type has that field). These are the
+localization's actual fit result and its own uncertainty. NOT checked, deliberately:
+`pvalue`, `σ_photons`, `σ_bg`, `σ_σ`, `σ_σx`, `σ_σy` — these are diagnostics, not the
+fit itself, and a NaN `pvalue` is already rejected by the optional FilterConfig
+`pvalue` range where that matters.
+"""
+const _NONFINITE_CHECK_FIELDS = (
+    :x, :y, :z, :photons, :bg, :σ_x, :σ_y, :σ_z, :σ_xy, :σ_xz, :σ_yz, :σ, :σx, :σy,
+)
+
+"""
     _drop_nonfinite_emitters(emitters) -> (kept, n_dropped)
 
-Drop every emitter with a non-finite value (NaN/Inf) in any of its `AbstractFloat`
-fields (x, y, photons, bg, σ_x, σ_y, ...). GaussMLE can produce non-finite fit
-results on an ill-conditioned ROI; keeping them poisons every downstream step that
-assumes finite floats (rendering, filtering, drift correction).
+Drop every emitter with a non-finite value (NaN/Inf) in any of `_NONFINITE_CHECK_FIELDS`
+that its concrete type has. GaussMLE can produce non-finite fit results on an
+ill-conditioned ROI; keeping them poisons every downstream step that assumes finite
+floats (rendering, filtering, drift correction). Checking a fixed tuple of field names
+via `hasfield`/`getfield` (rather than looping over `fieldnames(typeof(e))` and testing
+`isa AbstractFloat`) lets this constant-fold per concrete emitter type.
 """
 function _drop_nonfinite_emitters(emitters::AbstractVector)
-    isfinite_emitter(e) = all(fieldnames(typeof(e))) do f
-        val = getfield(e, f)
-        !(val isa AbstractFloat) || isfinite(val)
+    isfinite_emitter(e) = all(_NONFINITE_CHECK_FIELDS) do f
+        !hasfield(typeof(e), f) || isfinite(getfield(e, f))
     end
     kept = filter(isfinite_emitter, emitters)
     return kept, length(emitters) - length(kept)
