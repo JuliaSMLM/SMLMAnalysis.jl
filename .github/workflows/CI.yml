@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   ci:
-    uses: LidkeLab/.github/.github/workflows/julia-ci.yml@v1
+    uses: LidkeLab/.github/.github/workflows/julia-ci.yml@v2
     with:
       registered: true
       runic: true
