@@ -7,9 +7,6 @@
 # - Emitter2DFitSigma (GaussMLE: isotropic fitted σ)
 # - Emitter2DFitSigmaXY (GaussMLE: anisotropic fitted σx, σy)
 
-using HDF5
-using Dates
-
 const SMLD_FORMAT_VERSION = "1.3"  # v1.3: polygon / CellPolygon user metadata (edge-classify geometry); v1.2: Added σ_xy position covariance (round-trips Emitter2DFit/Sigma/SigmaXY); v1.1: PSF width fields
 
 # Version stamped into saved files ("unknown" if the module has no project version)
@@ -54,10 +51,12 @@ Supports all emitter types including GaussMLE types with fitted PSF widths:
 save_smld("results.h5", smld; source_file="/data/experiment.h5", drift_model=dm)
 ```
 """
-function save_smld(filepath::String, smld::BasicSMLD{T,E};
-                   source_file::Union{String,Nothing}=nothing,
-                   drift_model=nothing,
-                   compression::Int=3) where {T,E}
+function save_smld(
+        filepath::String, smld::BasicSMLD{T, E};
+        source_file::Union{String, Nothing} = nothing,
+        drift_model = nothing,
+        compression::Int = 3
+    ) where {T, E}
 
     n = length(smld.emitters)
     # Derive type + dimensionality from the concrete first emitter, not the SMLD's E
@@ -113,45 +112,45 @@ function save_smld(filepath::String, smld::BasicSMLD{T,E};
                 id = Int32[e.id for e in smld.emitters]
 
                 # Write core fields
-                em["x", compress=compression] = x
-                em["y", compress=compression] = y
-                em["photons", compress=compression] = photons
-                em["bg", compress=compression] = bg
-                em["sigma_x", compress=compression] = σ_x
-                em["sigma_y", compress=compression] = σ_y
-                em["sigma_photons", compress=compression] = σ_photons
-                em["sigma_bg", compress=compression] = σ_bg
-                em["frame", compress=compression] = frame
-                em["dataset", compress=compression] = dataset
-                em["track_id", compress=compression] = track_id
-                em["id", compress=compression] = id
+                em["x", compress = compression] = x
+                em["y", compress = compression] = y
+                em["photons", compress = compression] = photons
+                em["bg", compress = compression] = bg
+                em["sigma_x", compress = compression] = σ_x
+                em["sigma_y", compress = compression] = σ_y
+                em["sigma_photons", compress = compression] = σ_photons
+                em["sigma_bg", compress = compression] = σ_bg
+                em["frame", compress = compression] = frame
+                em["dataset", compress = compression] = dataset
+                em["track_id", compress = compression] = track_id
+                em["id", compress = compression] = id
 
                 # Position covariance σ_xy (present on Emitter2DFit / Emitter2DFitSigma / SigmaXY)
                 if hasproperty(smld.emitters[1], :σ_xy)
-                    em["sigma_xy", compress=compression] = [e.σ_xy for e in smld.emitters]
+                    em["sigma_xy", compress = compression] = [e.σ_xy for e in smld.emitters]
                 end
 
                 # 3D fields
                 if is_3d
                     z = [e.z for e in smld.emitters]
                     σ_z = [e.σ_z for e in smld.emitters]
-                    em["z", compress=compression] = z
-                    em["sigma_z", compress=compression] = σ_z
+                    em["z", compress = compression] = z
+                    em["sigma_z", compress = compression] = σ_z
                     # Off-diagonal position covariances (present on 3D fit types)
                     if hasproperty(smld.emitters[1], :σ_xz)
-                        em["sigma_xz", compress=compression] = [e.σ_xz for e in smld.emitters]
-                        em["sigma_yz", compress=compression] = [e.σ_yz for e in smld.emitters]
+                        em["sigma_xz", compress = compression] = [e.σ_xz for e in smld.emitters]
+                        em["sigma_yz", compress = compression] = [e.σ_yz for e in smld.emitters]
                     end
                 end
 
                 # GaussMLE Emitter2DFitSigma fields (isotropic PSF)
                 if has_sigma
                     psf_sigma = [e.σ for e in smld.emitters]
-                    em["psf_sigma", compress=compression] = psf_sigma
+                    em["psf_sigma", compress = compression] = psf_sigma
 
                     if hasproperty(smld.emitters[1], :σ_σ)
                         σ_sigma = [e.σ_σ for e in smld.emitters]
-                        em["sigma_psf_sigma", compress=compression] = σ_sigma
+                        em["sigma_psf_sigma", compress = compression] = σ_sigma
                     end
                 end
 
@@ -159,21 +158,21 @@ function save_smld(filepath::String, smld::BasicSMLD{T,E};
                 if has_sigma_xy
                     psf_sigma_x = [e.σx for e in smld.emitters]
                     psf_sigma_y = [e.σy for e in smld.emitters]
-                    em["psf_sigma_x", compress=compression] = psf_sigma_x
-                    em["psf_sigma_y", compress=compression] = psf_sigma_y
+                    em["psf_sigma_x", compress = compression] = psf_sigma_x
+                    em["psf_sigma_y", compress = compression] = psf_sigma_y
 
                     if hasproperty(smld.emitters[1], :σ_σx)
                         σ_sigma_x = [e.σ_σx for e in smld.emitters]
                         σ_sigma_y = [e.σ_σy for e in smld.emitters]
-                        em["sigma_psf_sigma_x", compress=compression] = σ_sigma_x
-                        em["sigma_psf_sigma_y", compress=compression] = σ_sigma_y
+                        em["sigma_psf_sigma_x", compress = compression] = σ_sigma_x
+                        em["sigma_psf_sigma_y", compress = compression] = σ_sigma_y
                     end
                 end
 
                 # p-value (GaussMLE emitters)
                 if has_pvalue
                     pvalue = [e.pvalue for e in smld.emitters]
-                    em["pvalue", compress=compression] = pvalue
+                    em["pvalue", compress = compression] = pvalue
                 end
             end
 
@@ -182,28 +181,28 @@ function save_smld(filepath::String, smld::BasicSMLD{T,E};
             camera = smld.camera
 
             cam["type"] = camera isa IdealCamera ? "IdealCamera" : "SCMOSCamera"
-            cam["pixel_edges_x", compress=compression] = collect(camera.pixel_edges_x)
-            cam["pixel_edges_y", compress=compression] = collect(camera.pixel_edges_y)
+            cam["pixel_edges_x", compress = compression] = collect(camera.pixel_edges_x)
+            cam["pixel_edges_y", compress = compression] = collect(camera.pixel_edges_y)
 
             if camera isa SCMOSCamera
                 # Store calibration data (handle scalars vs arrays)
                 if camera.offset isa AbstractArray
-                    cam["offset", compress=compression] = collect(camera.offset)
+                    cam["offset", compress = compression] = collect(camera.offset)
                 else
                     cam["offset"] = camera.offset
                 end
                 if camera.gain isa AbstractArray
-                    cam["gain", compress=compression] = collect(camera.gain)
+                    cam["gain", compress = compression] = collect(camera.gain)
                 else
                     cam["gain"] = camera.gain
                 end
                 if camera.readnoise isa AbstractArray
-                    cam["readnoise", compress=compression] = collect(camera.readnoise)
+                    cam["readnoise", compress = compression] = collect(camera.readnoise)
                 else
                     cam["readnoise"] = camera.readnoise
                 end
                 if camera.qe isa AbstractArray
-                    cam["qe", compress=compression] = collect(camera.qe)
+                    cam["qe", compress = compression] = collect(camera.qe)
                 else
                     cam["qe"] = camera.qe
                 end
@@ -225,18 +224,18 @@ function save_smld(filepath::String, smld::BasicSMLD{T,E};
             if !isempty(smld.metadata)
                 user_meta = create_group(fid, "user_metadata")
                 for (key, value) in smld.metadata
-                    if value isa AbstractVector{NTuple{2,Float64}}
+                    if value isa AbstractVector{NTuple{2, Float64}}
                         _write_polygon!(user_meta, key, value)
                     elseif value isa AbstractVector{SMLMClustering.CellPolygon}
                         _write_cellpolygons!(user_meta, key, value)
                     elseif value isa Union{String, Number, AbstractArray{<:Number}} ||
-                       value isa AbstractArray{<:String}
+                            value isa AbstractArray{<:String}
                         towrite = value isa AbstractArray{<:String} ? collect(value) : value
                         try
                             user_meta[key] = towrite
                         catch err
                             err isa InterruptException && rethrow()
-                            @warn "save_smld: dropping user metadata key \"$key\" — HDF5 write failed" exception=err
+                            @warn "save_smld: dropping user metadata key \"$key\" — HDF5 write failed" exception = err
                         end
                     else
                         # Unsupported type: warn rather than silently drop, so the loss is visible.
@@ -259,7 +258,7 @@ function _save_drift_model!(group, dm, compression::Int)
     group["model_type"] = string(typeof(dm).name.name)
 
     # Check for LegendrePolynomial-like structure
-    if hasproperty(dm, :ndatasets) && hasproperty(dm, :intra) && hasproperty(dm, :inter)
+    return if hasproperty(dm, :ndatasets) && hasproperty(dm, :intra) && hasproperty(dm, :inter)
         group["ndatasets"] = dm.ndatasets
 
         # Get parameters from first intra model
@@ -283,7 +282,7 @@ function _save_drift_model!(group, dm, compression::Int)
                 intra_coeffs[d, dim, :] = dm.intra[d].dm[dim].coefficients
             end
         end
-        group["intra_coefficients", compress=compression] = intra_coeffs
+        group["intra_coefficients", compress = compression] = intra_coeffs
 
         # Store inter shifts: (ndatasets, ndims)
         inter_shifts = zeros(ndatasets, ndims)
@@ -292,7 +291,7 @@ function _save_drift_model!(group, dm, compression::Int)
                 inter_shifts[d, dim] = dm.inter[d].dm[dim]
             end
         end
-        group["inter_shifts", compress=compression] = inter_shifts
+        group["inter_shifts", compress = compression] = inter_shifts
     end
 end
 
@@ -305,12 +304,12 @@ end
 #                    `hole_offsets` (n_holes+1, 0-based), and `hole_cell` (n_holes, 1-based)
 # ------------------------------------------------------------
 _polygon_matrix(p) = Float64[v[j] for v in p, j in 1:2]
-_matrix_polygon(m::AbstractMatrix) = NTuple{2,Float64}[(Float64(m[i, 1]), Float64(m[i, 2])) for i in axes(m, 1)]
+_matrix_polygon(m::AbstractMatrix) = NTuple{2, Float64}[(Float64(m[i, 1]), Float64(m[i, 2])) for i in axes(m, 1)]
 _offsets(lengths) = cumsum(vcat(0, collect(Int, lengths)))
 
 function _write_polygon!(parent, key::String, poly)
     parent[key] = _polygon_matrix(poly)
-    HDF5.attributes(parent[key])["kind"] = "polygon"
+    return HDF5.attributes(parent[key])["kind"] = "polygon"
 end
 
 function _write_cellpolygons!(parent, key::String, cells)
@@ -321,7 +320,7 @@ function _write_cellpolygons!(parent, key::String, cells)
     g["outer_offsets"] = _offsets(length(c.outer) for c in cells)
     g["hole_vertices"] = _polygon_matrix([v for h in holes for v in h])
     g["hole_offsets"] = _offsets(length(h) for h in holes)
-    g["hole_cell"] = Int[i for (i, c) in enumerate(cells) for _ in c.holes]
+    return g["hole_cell"] = Int[i for (i, c) in enumerate(cells) for _ in c.holes]
 end
 
 function _read_cellpolygons(g)
@@ -330,10 +329,12 @@ function _read_cellpolygons(g)
     hv = _matrix_polygon(read(g["hole_vertices"]))
     ho = read(g["hole_offsets"])
     hc = read(g["hole_cell"])
-    cells = [SMLMClustering.CellPolygon(outer[oo[i]+1:oo[i+1]], Vector{NTuple{2,Float64}}[])
-             for i in 1:length(oo)-1]
+    cells = [
+        SMLMClustering.CellPolygon(outer[(oo[i] + 1):oo[i + 1]], Vector{NTuple{2, Float64}}[])
+            for i in 1:(length(oo) - 1)
+    ]
     for k in eachindex(hc)
-        push!(cells[hc[k]].holes, hv[ho[k]+1:ho[k+1]])
+        push!(cells[hc[k]].holes, hv[(ho[k] + 1):ho[k + 1]])
     end
     return cells
 end
@@ -359,11 +360,13 @@ function _check_smld_format_version(file_version::AbstractString, filepath::Stri
     fmaj, fmin = _parse_version_pair(file_version)
     cmaj, cmin = _parse_version_pair(SMLD_FORMAT_VERSION)
     if fmaj != cmaj
-        error("load_smld: \"$filepath\" has format_version $file_version, incompatible with " *
-              "this reader's $SMLD_FORMAT_VERSION (major version differs).")
+        error(
+            "load_smld: \"$filepath\" has format_version $file_version, incompatible with " *
+                "this reader's $SMLD_FORMAT_VERSION (major version differs)."
+        )
     elseif fmin > cmin
         @warn "load_smld: \"$filepath\" format_version $file_version is newer than this " *
-              "reader's $SMLD_FORMAT_VERSION; reading recognized fields and ignoring the rest."
+            "reader's $SMLD_FORMAT_VERSION; reading recognized fields and ignoring the rest."
     end
     return
 end
@@ -385,7 +388,7 @@ smld = load_smld("results.h5")
 ```
 """
 function load_smld(filepath::String)
-    h5open(filepath, "r") do fid
+    return h5open(filepath, "r") do fid
         # Validate schema up front: a friendly error beats a raw KeyError deep in the read.
         haskey(fid, "metadata") || error("load_smld: \"$filepath\" is missing the /metadata group — not an SMLMAnalysis SMLD file?")
         haskey(fid, "emitters") || error("load_smld: \"$filepath\" is missing the /emitters group — not an SMLMAnalysis SMLD file?")
@@ -479,13 +482,15 @@ function load_smld(filepath::String)
             gain = read(cam_grp["gain"])
             readnoise = read(cam_grp["readnoise"])
             qe = read(cam_grp["qe"])
-            camera = SCMOSCamera(pixel_edges_x, pixel_edges_y;
-                                 offset=offset, gain=gain,
-                                 readnoise=readnoise, qe=qe)
+            camera = SCMOSCamera(
+                pixel_edges_x, pixel_edges_y;
+                offset = offset, gain = gain,
+                readnoise = readnoise, qe = qe
+            )
         end
 
         # Build metadata dict
-        metadata = Dict{String,Any}()
+        metadata = Dict{String, Any}()
 
         # Read provenance
         if haskey(fid, "provenance")
@@ -505,7 +510,7 @@ function load_smld(filepath::String)
         # Read drift correction if present
         if haskey(fid, "drift_correction")
             dc = fid["drift_correction"]
-            drift_info = Dict{String,Any}()
+            drift_info = Dict{String, Any}()
             drift_info["model_type"] = read(dc["model_type"])
             if haskey(dc, "degree")
                 drift_info["degree"] = read(dc["degree"])
@@ -540,100 +545,112 @@ end
 Internal: Construct emitters of the appropriate type based on emitter_type_str.
 """
 function _construct_emitters(
-    emitter_type_str::String, T::Type, n::Int, is_3d::Bool,
-    x, y, z, photons, bg,
-    σ_x, σ_y, σ_z, σ_photons, σ_bg, σ_xy, σ_xz, σ_yz,
-    psf_sigma, σ_sigma,
-    psf_sigma_x, psf_sigma_y, σ_sigma_x, σ_sigma_y,
-    pvalue,
-    frame, dataset, track_id, id
-)
+        emitter_type_str::String, T::Type, n::Int, is_3d::Bool,
+        x, y, z, photons, bg,
+        σ_x, σ_y, σ_z, σ_photons, σ_bg, σ_xy, σ_xz, σ_yz,
+        psf_sigma, σ_sigma,
+        psf_sigma_x, psf_sigma_y, σ_sigma_x, σ_sigma_y,
+        pvalue,
+        frame, dataset, track_id, id
+    )
     if emitter_type_str == "Emitter2DFitSigmaXY" && psf_sigma_x !== nothing
         # GaussMLE anisotropic PSF type
         Emitter2DFitSigmaXY = GaussMLE.Emitter2DFitSigmaXY
-        return [Emitter2DFitSigmaXY{T}(
-            T(x[i]), T(y[i]),
-            T(photons[i]), T(bg[i]),
-            T(psf_sigma_x[i]), T(psf_sigma_y[i]),
-            T(σ_x[i]), T(σ_y[i]),
-            σ_xy !== nothing ? T(σ_xy[i]) : T(0),
-            T(σ_photons[i]), T(σ_bg[i]),
-            σ_sigma_x !== nothing ? T(σ_sigma_x[i]) : T(0),
-            σ_sigma_y !== nothing ? T(σ_sigma_y[i]) : T(0),
-            pvalue !== nothing ? T(pvalue[i]) : T(0),
-            Int(frame[i]), Int(dataset[i]), Int(track_id[i]), Int(id[i])
-        ) for i in 1:n]
+        return [
+            Emitter2DFitSigmaXY{T}(
+                T(x[i]), T(y[i]),
+                T(photons[i]), T(bg[i]),
+                T(psf_sigma_x[i]), T(psf_sigma_y[i]),
+                T(σ_x[i]), T(σ_y[i]),
+                σ_xy !== nothing ? T(σ_xy[i]) : T(0),
+                T(σ_photons[i]), T(σ_bg[i]),
+                σ_sigma_x !== nothing ? T(σ_sigma_x[i]) : T(0),
+                σ_sigma_y !== nothing ? T(σ_sigma_y[i]) : T(0),
+                pvalue !== nothing ? T(pvalue[i]) : T(0),
+                Int(frame[i]), Int(dataset[i]), Int(track_id[i]), Int(id[i])
+            ) for i in 1:n
+        ]
 
     elseif emitter_type_str == "Emitter2DFitSigma" && psf_sigma !== nothing
         # GaussMLE isotropic PSF type
         Emitter2DFitSigma = GaussMLE.Emitter2DFitSigma
-        return [Emitter2DFitSigma{T}(
-            T(x[i]), T(y[i]),
-            T(photons[i]), T(bg[i]),
-            T(psf_sigma[i]),
-            T(σ_x[i]), T(σ_y[i]),
-            σ_xy !== nothing ? T(σ_xy[i]) : T(0),
-            T(σ_photons[i]), T(σ_bg[i]),
-            σ_sigma !== nothing ? T(σ_sigma[i]) : T(0),
-            pvalue !== nothing ? T(pvalue[i]) : T(0),
-            Int(frame[i]), Int(dataset[i]), Int(track_id[i]), Int(id[i])
-        ) for i in 1:n]
+        return [
+            Emitter2DFitSigma{T}(
+                T(x[i]), T(y[i]),
+                T(photons[i]), T(bg[i]),
+                T(psf_sigma[i]),
+                T(σ_x[i]), T(σ_y[i]),
+                σ_xy !== nothing ? T(σ_xy[i]) : T(0),
+                T(σ_photons[i]), T(σ_bg[i]),
+                σ_sigma !== nothing ? T(σ_sigma[i]) : T(0),
+                pvalue !== nothing ? T(pvalue[i]) : T(0),
+                Int(frame[i]), Int(dataset[i]), Int(track_id[i]), Int(id[i])
+            ) for i in 1:n
+        ]
 
     elseif emitter_type_str == "Emitter2DFitGaussMLE"
         # GaussMLE fixed-width 2D type (GaussianXYNB)
         Emitter2DFitGaussMLE = GaussMLE.Emitter2DFitGaussMLE
-        return [Emitter2DFitGaussMLE{T}(
-            T(x[i]), T(y[i]), T(photons[i]), T(bg[i]),
-            T(σ_x[i]), T(σ_y[i]),
-            σ_xy !== nothing ? T(σ_xy[i]) : T(0),
-            T(σ_photons[i]), T(σ_bg[i]),
-            pvalue !== nothing ? T(pvalue[i]) : T(0),
-            Int(frame[i]), Int(dataset[i]), Int(track_id[i]), Int(id[i])
-        ) for i in 1:n]
+        return [
+            Emitter2DFitGaussMLE{T}(
+                T(x[i]), T(y[i]), T(photons[i]), T(bg[i]),
+                T(σ_x[i]), T(σ_y[i]),
+                σ_xy !== nothing ? T(σ_xy[i]) : T(0),
+                T(σ_photons[i]), T(σ_bg[i]),
+                pvalue !== nothing ? T(pvalue[i]) : T(0),
+                Int(frame[i]), Int(dataset[i]), Int(track_id[i]), Int(id[i])
+            ) for i in 1:n
+        ]
 
     elseif emitter_type_str == "Emitter3DFitGaussMLE"
         # GaussMLE astigmatic 3D type (AstigmaticXYZNB)
         Emitter3DFitGaussMLE = GaussMLE.Emitter3DFitGaussMLE
-        return [Emitter3DFitGaussMLE{T}(
-            T(x[i]), T(y[i]), T(z[i]), T(photons[i]), T(bg[i]),
-            T(σ_x[i]), T(σ_y[i]), T(σ_z[i]),
-            σ_xy !== nothing ? T(σ_xy[i]) : T(0),
-            σ_xz !== nothing ? T(σ_xz[i]) : T(0),
-            σ_yz !== nothing ? T(σ_yz[i]) : T(0),
-            T(σ_photons[i]), T(σ_bg[i]),
-            pvalue !== nothing ? T(pvalue[i]) : T(0),
-            Int(frame[i]), Int(dataset[i]), Int(track_id[i]), Int(id[i])
-        ) for i in 1:n]
+        return [
+            Emitter3DFitGaussMLE{T}(
+                T(x[i]), T(y[i]), T(z[i]), T(photons[i]), T(bg[i]),
+                T(σ_x[i]), T(σ_y[i]), T(σ_z[i]),
+                σ_xy !== nothing ? T(σ_xy[i]) : T(0),
+                σ_xz !== nothing ? T(σ_xz[i]) : T(0),
+                σ_yz !== nothing ? T(σ_yz[i]) : T(0),
+                T(σ_photons[i]), T(σ_bg[i]),
+                pvalue !== nothing ? T(pvalue[i]) : T(0),
+                Int(frame[i]), Int(dataset[i]), Int(track_id[i]), Int(id[i])
+            ) for i in 1:n
+        ]
 
     elseif is_3d
         # Standard 3D emitter (with full position covariance)
-        return [Emitter3DFit{T}(
-            T(x[i]), T(y[i]), T(z[i]),
-            T(photons[i]), T(bg[i]),
-            T(σ_x[i]), T(σ_y[i]), T(σ_z[i]),
-            T(σ_photons[i]), T(σ_bg[i]);
-            σ_xy = σ_xy !== nothing ? T(σ_xy[i]) : T(0),
-            σ_xz = σ_xz !== nothing ? T(σ_xz[i]) : T(0),
-            σ_yz = σ_yz !== nothing ? T(σ_yz[i]) : T(0),
-            frame=Int(frame[i]),
-            dataset=Int(dataset[i]),
-            track_id=Int(track_id[i]),
-            id=Int(id[i])
-        ) for i in 1:n]
+        return [
+            Emitter3DFit{T}(
+                T(x[i]), T(y[i]), T(z[i]),
+                T(photons[i]), T(bg[i]),
+                T(σ_x[i]), T(σ_y[i]), T(σ_z[i]),
+                T(σ_photons[i]), T(σ_bg[i]);
+                σ_xy = σ_xy !== nothing ? T(σ_xy[i]) : T(0),
+                σ_xz = σ_xz !== nothing ? T(σ_xz[i]) : T(0),
+                σ_yz = σ_yz !== nothing ? T(σ_yz[i]) : T(0),
+                frame = Int(frame[i]),
+                dataset = Int(dataset[i]),
+                track_id = Int(track_id[i]),
+                id = Int(id[i])
+            ) for i in 1:n
+        ]
 
     else
         # Standard 2D emitter (fallback)
-        return [Emitter2DFit{T}(
-            T(x[i]), T(y[i]),
-            T(photons[i]), T(bg[i]),
-            T(σ_x[i]), T(σ_y[i]),
-            T(σ_photons[i]), T(σ_bg[i]);
-            σ_xy = σ_xy !== nothing ? T(σ_xy[i]) : T(0),
-            frame=Int(frame[i]),
-            dataset=Int(dataset[i]),
-            track_id=Int(track_id[i]),
-            id=Int(id[i])
-        ) for i in 1:n]
+        return [
+            Emitter2DFit{T}(
+                T(x[i]), T(y[i]),
+                T(photons[i]), T(bg[i]),
+                T(σ_x[i]), T(σ_y[i]),
+                T(σ_photons[i]), T(σ_bg[i]);
+                σ_xy = σ_xy !== nothing ? T(σ_xy[i]) : T(0),
+                frame = Int(frame[i]),
+                dataset = Int(dataset[i]),
+                track_id = Int(track_id[i]),
+                id = Int(id[i])
+            ) for i in 1:n
+        ]
     end
 end
 
@@ -664,13 +681,15 @@ end
 Print summary info about an SMLD HDF5 file without loading all data.
 """
 function smld_info(filepath::String)
-    h5open(filepath, "r") do fid
+    return h5open(filepath, "r") do fid
         meta = fid["metadata"]
 
         println("SMLD File: $filepath")
         println("  Format version: ", read(meta["format_version"]))
-        println("  Package: ", read(meta["package_name"]), " v",
-                haskey(meta, "package_version") ? read(meta["package_version"]) : "?")
+        println(
+            "  Package: ", read(meta["package_name"]), " v",
+            haskey(meta, "package_version") ? read(meta["package_version"]) : "?"
+        )
         println("  Emitter type: ", read(meta["emitter_type"]))
         println("  Element type: ", read(meta["element_type"]))
         println("  Emitters: ", read(meta["n_emitters"]))

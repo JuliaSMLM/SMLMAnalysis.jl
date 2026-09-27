@@ -355,7 +355,11 @@ re-exported: `OuterPolygonConfig`, `KdeValleyConfig`. The class is written to
 
 ### Multi-target steps
 
-Dispatch on `Vector{SMLMData.BasicSMLD}` inside a `MultiTargetConfig` pipeline:
+Dispatch on `Vector{SMLMData.BasicSMLD}` inside a `MultiTargetConfig` pipeline.
+Every step's `analyze(smlds, cfg; outdir, step_number, verbose, labels, colors)`
+method is called with both `labels` and `colors` keywords, whether or not it
+reads either — a custom `AbstractMultiTargetStep`'s `analyze` method must accept
+both:
 
 - `CompositeRenderConfig(; strategy, zoom, colors, clip_percentile=:auto, scalebar)` —
   multi-channel composite render (pass-through).
@@ -518,6 +522,8 @@ data, info = smart_h5_to_array(path; max_frames)      # the pair-returning form:
 images, dataset_indices = load_mic_h5(path; max_frames, max_blocks)   # (h, w, frames) + block index per frame
 info  = load_mic_h5_info(path)                                        # n_frames, n_blocks, frames_per_block, has_calibration
 block = load_mic_h5_block(path, block_index)
+cal   = load_mic_h5_calibration(path)                                 # raw (offset, variance, gain), SMITE's stored units
+cal2  = load_mic_h5_calibration_for_scmos(path)                       # (offset, readnoise, gain) in SCMOSCamera's convention
 cam   = build_camera_from_mic_h5(path; pixel_size, qe=1.0)            # SCMOSCamera from the file's calibration
 ```
 

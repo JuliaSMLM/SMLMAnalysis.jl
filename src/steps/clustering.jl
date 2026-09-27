@@ -16,20 +16,20 @@ labeled SMLD. The backend is selected entirely by the concrete config type.
 """
 
 # Cluster-label summary (cluster() backends: DBSCAN / HDBSCAN / Voronoi / Hierarchical)
-_step_summary(info::SMLMClustering.ClusterInfo) = Dict{Symbol,Any}(
-    :algorithm   => info.algorithm,
-    :n_locs_in   => info.n_locs_in,
+_step_summary(info::SMLMClustering.ClusterInfo) = Dict{Symbol, Any}(
+    :algorithm => info.algorithm,
+    :n_locs_in => info.n_locs_in,
     :n_clustered => info.n_clustered,
-    :n_noise     => info.n_noise,
-    :n_clusters  => info.n_clusters,
+    :n_noise => info.n_noise,
+    :n_clusters => info.n_clusters,
 )
 
 # Spatial-statistic summary (cluster_statistics() backends: Hopkins / Voronoi density)
-_step_summary(info::SMLMClustering.ClusterStatisticsInfo) = Dict{Symbol,Any}(
-    :algorithm      => info.algorithm,
-    :n_locs_in      => info.n_locs_in,
+_step_summary(info::SMLMClustering.ClusterStatisticsInfo) = Dict{Symbol, Any}(
+    :algorithm => info.algorithm,
+    :n_locs_in => info.n_locs_in,
     :statistic_name => info.statistic_name,
-    :statistic      => info.statistic,
+    :statistic => info.statistic,
 )
 
 """
@@ -42,12 +42,14 @@ deep-copied, labeled SMLD is returned and threaded onward (`emitter.id`: `0` =
 noise, `1..K` = cluster). See the SMLMClustering documentation for the algorithm
 details and per-backend configuration.
 """
-function analyze(smld::BasicSMLD, cfg::SMLMClustering.AbstractClusterConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE)
+function analyze(
+        smld::BasicSMLD, cfg::SMLMClustering.AbstractClusterConfig;
+        outdir = nothing, step_number::Int = 0, verbose::Int = Verbosity.STANDARD,
+        checkpoint::Int = Checkpoint.EXPENSIVE
+    )
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
-    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_locs=length(smld.emitters)
+    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_locs = length(smld.emitters)
 
     t = @elapsed ((smld_out, info) = SMLMClustering.cluster(smld, cfg))
 
@@ -57,11 +59,11 @@ function analyze(smld::BasicSMLD, cfg::SMLMClustering.AbstractClusterConfig;
         _save_info!(dir, info)
     end
     if dir !== nothing && checkpoint >= Checkpoint.ALL
-        _save_step_smld(dir, smld_out; filename="smld_clustered.h5")
+        _save_step_smld(dir, smld_out; filename = "smld_clustered.h5")
     end
 
     v >= Verbosity.PROGRESS && @info "  → $(info.n_clusters) clusters, $(info.n_clustered)/$(info.n_locs_in) clustered ($(info.n_noise) noise)"
-    (smld_out, StepInfo(step_number, cfg, t, _step_summary(info); info=info))
+    return (smld_out, StepInfo(step_number, cfg, t, _step_summary(info); info = info))
 end
 
 """
@@ -73,12 +75,14 @@ clustering tendency (`HopkinsConfig`) or Voronoi density
 and any per-emitter/per-dataset vectors live in the step's `ClusterStatisticsInfo`
 (`info.statistic`, `info.extras`).
 """
-function analyze(smld::BasicSMLD, cfg::SMLMClustering.AbstractStatisticsConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE)
+function analyze(
+        smld::BasicSMLD, cfg::SMLMClustering.AbstractStatisticsConfig;
+        outdir = nothing, step_number::Int = 0, verbose::Int = Verbosity.STANDARD,
+        checkpoint::Int = Checkpoint.EXPENSIVE
+    )
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
-    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_locs=length(smld.emitters)
+    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_locs = length(smld.emitters)
 
     t = @elapsed ((smld_out, info) = SMLMClustering.cluster_statistics(smld, cfg))
 
@@ -88,6 +92,6 @@ function analyze(smld::BasicSMLD, cfg::SMLMClustering.AbstractStatisticsConfig;
         _save_info!(dir, info)
     end
 
-    v >= Verbosity.PROGRESS && @info "  → $(info.statistic_name) = $(round(info.statistic, digits=4))"
-    (smld_out, StepInfo(step_number, cfg, t, _step_summary(info); info=info))
+    v >= Verbosity.PROGRESS && @info "  → $(info.statistic_name) = $(round(info.statistic, digits = 4))"
+    return (smld_out, StepInfo(step_number, cfg, t, _step_summary(info); info = info))
 end

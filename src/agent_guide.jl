@@ -19,10 +19,10 @@
 #   - stamp-scoped uninstall (uninstall_agent_guide) + a doctor (agent_guide_status)
 #   - Codex: one managed, stamped block per installing package in AGENTS.md
 
-const _INSTALLER        = "SMLMAnalysis"
-const _SKILL_DIRNAME    = "smlma-ecosystem"   # <pkgprefix>-<skill>
+const _INSTALLER = "SMLMAnalysis"
+const _SKILL_DIRNAME = "smlma-ecosystem"   # <pkgprefix>-<skill>
 const _INSTALLED_FORMAT = 1
-const _CODEX_BUNDLE     = "smlm-agent-guide"
+const _CODEX_BUNDLE = "smlm-agent-guide"
 
 # The exact phrase _write_reference! puts in the first line of every reference file it
 # writes. Ownership of a reference file is decided by looking for this phrase (see
@@ -34,16 +34,16 @@ const _REF_STAMP = "by SMLMAnalysis.install_agent_guide()"
 # dependency hierarchy: core types first, then single-step packages, then the
 # higher-level grouping/clustering packages.
 _ecosystem_packages() = (
-    (SMLMData,            "Core types shared by every package: Emitter2D/3D(Fit), Camera, BasicSMLD, ROIBatch"),
-    (SMLMBoxer,           "ROI detection from raw camera images (difference-of-Gaussians)"),
-    (GaussMLE,            "GPU-accelerated maximum-likelihood PSF fitting (Gaussian/astigmatic models)"),
-    (MicroscopePSFs,      "PSF models: Gaussian, Airy, spline, and vector PSFs"),
-    (SMLMSim,             "SMLM data simulation and fluorophore blinking kinetics"),
+    (SMLMData, "Core types shared by every package: Emitter2D/3D(Fit), Camera, BasicSMLD, ROIBatch"),
+    (SMLMBoxer, "ROI detection from raw camera images (difference-of-Gaussians)"),
+    (GaussMLE, "GPU-accelerated maximum-likelihood PSF fitting (Gaussian/astigmatic models)"),
+    (MicroscopePSFs, "PSF models: Gaussian, Airy, spline, and vector PSFs"),
+    (SMLMSim, "SMLM data simulation and fluorophore blinking kinetics"),
     (SMLMFrameConnection, "Linking localizations across frames + uncertainty calibration"),
     (SMLMDriftCorrection, "Sample-drift correction (entropy-based) and cross-channel alignment"),
-    (SMLMRender,          "Super-resolution image rendering (histogram/Gaussian/circle/ellipse)"),
-    (SMLMClustering,      "Clustering backends, spatial-tendency statistics, and edge classification"),
-    (SMLMBaGoL,           "Bayesian grouping of localizations into high-precision emitters (RJMCMC)"),
+    (SMLMRender, "Super-resolution image rendering (histogram/Gaussian/circle/ellipse)"),
+    (SMLMClustering, "Clustering backends, spatial-tendency statistics, and edge classification"),
+    (SMLMBaGoL, "Bayesian grouping of localizations into high-precision emitters (RJMCMC)"),
 )
 
 # Faithful to the hierarchy in CLAUDE.md / README.
@@ -67,14 +67,18 @@ _guide_description() = "JuliaSMLM SMLM analysis ecosystem — the unified analyz
 
 # --- provenance stamp ----------------------------------------------------------
 
-_source_version() = try string(pkgversion(@__MODULE__)) catch; "unknown" end
+_source_version() = try
+    string(pkgversion(@__MODULE__))
+catch
+    "unknown"
+end
 
 # Short commit of the installing package's checkout, or "none" for a registered
 # install with no git tree. Never throws — provenance is best-effort.
 function _source_commit()
     root = pkgdir(@__MODULE__)
     root === nothing && return "none"
-    try
+    return try
         c = strip(readchomp(`git -C $root rev-parse --short=7 HEAD`))
         isempty(c) ? "none" : String(c)
     catch
@@ -82,10 +86,12 @@ function _source_commit()
     end
 end
 
-_stamp_pairs() = ("x-installer"        => _INSTALLER,
-                  "x-source-version"   => _source_version(),
-                  "x-source-commit"    => _source_commit(),
-                  "x-installed-format" => string(_INSTALLED_FORMAT))
+_stamp_pairs() = (
+    "x-installer" => _INSTALLER,
+    "x-source-version" => _source_version(),
+    "x-source-commit" => _source_commit(),
+    "x-installed-format" => string(_INSTALLED_FORMAT),
+)
 
 _stamp_inline() = join(("$k: $v" for (k, v) in _stamp_pairs()), " | ")
 
@@ -102,17 +108,17 @@ function _frontmatter_field(path::AbstractString, key::AbstractString)
             continue
         end
         if seen == 1 && startswith(s, key * ":")
-            return strip(s[length(key)+2:end], ['"', ' '])
+            return strip(s[(length(key) + 2):end], ['"', ' '])
         end
     end
-    nothing
+    return nothing
 end
 
 # Read an inline `key: value` stamp field from the Codex GUIDE.md comment header.
 function _guide_field(guide::AbstractString, key::AbstractString)
     isfile(guide) || return nothing
     m = match(Regex(key * raw":\s*([^\s|]+)"), read(guide, String))
-    m === nothing ? nothing : String(m.captures[1])
+    return m === nothing ? nothing : String(m.captures[1])
 end
 
 # --- content collection --------------------------------------------------------
@@ -120,29 +126,37 @@ end
 function _pkg_entry(mod::Module, role::AbstractString)
     name = string(nameof(mod))
     root = pkgdir(mod)
-    ver  = try string(pkgversion(mod)) catch; "unknown" end
+    ver = try
+        string(pkgversion(mod))
+    catch
+        "unknown"
+    end
     (text, source) = _read_api_text(root, name)
-    (; name, role, version = ver, text, source)
+    return (; name, role, version = ver, text, source)
 end
 
 # api_overview.md is the ecosystem's AI-parseable reference convention; README is the
 # fallback. Returns (text, source_label).
-function _read_api_text(root::Union{AbstractString,Nothing}, name::AbstractString)
+function _read_api_text(root::Union{AbstractString, Nothing}, name::AbstractString)
     root === nothing && return ("_(package directory for $name not found)_\n", "none")
     for fname in ("api_overview.md", "README.md")
         p = joinpath(root, fname)
         isfile(p) && return (read(p, String), fname)
     end
-    ("_(no api_overview.md or README.md found for $name)_\n", "none")
+    return ("_(no api_overview.md or README.md found for $name)_\n", "none")
 end
 
 function _collect_pkg_docs()
-    entries = Any[_pkg_entry(@__MODULE__,
-        "Integration layer — the unified analyze(state, config) pipeline that orchestrates every package below")]
+    entries = Any[
+        _pkg_entry(
+            @__MODULE__,
+            "Integration layer — the unified analyze(state, config) pipeline that orchestrates every package below"
+        )
+    ]
     for (mod, role) in _ecosystem_packages()
         push!(entries, _pkg_entry(mod, role))
     end
-    entries
+    return entries
 end
 
 # --- rendering -----------------------------------------------------------------
@@ -151,13 +165,17 @@ function _render_guide(entries, refprefix::AbstractString)
     io = IOBuffer()
     println(io, "# SMLMAnalysis — JuliaSMLM ecosystem API guide")
     println(io)
-    println(io, "Generated by `SMLMAnalysis.install_agent_guide()` from the package versions ",
-                "resolved in this environment. Re-run it to refresh.")
+    println(
+        io, "Generated by `SMLMAnalysis.install_agent_guide()` from the package versions ",
+        "resolved in this environment. Re-run it to refresh."
+    )
     println(io)
-    println(io, "SMLMAnalysis integrates the JuliaSMLM single-molecule-localization-microscopy ",
-                "packages into one `analyze(state, config)` pipeline: the config type selects the ",
-                "operation via multiple dispatch, and steps compose in any order after detection/fitting. ",
-                "Coordinates are in microns throughout; raw data is `(height, width, frames)` image stacks.")
+    println(
+        io, "SMLMAnalysis integrates the JuliaSMLM single-molecule-localization-microscopy ",
+        "packages into one `analyze(state, config)` pipeline: the config type selects the ",
+        "operation via multiple dispatch, and steps compose in any order after detection/fitting. ",
+        "Coordinates are in microns throughout; raw data is `(height, width, frames)` image stacks."
+    )
     println(io)
     println(io, "## Dependency hierarchy")
     println(io, "```")
@@ -172,12 +190,16 @@ function _render_guide(entries, refprefix::AbstractString)
     end
     println(io)
     println(io, "## Where to start")
-    println(io, "- Entry point: `analyze(image_stacks, AnalysisConfig(...))`, or step-by-step ",
-                "`analyze(state, SomeConfig())`.")
-    println(io, "- Full SMLMAnalysis API (pipeline, step configs, I/O, multi-target): see ",
-                "[`$(refprefix)/SMLMAnalysis.md`]($(refprefix)/SMLMAnalysis.md).")
+    println(
+        io, "- Entry point: `analyze(image_stacks, AnalysisConfig(...))`, or step-by-step ",
+        "`analyze(state, SomeConfig())`."
+    )
+    println(
+        io, "- Full SMLMAnalysis API (pipeline, step configs, I/O, multi-target): see ",
+        "[`$(refprefix)/SMLMAnalysis.md`]($(refprefix)/SMLMAnalysis.md)."
+    )
     println(io, "- Each `reference/*.md` above is that package's own `api_overview.md`, copied verbatim.")
-    String(take!(io))
+    return String(take!(io))
 end
 
 # SKILL.md = stamped YAML frontmatter + the rendered guide body.
@@ -192,7 +214,7 @@ function _skill_text(entries)
     println(io, "---")
     println(io)
     print(io, _render_guide(entries, "reference"))
-    String(take!(io))
+    return String(take!(io))
 end
 
 # A reference file is ours iff it is a regular (non-symlink) file whose first line
@@ -206,12 +228,14 @@ end
 function _write_reference!(refdir::AbstractString, e)
     mkpath(refdir)
     p = joinpath(refdir, e.name * ".md")
-    content = string("<!-- $(e.name) v$(e.version) — copied from $(e.source) $_REF_STAMP. ",
-                      "Do not edit; re-run to refresh. -->\n\n", e.text)
+    content = string(
+        "<!-- $(e.name) v$(e.version) — copied from $(e.source) $_REF_STAMP. ",
+        "Do not edit; re-run to refresh. -->\n\n", e.text
+    )
     _replace_atomically(p) do tmp
         write(tmp, content)
     end
-    p
+    return p
 end
 
 # Preflight every destination reference file before mutating anything: a symlink is
@@ -228,7 +252,7 @@ function _preflight_reference_files(refdir::AbstractString, entries, overwrite::
             error("$p exists and was not written by $_INSTALLER. Pass overwrite=true to replace it.")
         end
     end
-    nothing
+    return nothing
 end
 
 # Remove only the reference files this installer generated — identified by the
@@ -243,9 +267,9 @@ function _remove_generated_reference!(refdir::AbstractString)
     if isempty(readdir(refdir))
         rm(refdir)
     else
-        @info "$(refdir): kept files this installer did not write" remaining=readdir(refdir)
+        @info "$(refdir): kept files this installer did not write" remaining = readdir(refdir)
     end
-    nothing
+    return nothing
 end
 
 # --- git / AGENTS.md side effects ----------------------------------------------
@@ -256,7 +280,7 @@ function _refuse_nonfile(path::AbstractString)
     islink(path) && throw(ArgumentError("$path is a symlink; refusing to write through it"))
     (ispath(path) && !isfile(path)) &&
         throw(ArgumentError("$path exists and is not a regular file; refusing to replace it"))
-    nothing
+    return nothing
 end
 
 # Append patterns to <root>/.gitignore (creating it if needed), skipping any already
@@ -264,7 +288,7 @@ end
 function _ensure_gitignored!(root::AbstractString, patterns)
     gi = joinpath(root, ".gitignore")
     _refuse_nonfile(gi)
-    raw  = isfile(gi) ? read(gi, String) : ""
+    raw = isfile(gi) ? read(gi, String) : ""
     have = Set(strip.(split(raw, '\n')))
     todo = [p for p in patterns if !(strip(p) in have)]
     isempty(todo) && return gi
@@ -276,18 +300,18 @@ function _ensure_gitignored!(root::AbstractString, patterns)
     _replace_atomically(gi) do tmp
         write(tmp, buf)
     end
-    gi
+    return gi
 end
 
 # Package-scoped markers so multiple packages can each own a block in one AGENTS.md.
 const _AGENTS_BEGIN = "<!-- BEGIN SMLMAnalysis agent-guide (managed by install_agent_guide) -->"
-const _AGENTS_END   = "<!-- END SMLMAnalysis agent-guide -->"
+const _AGENTS_END = "<!-- END SMLMAnalysis agent-guide -->"
 
 # Insert or replace our delimited block in AGENTS.md, leaving other content untouched.
 # Idempotent: re-running refreshes the block in place.
 function _upsert_agents_block!(path::AbstractString, block::AbstractString)
     _refuse_nonfile(path)
-    raw     = isfile(path) ? read(path, String) : ""
+    raw = isfile(path) ? read(path, String) : ""
     managed = string(_AGENTS_BEGIN, '\n', block, '\n', _AGENTS_END)
     b = findfirst(_AGENTS_BEGIN, raw)
     e = findfirst(_AGENTS_END, raw)
@@ -304,7 +328,7 @@ function _upsert_agents_block!(path::AbstractString, block::AbstractString)
             write(tmp, buf * managed * '\n')
         end
     end
-    path
+    return path
 end
 
 # Remove our block from AGENTS.md; returns true if a block was present and removed.
@@ -332,14 +356,14 @@ function _remove_agents_block!(path::AbstractString)
     b = findfirst(_AGENTS_BEGIN, raw)
     e = findfirst(_AGENTS_END, raw)
     (b === nothing || e === nothing || first(e) < first(b)) && return false
-    pre  = raw[1:prevind(raw, first(b))]
+    pre = raw[1:prevind(raw, first(b))]
     post = raw[nextind(raw, last(e)):end]
     endswith(pre, "\n\n") && (pre = chop(pre))
     startswith(post, "\n") && (post = chop(post; head = 1, tail = 0))
     _replace_atomically(path) do tmp
         write(tmp, pre * post)
     end
-    true
+    return true
 end
 
 _codex_block() = string(
@@ -347,7 +371,8 @@ _codex_block() = string(
     _guide_description(), "\n\n",
     "When working with JuliaSMLM / SMLMAnalysis code, read the ecosystem guide at ",
     "`", _CODEX_BUNDLE, "/GUIDE.md` and the per-package API references under ",
-    "`", _CODEX_BUNDLE, "/reference/`.")
+    "`", _CODEX_BUNDLE, "/reference/`."
+)
 
 # expanduser is a no-op on Windows; handle a leading ~ ourselves on every platform.
 # Strip any further leading separators after "~/" too, so "~//repo" resolves under
@@ -371,14 +396,14 @@ function _unsafe_reason(target, stamp, refdir)
     (ispath(target) && !isdir(target)) && return "$target is not a directory"
     (ispath(refdir) && !isdir(refdir)) && return "$refdir is not a directory"
     (ispath(stamp) && !islink(stamp) && !isfile(stamp)) && return "$stamp is not a regular file"
-    nothing
+    return nothing
 end
 
 # Skill/bundle directory for a (tool, scope, dir) triple.
 function _install_dir(tool::Symbol, scope::Symbol, dir::AbstractString)
-    if tool == :claude
+    return if tool == :claude
         scope == :project ? joinpath(dir, ".claude", "skills", _SKILL_DIRNAME) :
-                            joinpath(homedir(), ".claude", "skills", _SKILL_DIRNAME)
+            joinpath(homedir(), ".claude", "skills", _SKILL_DIRNAME)
     else
         base = scope == :project ? String(dir) : joinpath(homedir(), ".codex")
         joinpath(base, _CODEX_BUNDLE)
@@ -442,11 +467,13 @@ install_agent_guide(tool=:codex)         # Codex AGENTS.md + bundle in this repo
 install_agent_guide(scope=:user)         # Claude skill for all your projects
 ```
 """
-function install_agent_guide(; tool::Symbol = :claude,
-                               scope::Symbol = :project,
-                               track::Bool = false,
-                               overwrite::Bool = false,
-                               dir::AbstractString = pwd())
+function install_agent_guide(;
+        tool::Symbol = :claude,
+        scope::Symbol = :project,
+        track::Bool = false,
+        overwrite::Bool = false,
+        dir::AbstractString = pwd()
+    )
     tool in (:claude, :codex) ||
         throw(ArgumentError("tool must be :claude or :codex, got :$tool"))
     scope in (:project, :user) ||
@@ -456,13 +483,13 @@ function install_agent_guide(; tool::Symbol = :claude,
     end
     dir = _expand_home(dir)   # `dir="~/repo"` must not create a literal `~` under the cwd
 
-    entries   = _collect_pkg_docs()
+    entries = _collect_pkg_docs()
     gitignore = !track && scope == :project
-    target    = _install_dir(tool, scope, dir)
+    target = _install_dir(tool, scope, dir)
 
     if tool == :claude
         wrapper = joinpath(target, "SKILL.md")
-        refdir  = joinpath(target, "reference")
+        refdir = joinpath(target, "reference")
         # Never mutate through a symlink: a symlinked target/wrapper/reference dir may
         # point outside the install dir entirely. Checked before any mutation.
         r = _unsafe_reason(target, wrapper, refdir)
@@ -477,8 +504,10 @@ function install_agent_guide(; tool::Symbol = :claude,
         if isdir(target) && !isempty(readdir(target))
             owner = isfile(wrapper) ? _frontmatter_field(wrapper, "x-installer") : nothing
             owner == _INSTALLER || overwrite ||
-                error("$target already exists and was not installed by $_INSTALLER " *
-                      "(x-installer=$(owner === nothing ? "none" : owner)). Pass overwrite=true to replace it.")
+                error(
+                "$target already exists and was not installed by $_INSTALLER " *
+                    "(x-installer=$(owner === nothing ? "none" : owner)). Pass overwrite=true to replace it."
+            )
         end
         # Preflight every reference destination before mutating anything.
         _preflight_reference_files(refdir, entries, overwrite)
@@ -495,7 +524,7 @@ function install_agent_guide(; tool::Symbol = :claude,
         gitignore && _ensure_gitignored!(dir, ["/.claude/skills/$_SKILL_DIRNAME/"])
         return target
     else # :codex
-        guide  = joinpath(target, "GUIDE.md")
+        guide = joinpath(target, "GUIDE.md")
         refdir = joinpath(target, "reference")
         r = _unsafe_reason(target, guide, refdir)
         r === nothing || throw(ArgumentError(r * "; refusing to install"))
@@ -543,9 +572,11 @@ for `tool=:codex`, the `AGENTS.md` block is then also left in place). Returns th
 removed (empty if nothing of ours was found, including when the target is unsafe to
 touch).
 """
-function uninstall_agent_guide(; tool::Symbol = :claude,
-                                 scope::Symbol = :project,
-                                 dir::AbstractString = pwd())
+function uninstall_agent_guide(;
+        tool::Symbol = :claude,
+        scope::Symbol = :project,
+        dir::AbstractString = pwd()
+    )
     tool in (:claude, :codex) ||
         throw(ArgumentError("tool must be :claude or :codex, got :$tool"))
     scope in (:project, :user) ||
@@ -553,9 +584,9 @@ function uninstall_agent_guide(; tool::Symbol = :claude,
     dir = _expand_home(dir)
 
     removed = String[]
-    target  = _install_dir(tool, scope, dir)
+    target = _install_dir(tool, scope, dir)
     if tool == :claude
-        stamp  = joinpath(target, "SKILL.md")
+        stamp = joinpath(target, "SKILL.md")
         refdir = joinpath(target, "reference")
         r = _unsafe_reason(target, stamp, refdir)
         if r !== nothing
@@ -566,7 +597,7 @@ function uninstall_agent_guide(; tool::Symbol = :claude,
             push!(removed, _remove_own_files!(target, stamp))
         end
     else
-        stamp  = joinpath(target, "GUIDE.md")
+        stamp = joinpath(target, "GUIDE.md")
         refdir = joinpath(target, "reference")
         r = _unsafe_reason(target, stamp, refdir)
         if r !== nothing
@@ -579,7 +610,7 @@ function uninstall_agent_guide(; tool::Symbol = :claude,
         agents = joinpath(dirname(target), "AGENTS.md")
         _remove_agents_block!(agents) && push!(removed, agents)
     end
-    removed
+    return removed
 end
 
 # Remove exactly what install_agent_guide writes into `target` — the stamped wrapper
@@ -595,7 +626,7 @@ function _remove_own_files!(target::AbstractString, stamp::AbstractString)
         rm(target)
         return String(target)
     end
-    @info "uninstall_agent_guide: removed SMLMAnalysis's files from $target but kept the directory — it still holds files this installer did not write." remaining=readdir(target)
+    @info "uninstall_agent_guide: removed SMLMAnalysis's files from $target but kept the directory — it still holds files this installer did not write." remaining = readdir(target)
     return String(target)
 end
 
@@ -607,30 +638,34 @@ source_commit, current_version, stale)`. `stale` is true when the stamped
 `source_version` differs from the version currently resolved in this environment
 (re-run [`install_agent_guide`](@ref) to refresh).
 """
-function agent_guide_status(; tool::Symbol = :claude,
-                              scope::Symbol = :project,
-                              dir::AbstractString = pwd())
+function agent_guide_status(;
+        tool::Symbol = :claude,
+        scope::Symbol = :project,
+        dir::AbstractString = pwd()
+    )
     tool in (:claude, :codex) ||
         throw(ArgumentError("tool must be :claude or :codex, got :$tool"))
     scope in (:project, :user) ||
         throw(ArgumentError("scope must be :project or :user, got :$scope"))
 
     current = _source_version()
-    target  = _install_dir(tool, scope, _expand_home(dir))
+    target = _install_dir(tool, scope, _expand_home(dir))
     stampfile = tool == :claude ? joinpath(target, "SKILL.md") : joinpath(target, "GUIDE.md")
-    refdir    = joinpath(target, "reference")
-    reader    = tool == :claude ? _frontmatter_field : _guide_field
+    refdir = joinpath(target, "reference")
+    reader = tool == :claude ? _frontmatter_field : _guide_field
 
     # A symlinked target/stamp/reference dir is never followed elsewhere in this file;
     # report it as not-installed here too rather than reading through it.
     installed = _unsafe_reason(target, stampfile, refdir) === nothing &&
-                reader(stampfile, "x-installer") == _INSTALLER
+        reader(stampfile, "x-installer") == _INSTALLER
     sv = installed ? reader(stampfile, "x-source-version") : nothing
     sc = installed ? reader(stampfile, "x-source-commit") : nothing
-    (; installed,
-       path = target,
-       source_version = sv,
-       source_commit = sc,
-       current_version = current,
-       stale = installed && sv !== nothing && sv != current)
+    return (;
+        installed,
+        path = target,
+        source_version = sv,
+        source_commit = sc,
+        current_version = current,
+        stale = installed && sv !== nothing && sv != current,
+    )
 end

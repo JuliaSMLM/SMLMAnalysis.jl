@@ -50,9 +50,9 @@ image_stacks = data["image_stacks"]  # Vector{SubArray}, dataset boundaries from
 camera = IdealCamera(data["camera_nx"], data["camera_ny"], data["camera_pixelsize"])
 psf_sigma = data["psf_sigma"]
 
-println("Camera: $(data["camera_nx"])x$(data["camera_ny"]) pixels, $(data["camera_pixelsize"]*1000)nm/pixel")
+println("Camera: $(data["camera_nx"])x$(data["camera_ny"]) pixels, $(data["camera_pixelsize"] * 1000)nm/pixel")
 println("Data: $(length(image_stacks)) datasets x $(data["n_frames"]) frames/dataset")
-println("Ruler: $(data["ruler_marks"]) marks, $(data["ruler_spacing"]*1000)nm spacing")
+println("Ruler: $(data["ruler_marks"]) marks, $(data["ruler_spacing"] * 1000)nm spacing")
 println()
 
 # ============================================================================
@@ -63,22 +63,22 @@ println("="^60)
 println("Running analysis with AnalysisConfig")
 println("="^60)
 
-rm(OUTPUT_DIR; force=true, recursive=true)
+rm(OUTPUT_DIR; force = true, recursive = true)
 mkpath(OUTPUT_DIR)
 
 config = AnalysisConfig(
     camera = camera,
     steps = [
         DetectFitConfig(
-            boxer = BoxerConfig(boxsize=7, min_photons=500.0, psf_sigma=psf_sigma),
-            fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20),
+            boxer = BoxerConfig(boxsize = 7, min_photons = 500.0, psf_sigma = psf_sigma),
+            fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), iterations = 20),
         ),
         FilterConfig(
             photons = (500.0, Inf),
             precision = (0.0, 0.007),
-            pvalue = (1e-3, 1.0)
+            pvalue = (1.0e-3, 1.0)
         ),
-        FrameConnectConfig(max_frame_gap = 5, calibration=CalibrationConfig()),
+        FrameConnectConfig(max_frame_gap = 5, calibration = CalibrationConfig()),
         DriftConfig(degree = 2),
         # NOTE: no DensityFilterConfig here. Nanorulers are sparse, isolated
         # structures (a few marks per ruler, rulers far apart), so a density
@@ -86,9 +86,11 @@ config = AnalysisConfig(
         # the very structure we want to see. It is appropriate for dense
         # clustered samples (see analysis_example.jl), not nanorulers.
         # High zoom so the 40 nm marks separate in the reconstruction.
-        RenderConfig(zoom=40, colormap=:inferno, scalebar=true),
-        RenderConfig(strategy=CircleRender(), zoom=80, colormap=:turbo,
-                     color_by=:absolute_frame, scalebar=true),
+        RenderConfig(zoom = 40, colormap = :inferno, scalebar = true),
+        RenderConfig(
+            strategy = CircleRender(), zoom = 80, colormap = :turbo,
+            color_by = :absolute_frame, scalebar = true
+        ),
     ],
     outdir = OUTPUT_DIR,
     verbose = Verbosity.STANDARD
@@ -110,6 +112,6 @@ println("Results:")
 println("  Final localizations: $(length(result.smld.emitters))")
 println("  Datasets: $(result.smld.n_datasets)")
 println("  Frames per dataset: $(result.smld.n_frames)")
-println("  Total time: $(round(info.elapsed_s, digits=2))s")
+println("  Total time: $(round(info.elapsed_s, digits = 2))s")
 println()
 println("Output saved to: $OUTPUT_DIR")
