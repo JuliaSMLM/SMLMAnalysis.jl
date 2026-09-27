@@ -26,7 +26,7 @@ println("File contains ", info.nframes, " frames of size ", info.width, "x", inf
 ```
 """
 function load_smart_h5_info(filepath::String)
-    HDF5.h5open(filepath, "r") do file
+    return HDF5.h5open(filepath, "r") do file
         data = file["Main/data"]
         dims = size(data)
 
@@ -36,7 +36,7 @@ function load_smart_h5_info(filepath::String)
             height = dims[2],
             nframes = dims[3],
             dtype = eltype(data),
-            file_size_gb = filesize(filepath) / 1e9
+            file_size_gb = filesize(filepath) / 1.0e9,
         )
     end
 end
@@ -62,8 +62,8 @@ data = load_smart_h5("data/experiment.h5")
 data = load_smart_h5("data/experiment.h5", frame_range=1:1000)
 ```
 """
-function load_smart_h5(filepath::String; frame_range=nothing)
-    HDF5.h5open(filepath, "r") do file
+function load_smart_h5(filepath::String; frame_range = nothing)
+    return HDF5.h5open(filepath, "r") do file
         data = file["Main/data"]
 
         if frame_range === nothing
@@ -96,7 +96,7 @@ data, info = smart_h5_to_array("data/experiment.h5", max_frames=1000)
 println("Loaded ", size(data, 3), " frames of size ", size(data, 1), "x", size(data, 2))
 ```
 """
-function smart_h5_to_array(filepath::String; max_frames=nothing, verbose=false)
+function smart_h5_to_array(filepath::String; max_frames = nothing, verbose = false)
     info = load_smart_h5_info(filepath)
 
     frame_range = if max_frames === nothing
@@ -105,13 +105,13 @@ function smart_h5_to_array(filepath::String; max_frames=nothing, verbose=false)
         1:min(max_frames, info.nframes)
     end
 
-    t1 = @elapsed data = load_smart_h5(filepath, frame_range=frame_range)
-    verbose && println("    HDF5 read: $(round(t1, digits=2))s")
+    t1 = @elapsed data = load_smart_h5(filepath, frame_range = frame_range)
+    verbose && println("    HDF5 read: $(round(t1, digits = 2))s")
 
     # Transpose from (width, height, frames) to (height, width, frames)
     # to match standard image conventions
     t2 = @elapsed data = permutedims(data, (2, 1, 3))
-    verbose && println("    permutedims: $(round(t2, digits=2))s")
+    verbose && println("    permutedims: $(round(t2, digits = 2))s")
 
     return data, info
 end

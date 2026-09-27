@@ -42,18 +42,20 @@ cam = IdealCamera(256, 256, 0.1)   # 256x256, 100 nm pixels
 # one from the file's own calibration with build_camera_from_mic_h5(path; pixel_size=).
 
 const SMART_FILE = joinpath(@__DIR__, "data", "experiment_smart.h5")
-const MIC_FILE   = joinpath(@__DIR__, "data", "experiment_mic.h5")
+const MIC_FILE = joinpath(@__DIR__, "data", "experiment_mic.h5")
 
 if isfile(MIC_FILE)
     println("[1] Streaming MIC file: $MIC_FILE")
     config = AnalysisConfig(
-        camera = build_camera_from_mic_h5(MIC_FILE; pixel_size=0.1),  # or your own IdealCamera/SCMOSCamera
+        camera = build_camera_from_mic_h5(MIC_FILE; pixel_size = 0.1),  # or your own IdealCamera/SCMOSCamera
         steps = [
-            DetectFitConfig(path=MIC_FILE, h5_format=:mic,
-                            boxer=BoxerConfig(boxsize=9, psf_sigma=0.130),
-                            fitter=GaussMLEConfig(psf_model=GaussianXYNBS())),
-            FilterConfig(photons=(500.0, Inf)),
-            RenderConfig(zoom=20, colormap=:inferno),
+            DetectFitConfig(
+                path = MIC_FILE, h5_format = :mic,
+                boxer = BoxerConfig(boxsize = 9, psf_sigma = 0.13),
+                fitter = GaussMLEConfig(psf_model = GaussianXYNBS())
+            ),
+            FilterConfig(photons = (500.0, Inf)),
+            RenderConfig(zoom = 20, colormap = :inferno),
         ],
         outdir = joinpath(@__DIR__, "output", "loading_data_mic"),
     )
@@ -107,13 +109,17 @@ end
 
 println("[3] Simulating a small stack with SMLMSim ...")
 sim_cam = IdealCamera(64, 64, 0.1)
-sim = StaticSMLMConfig(density=2.0, σ_psf=0.13, nframes=200, ndatasets=1)
-(_, si) = simulate(sim;
-    pattern  = Nmer2D(n=8, d=0.05),
-    molecule = GenericFluor(photons=5.0e4, k_off=20.0, k_on=0.05),
-    camera   = sim_cam)
-(frames, _) = gen_images(si.smld_model, MicroscopePSFs.GaussianPSF(0.13);
-    dataset=1, bg=20.0, poisson_noise=true)
+sim = StaticSMLMConfig(density = 2.0, σ_psf = 0.13, nframes = 200, ndatasets = 1)
+(_, si) = simulate(
+    sim;
+    pattern = Nmer2D(n = 8, d = 0.05),
+    molecule = GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.05),
+    camera = sim_cam
+)
+(frames, _) = gen_images(
+    si.smld_model, MicroscopePSFs.GaussianPSF(0.13);
+    dataset = 1, bg = 20.0, poisson_noise = true
+)
 
 # `frames` is a plain 3D array — exactly what a TIFF or H5 loader would hand you.
 println("    frames::$(typeof(frames))  size = $(size(frames))  → (height, width, frames)")
@@ -121,19 +127,25 @@ println("    frames::$(typeof(frames))  size = $(size(frames))  → (height, wid
 image_stacks = [frames]           # wrap as a 1-dataset Vector (a bare `frames` also works)
 config = AnalysisConfig(
     camera = sim_cam,
-    steps  = [
-        DetectFitConfig(boxer=BoxerConfig(boxsize=7, psf_sigma=0.13),
-                        fitter=GaussMLEConfig(psf_model=GaussianXYNBS())),
-        FilterConfig(photons=(500.0, Inf)),
-        RenderConfig(zoom=10, colormap=:inferno),
+    steps = [
+        DetectFitConfig(
+            boxer = BoxerConfig(boxsize = 7, psf_sigma = 0.13),
+            fitter = GaussMLEConfig(psf_model = GaussianXYNBS())
+        ),
+        FilterConfig(photons = (500.0, Inf)),
+        RenderConfig(zoom = 10, colormap = :inferno),
     ],
-    outdir  = joinpath(@__DIR__, "output", "loading_data_sim"),
+    outdir = joinpath(@__DIR__, "output", "loading_data_sim"),
     verbose = Verbosity.PROGRESS,
 )
 (result, analysis_info) = analyze(image_stacks, config)
 
 println()
-println("Done. image_stacks = Vector of $(length(image_stacks)) dataset(s); " *
-        "each element is a $(ndims(frames))D $(eltype(frames)) array of (height, width, frames).")
-println("→ $(length(result.smld.emitters)) localizations in " *
-        "$(round(analysis_info.elapsed_s, digits=2))s.")
+println(
+    "Done. image_stacks = Vector of $(length(image_stacks)) dataset(s); " *
+        "each element is a $(ndims(frames))D $(eltype(frames)) array of (height, width, frames)."
+)
+println(
+    "→ $(length(result.smld.emitters)) localizations in " *
+        "$(round(analysis_info.elapsed_s, digits = 2))s."
+)

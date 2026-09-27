@@ -32,13 +32,13 @@ documentation for the algorithm details and per-config parameters.
 # `config.toml` + the StepInfo summary (`:method`) for provenance, so nothing is lost.
 step_name(cfg::SMLMClustering.AbstractEdgeClassifyConfig) = "edgeclassify"
 
-_step_summary(info::SMLMClustering.EdgeClassifyInfo) = Dict{Symbol,Any}(
-    :method     => SMLMClustering.method_name(info.config),
+_step_summary(info::SMLMClustering.EdgeClassifyInfo) = Dict{Symbol, Any}(
+    :method => SMLMClustering.method_name(info.config),
     :n_emitters => info.n_emitters,
     :n_interior => info.n_interior,
     :n_membrane => info.n_membrane,
-    :n_outside  => info.n_outside,
-    :n_cells    => length(info.cells),
+    :n_outside => info.n_outside,
+    :n_cells => length(info.cells),
 )
 
 """
@@ -52,12 +52,14 @@ cell-mask geometry is mirrored into `metadata` (`edge_cells`, `edge_outer_polygo
 for downstream steps. The authoritative per-emitter class and the full geometry
 live in the step's `EdgeClassifyInfo` (`info.class` / `interior_mask(info)`).
 """
-function analyze(smld::BasicSMLD, cfg::SMLMClustering.AbstractEdgeClassifyConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE)
+function analyze(
+        smld::BasicSMLD, cfg::SMLMClustering.AbstractEdgeClassifyConfig;
+        outdir = nothing, step_number::Int = 0, verbose::Int = Verbosity.STANDARD,
+        checkpoint::Int = Checkpoint.EXPENSIVE
+    )
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
-    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_locs=length(smld.emitters)
+    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_locs = length(smld.emitters)
 
     t = @elapsed ((smld_out, info) = SMLMClustering.classify_emitters(smld, cfg))
 
@@ -69,13 +71,13 @@ function analyze(smld::BasicSMLD, cfg::SMLMClustering.AbstractEdgeClassifyConfig
         # active since SMLMAnalysis hard-deps CairoMakie + SMLMRender). Owner-owned figures,
         # called here — same pattern as bagol_step → compute/write/plot_report.
         report = SMLMClustering.compute_edge_report(smld_out, info)
-        SMLMClustering.write_edge_report(report; output_dir=dir)
-        SMLMClustering.plot_edge_report(report; output_dir=dir, prefix="edge")
+        SMLMClustering.write_edge_report(report; output_dir = dir)
+        SMLMClustering.plot_edge_report(report; output_dir = dir, prefix = "edge")
     end
     if dir !== nothing && checkpoint >= Checkpoint.ALL
-        _save_step_smld(dir, smld_out; filename="smld_edgeclassified.h5")
+        _save_step_smld(dir, smld_out; filename = "smld_edgeclassified.h5")
     end
 
     v >= Verbosity.PROGRESS && @info "  → $(info.n_interior) interior / $(info.n_membrane) membrane / $(info.n_outside) outside, $(length(info.cells)) cell(s)"
-    (smld_out, StepInfo(step_number, cfg, t, _step_summary(info); info=info))
+    return (smld_out, StepInfo(step_number, cfg, t, _step_summary(info); info = info))
 end

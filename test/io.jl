@@ -17,12 +17,15 @@ using Statistics
 
     mktempdir() do dir
         # Emitter2DFitSigma (16 fields) — the primary GaussianXYNBS output.
-        es = [GaussMLE.Emitter2DFitSigma{T}(
+        es = [
+            GaussMLE.Emitter2DFitSigma{T}(
                 0.1i, 0.2i, 1000.0 + i, 5.0, 0.13,     # x, y, photons, bg, σ
                 0.01, 0.012, 0.003, 20.0, 0.5, 0.002,  # σ_x, σ_y, σ_xy, σ_photons, σ_bg, σ_σ
-                0.4, i, 1, 0, i)                        # pvalue, frame, dataset, track_id, id
-              for i in 1:5]
-        smld = SMLMAnalysis.BasicSMLD(es, cam, 10, 1, Dict{String,Any}())
+                0.4, i, 1, 0, i
+            )                        # pvalue, frame, dataset, track_id, id
+                for i in 1:5
+        ]
+        smld = SMLMAnalysis.BasicSMLD(es, cam, 10, 1, Dict{String, Any}())
         path = joinpath(dir, "sigma.h5")
         save_smld(path, smld)
         loaded = load_smld(path)
@@ -37,12 +40,15 @@ using Statistics
         @test loaded.emitters[3].σ_xy ≈ 0.003   # the field that used to vanish
 
         # Emitter2DFitSigmaXY (18 fields) — GaussianXYNBSXSY output.
-        exy = [GaussMLE.Emitter2DFitSigmaXY{T}(
+        exy = [
+            GaussMLE.Emitter2DFitSigmaXY{T}(
                 0.1i, 0.2i, 1000.0 + i, 5.0, 0.13, 0.14, # x, y, photons, bg, σx, σy
                 0.01, 0.012, 0.003, 20.0, 0.5,           # σ_x, σ_y, σ_xy, σ_photons, σ_bg
-                0.002, 0.0021, 0.4, i, 1, 0, i)          # σ_σx, σ_σy, pvalue, frame, dataset, track_id, id
-              for i in 1:4]
-        smld_xy = SMLMAnalysis.BasicSMLD(exy, cam, 10, 1, Dict{String,Any}())
+                0.002, 0.0021, 0.4, i, 1, 0, i
+            )          # σ_σx, σ_σy, pvalue, frame, dataset, track_id, id
+                for i in 1:4
+        ]
+        smld_xy = SMLMAnalysis.BasicSMLD(exy, cam, 10, 1, Dict{String, Any}())
         pxy = joinpath(dir, "sigmaxy.h5")
         save_smld(pxy, smld_xy)
         loaded_xy = load_smld(pxy)
@@ -83,10 +89,14 @@ end
 
     # Setting .dataset in place must work for the fixed-width / astigmatic types
     # and leave every other field untouched.
-    e2g = GaussMLE.Emitter2DFitGaussMLE{T}(0.1, 0.2, 1000.0, 5.0,
-            0.01, 0.012, 0.003, 20.0, 0.5, 0.4, 1, 1, 0, 1)
-    e3g = GaussMLE.Emitter3DFitGaussMLE{T}(0.1, 0.2, 0.3, 1000.0, 5.0,
-            0.01, 0.012, 0.02, 0.003, 0.001, 0.002, 20.0, 0.5, 0.4, 1, 1, 0, 1)
+    e2g = GaussMLE.Emitter2DFitGaussMLE{T}(
+        0.1, 0.2, 1000.0, 5.0,
+        0.01, 0.012, 0.003, 20.0, 0.5, 0.4, 1, 1, 0, 1
+    )
+    e3g = GaussMLE.Emitter3DFitGaussMLE{T}(
+        0.1, 0.2, 0.3, 1000.0, 5.0,
+        0.01, 0.012, 0.02, 0.003, 0.001, 0.002, 20.0, 0.5, 0.4, 1, 1, 0, 1
+    )
     e2g.dataset = 7
     @test e2g.dataset == 7
     @test e2g.σ_xy ≈ 0.003
@@ -96,9 +106,13 @@ end
 
     mktempdir() do dir
         # Emitter2DFitGaussMLE (GaussianXYNB) round-trip.
-        g2 = [GaussMLE.Emitter2DFitGaussMLE{T}(0.1i, 0.2i, 1000.0 + i, 5.0,
-                0.01, 0.012, 0.003, 20.0, 0.5, 0.4, i, 1, 0, i) for i in 1:4]
-        s2 = SMLMAnalysis.BasicSMLD(g2, cam, 10, 1, Dict{String,Any}())
+        g2 = [
+            GaussMLE.Emitter2DFitGaussMLE{T}(
+                0.1i, 0.2i, 1000.0 + i, 5.0,
+                0.01, 0.012, 0.003, 20.0, 0.5, 0.4, i, 1, 0, i
+            ) for i in 1:4
+        ]
+        s2 = SMLMAnalysis.BasicSMLD(g2, cam, 10, 1, Dict{String, Any}())
         p2 = joinpath(dir, "g2.h5"); save_smld(p2, s2); l2 = load_smld(p2)
         @test eltype(l2.emitters) <: GaussMLE.Emitter2DFitGaussMLE
         for (a, b) in zip(s2.emitters, l2.emitters), f in fieldnames(GaussMLE.Emitter2DFitGaussMLE)
@@ -106,9 +120,13 @@ end
         end
 
         # Emitter3DFitGaussMLE (AstigmaticXYZNB) round-trip: z + full covariance.
-        g3 = [GaussMLE.Emitter3DFitGaussMLE{T}(0.1i, 0.2i, 0.3i, 1000.0 + i, 5.0,
-                0.01, 0.012, 0.02, 0.003, 0.001, 0.002, 20.0, 0.5, 0.4, i, 1, 0, i) for i in 1:4]
-        s3 = SMLMAnalysis.BasicSMLD(g3, cam, 10, 1, Dict{String,Any}())
+        g3 = [
+            GaussMLE.Emitter3DFitGaussMLE{T}(
+                0.1i, 0.2i, 0.3i, 1000.0 + i, 5.0,
+                0.01, 0.012, 0.02, 0.003, 0.001, 0.002, 20.0, 0.5, 0.4, i, 1, 0, i
+            ) for i in 1:4
+        ]
+        s3 = SMLMAnalysis.BasicSMLD(g3, cam, 10, 1, Dict{String, Any}())
         p3 = joinpath(dir, "g3.h5"); save_smld(p3, s3); l3 = load_smld(p3)
         @test eltype(l3.emitters) <: GaussMLE.Emitter3DFitGaussMLE
         @test l3.emitters[2].z ≈ 0.6
@@ -117,10 +135,14 @@ end
 
         # Standard SMLMAnalysis.Emitter3DFit: off-diagonal covariances σ_xz/σ_yz survive
         # (they were never written before this fix).
-        e3 = [SMLMAnalysis.Emitter3DFit{T}(0.1i, 0.2i, 0.3i, 1000.0 + i, 5.0,
+        e3 = [
+            SMLMAnalysis.Emitter3DFit{T}(
+                0.1i, 0.2i, 0.3i, 1000.0 + i, 5.0,
                 0.01, 0.012, 0.02, 20.0, 0.5;
-                σ_xy=0.003, σ_xz=0.001, σ_yz=0.002, frame=i, dataset=1, id=i) for i in 1:4]
-        s3s = SMLMAnalysis.BasicSMLD(e3, cam, 10, 1, Dict{String,Any}())
+                σ_xy = 0.003, σ_xz = 0.001, σ_yz = 0.002, frame = i, dataset = 1, id = i
+            ) for i in 1:4
+        ]
+        s3s = SMLMAnalysis.BasicSMLD(e3, cam, 10, 1, Dict{String, Any}())
         p3s = joinpath(dir, "e3.h5"); save_smld(p3s, s3s); l3s = load_smld(p3s)
         @test eltype(l3s.emitters) <: SMLMAnalysis.Emitter3DFit
         @test l3s.emitters[2].σ_xz ≈ 0.001
@@ -129,12 +151,15 @@ end
         # Abstract-eltype SMLD (as the pipeline produced before narrowing):
         # save_smld must reload it as concrete Emitter2DFitSigma, NOT degrade to
         # SMLMAnalysis.Emitter2DFit and drop the PSF-width σ.
-        abs_v = SMLMAnalysis.AbstractEmitter[GaussMLE.Emitter2DFitSigma{T}(
-                    0.1i, 0.2i, 1000.0 + i, 5.0, 0.13,
-                    0.01, 0.012, 0.003, 20.0, 0.5, 0.002,
-                    0.4, i, 1, 0, i) for i in 1:4]
+        abs_v = SMLMAnalysis.AbstractEmitter[
+            GaussMLE.Emitter2DFitSigma{T}(
+                0.1i, 0.2i, 1000.0 + i, 5.0, 0.13,
+                0.01, 0.012, 0.003, 20.0, 0.5, 0.002,
+                0.4, i, 1, 0, i
+            ) for i in 1:4
+        ]
         @test eltype(abs_v) == SMLMAnalysis.AbstractEmitter
-        s_abs = SMLMAnalysis.BasicSMLD(abs_v, cam, 10, 1, Dict{String,Any}())
+        s_abs = SMLMAnalysis.BasicSMLD(abs_v, cam, 10, 1, Dict{String, Any}())
         pabs = joinpath(dir, "abs.h5"); save_smld(pabs, s_abs); labs = load_smld(pabs)
         @test eltype(labs.emitters) <: GaussMLE.Emitter2DFitSigma   # NOT SMLMAnalysis.Emitter2DFit
         @test labs.emitters[2].σ ≈ 0.13                             # PSF-width σ preserved
@@ -145,48 +170,60 @@ end
 @testset "step checkpoint is versioned HDF5" begin
     # _save_step_smld writes through save_smld; load_smld must read it back unchanged.
     cam = IdealCamera(16, 16, 0.1)
-    em = [SMLMAnalysis.Emitter2DFit{Float64}(0.1i, 0.2i, 1000.0 + i, 5.0, 0.01, 0.012, 20.0, 0.5;
-                                frame=i, dataset=1 + (i % 2)) for i in 1:6]
-    smld = SMLMAnalysis.BasicSMLD(em, cam, 6, 2, Dict{String,Any}())
-    dm = SMLMDriftCorrection.LegendrePolynomial(smld; degree=2)
+    em = [
+        SMLMAnalysis.Emitter2DFit{Float64}(
+            0.1i, 0.2i, 1000.0 + i, 5.0, 0.01, 0.012, 20.0, 0.5;
+            frame = i, dataset = 1 + (i % 2)
+        ) for i in 1:6
+    ]
+    smld = SMLMAnalysis.BasicSMLD(em, cam, 6, 2, Dict{String, Any}())
+    dm = SMLMDriftCorrection.LegendrePolynomial(smld; degree = 2)
     mktempdir() do dir
-        p = SMLMAnalysis._save_step_smld(joinpath(dir, "03_driftcorrect"), smld;
-                                         filename="smld_corrected.h5", drift_model=dm)
+        p = SMLMAnalysis._save_step_smld(
+            joinpath(dir, "03_driftcorrect"), smld;
+            filename = "smld_corrected.h5", drift_model = dm
+        )
         @test p == joinpath(dir, "03_driftcorrect", "smld_corrected.h5") && isfile(p)
         s2 = load_smld(p)
         @test s2.emitters isa Vector{SMLMAnalysis.Emitter2DFit{Float64}}
-        @test all(getfield(a, f) == getfield(b, f) for (a, b) in zip(em, s2.emitters)
-                  for f in fieldnames(SMLMAnalysis.Emitter2DFit{Float64}))
+        @test all(
+            getfield(a, f) == getfield(b, f) for (a, b) in zip(em, s2.emitters)
+                for f in fieldnames(SMLMAnalysis.Emitter2DFit{Float64})
+        )
         @test (s2.n_frames, s2.n_datasets) == (6, 2)
         @test s2.camera.pixel_edges_x == cam.pixel_edges_x
         @test s2.metadata["drift_correction"]["model_type"] == "LegendrePolynomial"
-        @test SMLMAnalysis._save_step_smld(nothing, smld; filename="x.h5") === nothing
+        @test SMLMAnalysis._save_step_smld(nothing, smld; filename = "x.h5") === nothing
     end
 end
 
 @testset "edge geometry metadata round-trip" begin
     # Edge classification mirrors its cell mask into metadata; save_smld must keep it.
     CP = SMLMAnalysis.SMLMClustering.CellPolygon
-    sq(x0, s) = NTuple{2,Float64}[(x0, x0), (x0 + s, x0), (x0 + s, x0 + s), (x0, x0 + s)]
-    cells = [CP(sq(0.0, 4.0), [sq(0.5, 1.0), sq(2.0, 0.5)]),   # two holes
-             CP(sq(5.0, 1.0)),                                # no holes
-             CP(sq(7.0, 2.0), [sq(7.5, 0.2)])]
+    sq(x0, s) = NTuple{2, Float64}[(x0, x0), (x0 + s, x0), (x0 + s, x0 + s), (x0, x0 + s)]
+    cells = [
+        CP(sq(0.0, 4.0), [sq(0.5, 1.0), sq(2.0, 0.5)]),   # two holes
+        CP(sq(5.0, 1.0)),                                # no holes
+        CP(sq(7.0, 2.0), [sq(7.5, 0.2)]),
+    ]
     outer = sq(0.0, 4.0)
     cam = IdealCamera(16, 16, 0.1)
-    em = [SMLMAnalysis.Emitter2DFit{Float64}(0.1i, 0.1i, 1000.0, 5.0, 0.01, 0.01, 20.0, 0.5; frame=i) for i in 1:3]
+    em = [SMLMAnalysis.Emitter2DFit{Float64}(0.1i, 0.1i, 1000.0, 5.0, 0.01, 0.01, 20.0, 0.5; frame = i) for i in 1:3]
     cellkey(cs) = [(c.outer, c.holes) for c in cs]   # CellPolygon has no ==; compare its fields
     mktempdir() do dir
-        md = Dict{String,Any}("edge_cells" => cells, "edge_outer_polygon" => outer,
-                              "empty_cells" => CP[], "empty_polygon" => NTuple{2,Float64}[])
+        md = Dict{String, Any}(
+            "edge_cells" => cells, "edge_outer_polygon" => outer,
+            "empty_cells" => CP[], "empty_polygon" => NTuple{2, Float64}[]
+        )
         p = joinpath(dir, "geom.h5")
         save_smld(p, SMLMAnalysis.BasicSMLD(em, cam, 3, 1, md))
         m2 = load_smld(p).metadata
         @test m2["edge_outer_polygon"] == outer
-        @test m2["edge_outer_polygon"] isa Vector{NTuple{2,Float64}}
+        @test m2["edge_outer_polygon"] isa Vector{NTuple{2, Float64}}
         @test m2["edge_cells"] isa Vector{CP}
         @test cellkey(m2["edge_cells"]) == cellkey(cells)
         @test m2["empty_cells"] isa Vector{CP} && isempty(m2["empty_cells"])
-        @test m2["empty_polygon"] isa Vector{NTuple{2,Float64}} && isempty(m2["empty_polygon"])
+        @test m2["empty_polygon"] isa Vector{NTuple{2, Float64}} && isempty(m2["empty_polygon"])
     end
 end
 
@@ -206,7 +243,7 @@ end
         # FilterConfig: photons/precision are Tuple{Float64,Float64}; Inf must
         # serialize as TOML `inf`. FilterConfig has no nested-config fields, so
         # every value sits at the root table.
-        cfg = FilterConfig(photons=(500.0, Inf), precision=(0.0, 0.02))
+        cfg = FilterConfig(photons = (500.0, Inf), precision = (0.0, 0.02))
         SMLMAnalysis._save_config!(dir, cfg)
         parsed = TOML.parsefile(joinpath(dir, "config.toml"))   # throws if invalid TOML
         @test parsed["type"] == "FilterConfig"
@@ -216,7 +253,7 @@ end
 
         # DetectFitConfig.datasets is an AbstractVector{Int}; a UnitRange (1:19)
         # used to emit the bare, invalid `datasets = 1:19`. It must now parse.
-        cfg2 = DetectFitConfig(datasets=1:19)
+        cfg2 = DetectFitConfig(datasets = 1:19)
         SMLMAnalysis._save_config!(dir, cfg2)
         @test TOML.parsefile(joinpath(dir, "config.toml")) isa AbstractDict  # no parse error
 
@@ -267,7 +304,7 @@ end
         @test all(cal.gain .≈ 0.5f0)     # e⁻/ADU = 1/gain_stored
         @test all(cal.offset .≈ 100.0f0)
 
-        cam = build_camera_from_mic_h5(path; pixel_size=0.1)
+        cam = build_camera_from_mic_h5(path; pixel_size = 0.1)
         @test all(cam.readnoise .≈ 1.0f0)
         @test all(cam.gain .≈ 0.5f0)
         @test all(cam.offset .≈ 100.0f0)
@@ -285,7 +322,7 @@ end
             g["Data001"] = rand(Float32, 4, 4, 3)
             SMLMAnalysis.HDF5.create_group(g, "Data002")
         end
-        @test_logs (:warn, r"load_mic_h5: skipping unreadable data block \"Data002\"") match_mode=:any load_mic_h5(path)
+        @test_logs (:warn, r"load_mic_h5: skipping unreadable data block \"Data002\"") match_mode = :any load_mic_h5(path)
         images, dataset_indices = load_mic_h5(path)
         @test size(images, 3) == 3
         @test all(==(1), dataset_indices)
@@ -299,9 +336,11 @@ end
     # type differs by Julia version, so only a throw is asserted.
     cam = IdealCamera(8, 8, 0.1)
     T = Float64
-    es = [SMLMAnalysis.Emitter2DFit{T}(0.1i, 0.2i, 1000.0 + i, 5.0, 0.01, 0.012, 20.0, 0.5, 0.4, i, 1, 0, i)
-          for i in 1:3]
-    smld = SMLMAnalysis.BasicSMLD(es, cam, 10, 1, Dict{String,Any}())
+    es = [
+        SMLMAnalysis.Emitter2DFit{T}(0.1i, 0.2i, 1000.0 + i, 5.0, 0.01, 0.012, 20.0, 0.5, 0.4, i, 1, 0, i)
+            for i in 1:3
+    ]
+    smld = SMLMAnalysis.BasicSMLD(es, cam, 10, 1, Dict{String, Any}())
 
     mktempdir() do dir
         # save_smld: destination is a directory, not a file.

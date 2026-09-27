@@ -7,7 +7,11 @@
 # Helper to check if path exists in HDF5 file (works with nested paths).
 # HDF5.haskey only checks direct children, so probe by indexing; a missing path
 # throws (→ false) but a real interrupt must still propagate.
-_h5_exists(f, path) = try; f[path]; true; catch e; e isa InterruptException && rethrow(); false; end
+_h5_exists(f, path) = try
+    f[path]; true
+catch e
+    e isa InterruptException && rethrow(); false
+end
 
 # Helper to resolve actual dataset path (handles both old and new H5 formats)
 function _resolve_data_path(f, dk::String)
@@ -39,7 +43,7 @@ Returns NamedTuple with fields:
 - has_calibration: whether calibration data exists
 """
 function load_mic_h5_info(filepath::String)
-    h5open(filepath, "r") do f
+    return h5open(filepath, "r") do f
         # Find data blocks
         zpos = f["Channel01/Zposition001"]
         data_keys = sort([k for k in keys(zpos) if startswith(k, "Data")])
@@ -62,7 +66,7 @@ function load_mic_h5_info(filepath::String)
                 e isa InterruptException && rethrow()
                 # Skip blocks without valid data, but surface the loss — a silently
                 # dropped block otherwise shows up only as a frame-count mismatch.
-                @warn "load_mic_h5_info: skipping unreadable data block \"$dk\"" exception=e
+                @warn "load_mic_h5_info: skipping unreadable data block \"$dk\"" exception = e
                 continue
             end
         end
@@ -81,7 +85,7 @@ function load_mic_h5_info(filepath::String)
             n_blocks = length(data_keys),
             frames_per_block = frames_per_block,
             has_calibration = _h5_exists(f, "Calibration"),
-            file_size_gb = filesize(filepath) / 1e9
+            file_size_gb = filesize(filepath) / 1.0e9,
         )
     end
 end
@@ -99,11 +103,11 @@ Returns NamedTuple with (offset, variance, gain) as 2D arrays:
 Use `load_mic_h5_calibration_for_scmos()` to convert these to SCMOSCamera's units.
 """
 function load_mic_h5_calibration(filepath::String)
-    h5open(filepath, "r") do f
+    return h5open(filepath, "r") do f
         offset = read(f["Calibration/CCDOffset"])
         variance = read(f["Calibration/CCDVar"])
         gain = read(f["Calibration/Gain"])
-        return (offset=offset, variance=variance, gain=gain)
+        return (offset = offset, variance = variance, gain = gain)
     end
 end
 
@@ -123,7 +127,7 @@ function load_mic_h5_calibration_for_scmos(filepath::String)
     return (
         offset = Float32.(cal.offset),
         readnoise = Float32.(sqrt.(cal.variance) ./ cal.gain),
-        gain = Float32.(1.0 ./ cal.gain)  # Invert gain to our convention
+        gain = Float32.(1.0 ./ cal.gain),  # Invert gain to our convention
     )
 end
 
@@ -141,11 +145,13 @@ Pixel size and QE are not stored in MIC H5 files and must be provided.
 - `pixel_size`: Pixel size in μm (required)
 - `qe`: Quantum efficiency 0-1 (default: 1.0)
 """
-function build_camera_from_mic_h5(filepath::String; pixel_size::Real, qe::Real=1.0)
+function build_camera_from_mic_h5(filepath::String; pixel_size::Real, qe::Real = 1.0)
     cal = load_mic_h5_calibration_for_scmos(filepath)
     ny, nx = size(cal.readnoise)
-    SCMOSCamera(nx, ny, Float32(pixel_size), cal.readnoise;
-                offset=cal.offset, gain=cal.gain, qe=Float32(qe))
+    return SCMOSCamera(
+        nx, ny, Float32(pixel_size), cal.readnoise;
+        offset = cal.offset, gain = cal.gain, qe = Float32(qe)
+    )
 end
 
 """
@@ -155,7 +161,7 @@ Load a single data block from MIC H5 file.
 block_num is 1-indexed.
 """
 function load_mic_h5_block(filepath::String, block_num::Int)
-    h5open(filepath, "r") do f
+    return h5open(filepath, "r") do f
         zpos = f["Channel01/Zposition001"]
         data_keys = sort([k for k in keys(zpos) if startswith(k, "Data")])
 
@@ -178,10 +184,12 @@ Returns:
 - images: 3D array (height × width × n_frames)
 - dataset_indices: Vector{Int} mapping each frame to its block (1-indexed)
 """
-function load_mic_h5(filepath::String;
-                          max_frames::Union{Int,Nothing}=nothing,
-                          max_blocks::Union{Int,Nothing}=nothing)
-    h5open(filepath, "r") do f
+function load_mic_h5(
+        filepath::String;
+        max_frames::Union{Int, Nothing} = nothing,
+        max_blocks::Union{Int, Nothing} = nothing
+    )
+    return h5open(filepath, "r") do f
         # Find all data blocks
         zpos = f["Channel01/Zposition001"]
         data_keys = sort([k for k in keys(zpos) if startswith(k, "Data")])
@@ -203,7 +211,7 @@ function load_mic_h5(filepath::String;
                 e isa InterruptException && rethrow()
                 # Skip blocks without valid data, but surface the loss — a silently
                 # dropped block otherwise shows up only as a frame-count mismatch.
-                @warn "load_mic_h5: skipping unreadable data block \"$dk\"" exception=e
+                @warn "load_mic_h5: skipping unreadable data block \"$dk\"" exception = e
                 continue
             end
         end
@@ -238,8 +246,8 @@ function load_mic_h5(filepath::String;
                 break
             end
 
-            images[:, :, frame_idx:frame_idx+n_copy-1] = Float32.(block_data[:, :, 1:n_copy])
-            dataset_indices[frame_idx:frame_idx+n_copy-1] .= block_num
+            images[:, :, frame_idx:(frame_idx + n_copy - 1)] = Float32.(block_data[:, :, 1:n_copy])
+            dataset_indices[frame_idx:(frame_idx + n_copy - 1)] .= block_num
             frame_idx += n_copy
 
             if frame_idx > n_to_load

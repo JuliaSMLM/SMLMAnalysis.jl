@@ -15,7 +15,7 @@ using Statistics
 
     # Test SMLMAnalysis.AnalysisInfo with data
     cfg0 = FilterConfig()
-    si0 = SMLMAnalysis.StepInfo(1, cfg0, 0.2, Dict{Symbol,Any}(); info=SMLMAnalysis.FilterInfo(10, 8, 0.2))
+    si0 = SMLMAnalysis.StepInfo(1, cfg0, 0.2, Dict{Symbol, Any}(); info = SMLMAnalysis.FilterInfo(10, 8, 0.2))
     info = SMLMAnalysis.AnalysisInfo(1.5, SMLMAnalysis.StepInfo[si0])
     @test info.elapsed_s == 1.5
     @test length(info.step_infos) == 1
@@ -24,7 +24,7 @@ using Statistics
     # Test SMLMAnalysis.StepInfo with typed info
     cfg = FilterConfig()
     filter_info = SMLMAnalysis.FilterInfo(100, 80, 0.5)
-    step_info = SMLMAnalysis.StepInfo(1, cfg, 0.5, Dict{Symbol,Any}(:n_before => 100); info=filter_info)
+    step_info = SMLMAnalysis.StepInfo(1, cfg, 0.5, Dict{Symbol, Any}(:n_before => 100); info = filter_info)
     @test step_info.info !== nothing
     @test step_info.info isa SMLMAnalysis.FilterInfo
     @test step_info.info.n_before == 100
@@ -32,7 +32,7 @@ using Statistics
     @test step_info.elapsed_s == 0.5
 
     # Test SMLMAnalysis.StepInfo without info
-    step_info2 = SMLMAnalysis.StepInfo(2, cfg, 0.3, Dict{Symbol,Any}())
+    step_info2 = SMLMAnalysis.StepInfo(2, cfg, 0.3, Dict{Symbol, Any}())
     @test step_info2.info === nothing
 
     # Test native info structs
@@ -73,8 +73,8 @@ using Statistics
     ys = [0.0, 0.0, 0.05, 0.05, 5.0]
     σs = [0.01, 0.01, 0.01, 0.05, 0.2]
     emitters = [SMLMAnalysis.Emitter2DFit(xs[i], ys[i], 1000.0, 10.0, σs[i], σs[i], 0.0, 1.0, 1.0, i, 1, 0, i) for i in 1:5]
-    smld_df = SMLMAnalysis.BasicSMLD(emitters, cam, 1, 1, Dict{String,Any}())
-    cfg_df = DensityFilterConfig(n_sigma=3.0, min_neighbors=1)
+    smld_df = SMLMAnalysis.BasicSMLD(emitters, cam, 1, 1, Dict{String, Any}())
+    cfg_df = DensityFilterConfig(n_sigma = 3.0, min_neighbors = 1)
     filtered_df, _ = SMLMAnalysis.densityfilter_step(smld_df, cfg_df)
 
     σ = [sqrt(e.σ_x^2 + e.σ_y^2) for e in emitters]
@@ -88,7 +88,7 @@ using Statistics
 
     # Non-finite σ is rejected up front rather than silently propagating.
     bad_emitters = [SMLMAnalysis.Emitter2DFit(0.0, 0.0, 1000.0, 10.0, NaN, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, 1)]
-    smld_bad = SMLMAnalysis.BasicSMLD(bad_emitters, cam, 1, 1, Dict{String,Any}())
+    smld_bad = SMLMAnalysis.BasicSMLD(bad_emitters, cam, 1, 1, Dict{String, Any}())
     @test_throws ArgumentError SMLMAnalysis.densityfilter_step(smld_bad, cfg_df)
 
     # IntensityFilter: non-finite photons rejected up front. Needs >=100
@@ -96,15 +96,16 @@ using Statistics
     # would skip the check before it is reached.
     many = [SMLMAnalysis.Emitter2DFit(0.01i, 0.01i, 1000.0, 10.0, 0.01, 0.01, 0.0, 1.0, 1.0, i, 1, 0, i) for i in 2:100]
     bad_photon = SMLMAnalysis.Emitter2DFit(0.5, 0.5, NaN, 10.0, 0.01, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, 1)
-    smld_ifbad = SMLMAnalysis.BasicSMLD(vcat([bad_photon], many), cam, 1, 1, Dict{String,Any}())
+    smld_ifbad = SMLMAnalysis.BasicSMLD(vcat([bad_photon], many), cam, 1, 1, Dict{String, Any}())
     @test_throws ArgumentError SMLMAnalysis.intensityfilter_step(smld_ifbad, IntensityFilterConfig())
 
     # psf_sigma: an explicit (lo, hi) — including a 0.0 lower bound — is
     # always applied, unlike :auto's "skip when degenerate" behavior.
     mkem_sigma(σ, i) = GaussMLE.Emitter2DFitSigma{Float64}(
-        0.0, 0.0, 1000.0, 5.0, σ, 0.01, 0.01, 0.0, 20.0, 0.5, 0.002, 1.0, 1, 1, 0, i)
-    smld_ps = SMLMAnalysis.BasicSMLD([mkem_sigma(0.05, 1), mkem_sigma(0.3, 2)], cam, 1, 1, Dict{String,Any}())
-    filtered_ps, _ = SMLMAnalysis.filter_step(smld_ps, FilterConfig(psf_sigma=(0.0, 0.1)))
+        0.0, 0.0, 1000.0, 5.0, σ, 0.01, 0.01, 0.0, 20.0, 0.5, 0.002, 1.0, 1, 1, 0, i
+    )
+    smld_ps = SMLMAnalysis.BasicSMLD([mkem_sigma(0.05, 1), mkem_sigma(0.3, 2)], cam, 1, 1, Dict{String, Any}())
+    filtered_ps, _ = SMLMAnalysis.filter_step(smld_ps, FilterConfig(psf_sigma = (0.0, 0.1)))
     @test length(filtered_ps.emitters) == 1
     @test filtered_ps.emitters[1].σ == 0.05
 end
@@ -113,17 +114,17 @@ end
     cam = IdealCamera(64, 64, 0.1)
 
     # Valid levels round-trip through AnalysisConfig / MultiTargetConfig construction.
-    @test AnalysisConfig(camera=cam, verbose=Verbosity.SILENT, checkpoint=Checkpoint.NONE).verbose == Verbosity.SILENT
-    @test AnalysisConfig(camera=cam, verbose=Verbosity.DEBUG, checkpoint=Checkpoint.ALL).checkpoint == Checkpoint.ALL
-    @test MultiTargetConfig(labels=[:A], outdir="x", verbose=Verbosity.DEBUG).verbose == Verbosity.DEBUG
+    @test AnalysisConfig(camera = cam, verbose = Verbosity.SILENT, checkpoint = Checkpoint.NONE).verbose == Verbosity.SILENT
+    @test AnalysisConfig(camera = cam, verbose = Verbosity.DEBUG, checkpoint = Checkpoint.ALL).checkpoint == Checkpoint.ALL
+    @test MultiTargetConfig(labels = [:A], outdir = "x", verbose = Verbosity.DEBUG).verbose == Verbosity.DEBUG
 
     # Out-of-range verbose/checkpoint must raise ArgumentError at construction.
-    @test_throws ArgumentError AnalysisConfig(camera=cam, verbose=-1)
-    @test_throws ArgumentError AnalysisConfig(camera=cam, verbose=Verbosity.DEBUG + 1)
-    @test_throws ArgumentError AnalysisConfig(camera=cam, checkpoint=-1)
-    @test_throws ArgumentError AnalysisConfig(camera=cam, checkpoint=Checkpoint.ALL + 1)
-    @test_throws ArgumentError MultiTargetConfig(labels=[:A], outdir="x", verbose=-1)
-    @test_throws ArgumentError MultiTargetConfig(labels=[:A], outdir="x", verbose=Verbosity.DEBUG + 1)
+    @test_throws ArgumentError AnalysisConfig(camera = cam, verbose = -1)
+    @test_throws ArgumentError AnalysisConfig(camera = cam, verbose = Verbosity.DEBUG + 1)
+    @test_throws ArgumentError AnalysisConfig(camera = cam, checkpoint = -1)
+    @test_throws ArgumentError AnalysisConfig(camera = cam, checkpoint = Checkpoint.ALL + 1)
+    @test_throws ArgumentError MultiTargetConfig(labels = [:A], outdir = "x", verbose = -1)
+    @test_throws ArgumentError MultiTargetConfig(labels = [:A], outdir = "x", verbose = Verbosity.DEBUG + 1)
 
     # Same validation at the _run_pipeline entry point, for direct calls that
     # bypass AnalysisConfig entirely.
@@ -139,8 +140,8 @@ end
     @test CalibrationResult === SMLMFrameConnection.CalibrationResult
 
     # CalibrationConfig can be nested in FrameConnectConfig
-    cal_cfg = CalibrationConfig(clamp_k_to_one=true)
-    fc_cfg = FrameConnectConfig(max_frame_gap=5, calibration=cal_cfg)
+    cal_cfg = CalibrationConfig(clamp_k_to_one = true)
+    fc_cfg = FrameConnectConfig(max_frame_gap = 5, calibration = cal_cfg)
     @test fc_cfg.calibration !== nothing
     @test fc_cfg.calibration.clamp_k_to_one == true
 
@@ -163,13 +164,15 @@ end
 @testset "stepinfo/stepinfos accessors" begin
     # Build StepInfos directly; FilterConfig → name "filter" (repeated),
     # DensityFilterConfig → name "densityfilter" (unique).
-    si_a = SMLMAnalysis.StepInfo(1, FilterConfig(), 0.1, Dict{Symbol,Any}(); info=SMLMAnalysis.FilterInfo(100, 90, 0.1))
-    si_b = SMLMAnalysis.StepInfo(2, DensityFilterConfig(), 0.2, Dict{Symbol,Any}(); info=SMLMAnalysis.DensityFilterInfo(90, 80, 5, 0.2))
-    si_c = SMLMAnalysis.StepInfo(3, FilterConfig(), 0.3, Dict{Symbol,Any}(); info=SMLMAnalysis.FilterInfo(200, 150, 0.3))
+    si_a = SMLMAnalysis.StepInfo(1, FilterConfig(), 0.1, Dict{Symbol, Any}(); info = SMLMAnalysis.FilterInfo(100, 90, 0.1))
+    si_b = SMLMAnalysis.StepInfo(2, DensityFilterConfig(), 0.2, Dict{Symbol, Any}(); info = SMLMAnalysis.DensityFilterInfo(90, 80, 5, 0.2))
+    si_c = SMLMAnalysis.StepInfo(3, FilterConfig(), 0.3, Dict{Symbol, Any}(); info = SMLMAnalysis.FilterInfo(200, 150, 0.3))
     steps = SMLMAnalysis.StepInfo[si_a, si_b, si_c]
 
-    for info in (SMLMAnalysis.AnalysisInfo(1.0, steps),
-                 SMLMAnalysis.MultiTargetInfo(1.0, Dict{Symbol,SMLMAnalysis.AnalysisInfo}(), steps))
+    for info in (
+            SMLMAnalysis.AnalysisInfo(1.0, steps),
+            SMLMAnalysis.MultiTargetInfo(1.0, Dict{Symbol, SMLMAnalysis.AnalysisInfo}(), steps),
+        )
         # Symbol and String name lookup return the same SMLMAnalysis.StepInfo
         @test stepinfo(info, :densityfilter) === si_b
         @test stepinfo(info, "densityfilter") === si_b

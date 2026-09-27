@@ -53,20 +53,20 @@ config_clusters = AnalysisConfig(
     camera = camera,
     steps = [
         DetectFitConfig(
-            boxer = BoxerConfig(boxsize=7, min_photons=500.0, psf_sigma=psf_sigma),
-            fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20),
+            boxer = BoxerConfig(boxsize = 7, min_photons = 500.0, psf_sigma = psf_sigma),
+            fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), iterations = 20),
         ),
         FilterConfig(
             photons = (500.0, Inf),
             precision = (0.0, 0.007),
-            pvalue = (1e-3, 1.0),
+            pvalue = (1.0e-3, 1.0),
         ),
-        FrameConnectConfig(max_frame_gap = 5, calibration=CalibrationConfig()),
+        FrameConnectConfig(max_frame_gap = 5, calibration = CalibrationConfig()),
         DriftConfig(degree = 2),
-        DensityFilterConfig(n_sigma=2.0, min_neighbors=:auto),
-        RenderConfig(zoom=20, colormap=:inferno, scalebar=true),
-        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing, scalebar=true),
-        RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame, scalebar=true),
+        DensityFilterConfig(n_sigma = 2.0, min_neighbors = :auto),
+        RenderConfig(zoom = 20, colormap = :inferno, scalebar = true),
+        RenderConfig(strategy = HistogramRender(), zoom = 10, colormap = :turbo, color_by = :absolute_frame, clip_percentile = nothing, scalebar = true),
+        RenderConfig(strategy = CircleRender(), zoom = 50, colormap = :turbo, color_by = :absolute_frame, scalebar = true),
     ],
     verbose = Verbosity.STANDARD,
 )
@@ -75,20 +75,20 @@ config_lines = AnalysisConfig(
     camera = camera,
     steps = [
         DetectFitConfig(
-            boxer = BoxerConfig(boxsize=7, min_photons=500.0, psf_sigma=psf_sigma),
-            fitter = GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20),
+            boxer = BoxerConfig(boxsize = 7, min_photons = 500.0, psf_sigma = psf_sigma),
+            fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), iterations = 20),
         ),
         FilterConfig(
             photons = (500.0, Inf),
             precision = (0.0, 0.007),
-            pvalue = (1e-3, 1.0),
+            pvalue = (1.0e-3, 1.0),
         ),
-        FrameConnectConfig(max_frame_gap = 5, calibration=CalibrationConfig()),
+        FrameConnectConfig(max_frame_gap = 5, calibration = CalibrationConfig()),
         DriftConfig(degree = 2),
-        DensityFilterConfig(n_sigma=2.0, min_neighbors=:auto),
-        RenderConfig(zoom=20, colormap=:inferno, scalebar=true),
-        RenderConfig(strategy=HistogramRender(), zoom=10, colormap=:turbo, color_by=:absolute_frame, clip_percentile=nothing, scalebar=true),
-        RenderConfig(strategy=CircleRender(), zoom=50, colormap=:turbo, color_by=:absolute_frame, scalebar=true),
+        DensityFilterConfig(n_sigma = 2.0, min_neighbors = :auto),
+        RenderConfig(zoom = 20, colormap = :inferno, scalebar = true),
+        RenderConfig(strategy = HistogramRender(), zoom = 10, colormap = :turbo, color_by = :absolute_frame, clip_percentile = nothing, scalebar = true),
+        RenderConfig(strategy = CircleRender(), zoom = 50, colormap = :turbo, color_by = :absolute_frame, scalebar = true),
     ],
     verbose = Verbosity.STANDARD,
 )
@@ -104,18 +104,22 @@ println("="^60)
 mt = MultiTargetConfig(
     labels = [:clusters, :lines],
     steps = [
-        CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
-        CompositeRenderConfig(zoom=10.0, strategy=HistogramRender()),
-        CompositeRenderConfig(zoom=50.0, strategy=CircleRender()),
-        CrossCorrConfig(r_max=0.5, dr=0.005),
+        CompositeRenderConfig(zoom = 20.0, strategy = GaussianRender()),
+        CompositeRenderConfig(zoom = 10.0, strategy = HistogramRender()),
+        CompositeRenderConfig(zoom = 50.0, strategy = CircleRender()),
+        CrossCorrConfig(r_max = 0.5, dr = 0.005),
     ],
-    outdir = let d = joinpath(@__DIR__, "output", "multicolor_example"); rm(d; force=true, recursive=true); d end,
+    outdir = let d = joinpath(@__DIR__, "output", "multicolor_example")
+        rm(d; force = true, recursive = true); d
+    end,
 )
 
-(result, info) = analyze([
-    (image_stacks_clusters, config_clusters),
-    (image_stacks_lines, config_lines),
-], mt)
+(result, info) = analyze(
+    [
+        (image_stacks_clusters, config_clusters),
+        (image_stacks_lines, config_lines),
+    ], mt
+)
 
 # ============================================================================
 # Summary
@@ -133,11 +137,11 @@ for label in result.labels
 end
 total = sum(length(s.emitters) for s in result.smlds)
 println("  Total: $total localizations")
-println("  Time: $(round(info.elapsed_s, digits=2))s")
+println("  Time: $(round(info.elapsed_s, digits = 2))s")
 println()
 println("Per-channel info:")
 for (label, ch_info) in info.channels
-    println("  $label: $(round(ch_info.elapsed_s, digits=2))s")
+    println("  $label: $(round(ch_info.elapsed_s, digits = 2))s")
 end
 println()
 println("Output: $(mt.outdir)")

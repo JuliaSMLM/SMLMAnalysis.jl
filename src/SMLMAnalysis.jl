@@ -262,8 +262,10 @@ export install_agent_guide, uninstall_agent_guide, agent_guide_status
 # DriftConfig, RenderConfig, BaGoLConfig, clustering configs) are deliberately absent
 # — extending Base.show for them would be type piracy.
 Base.show(io::IO, cfg::AbstractMultiTargetStep) = _show_config(io, cfg)
-for T in (AnalysisConfig, MultiTargetConfig, DetectFitConfig,
-          FilterConfig, DensityFilterConfig, IntensityFilterConfig)
+for T in (
+        AnalysisConfig, MultiTargetConfig, DetectFitConfig,
+        FilterConfig, DensityFilterConfig, IntensityFilterConfig,
+    )
     @eval Base.show(io::IO, cfg::$T) = _show_config(io, cfg)
 end
 
@@ -295,22 +297,28 @@ using PrecompileTools: @setup_workload, @compile_workload
     Random.seed!(1)
     cam = IdealCamera(32, 32, 0.1)
     sim = StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 1)
-    (_, si) = simulate(sim;
-        pattern  = Nmer2D(n = 8, d = 0.05),
+    (_, si) = simulate(
+        sim;
+        pattern = Nmer2D(n = 8, d = 0.05),
         molecule = GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
-        camera   = cam)
-    (imgs, _) = gen_images(si.smld_model, MicroscopePSFs.GaussianPSF(0.13);
-        dataset = 1, bg = 20.0, poisson_noise = true)
+        camera = cam
+    )
+    (imgs, _) = gen_images(
+        si.smld_model, MicroscopePSFs.GaussianPSF(0.13);
+        dataset = 1, bg = 20.0, poisson_noise = true
+    )
 
     @compile_workload begin
         # Cached: the detect/fit → filter → frame-connect → render pipeline.
         cfg = AnalysisConfig(
-            DetectFitConfig(boxer  = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
-                            fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)),
+            DetectFitConfig(
+                boxer = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
+                fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)
+            ),
             FilterConfig(photons = (100.0, Inf)),
             FrameConnectConfig(max_frame_gap = 2),
             RenderConfig(zoom = 10);
-            camera  = cam,
+            camera = cam,
             verbose = Verbosity.SILENT,
         )
         analyze([imgs], cfg)

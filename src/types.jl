@@ -51,10 +51,10 @@ producing only image/diagnostic outputs — the SMLD is always on disk for
 downstream iteration.
 """
 module Checkpoint
-    const NONE      = 0   # no SMLD checkpoints
-    const END       = 1   # final SMLD step only (orchestrator handles)
+    const NONE = 0   # no SMLD checkpoints
+    const END = 1   # final SMLD step only (orchestrator handles)
     const EXPENSIVE = 2   # expensive steps + final (default)
-    const ALL       = 3   # every SMLD-producing step
+    const ALL = 3   # every SMLD-producing step
 end
 
 """
@@ -64,9 +64,12 @@ Throw `ArgumentError` if `v` is outside `[Verbosity.SILENT, Verbosity.DEBUG]`.
 Returns `v` unchanged otherwise, so it can be used inline.
 """
 function _validate_verbose(v::Int)
-    (Verbosity.SILENT <= v <= Verbosity.DEBUG) || throw(ArgumentError(
-        "verbose=$v is outside the Verbosity range [$(Verbosity.SILENT), $(Verbosity.DEBUG)]"))
-    v
+    (Verbosity.SILENT <= v <= Verbosity.DEBUG) || throw(
+        ArgumentError(
+            "verbose=$v is outside the Verbosity range [$(Verbosity.SILENT), $(Verbosity.DEBUG)]"
+        )
+    )
+    return v
 end
 
 """
@@ -76,9 +79,12 @@ Throw `ArgumentError` if `cp` is outside `[Checkpoint.NONE, Checkpoint.ALL]`.
 Returns `cp` unchanged otherwise, so it can be used inline.
 """
 function _validate_checkpoint(cp::Int)
-    (Checkpoint.NONE <= cp <= Checkpoint.ALL) || throw(ArgumentError(
-        "checkpoint=$cp is outside the Checkpoint range [$(Checkpoint.NONE), $(Checkpoint.ALL)]"))
-    cp
+    (Checkpoint.NONE <= cp <= Checkpoint.ALL) || throw(
+        ArgumentError(
+            "checkpoint=$cp is outside the Checkpoint range [$(Checkpoint.NONE), $(Checkpoint.ALL)]"
+        )
+    )
+    return cp
 end
 
 # ============================================================
@@ -107,22 +113,22 @@ cam_cropped = crop_camera(cam, 100:300, 50:200)
 """
 function crop_camera(camera::SMLMData.IdealCamera, roi_x::UnitRange{Int}, roi_y::UnitRange{Int})
     # Slice pixel edges (need +1 for edges)
-    new_edges_x = camera.pixel_edges_x[roi_x.start:roi_x.stop+1]
-    new_edges_y = camera.pixel_edges_y[roi_y.start:roi_y.stop+1]
-    SMLMData.IdealCamera(new_edges_x, new_edges_y)
+    new_edges_x = camera.pixel_edges_x[roi_x.start:(roi_x.stop + 1)]
+    new_edges_y = camera.pixel_edges_y[roi_y.start:(roi_y.stop + 1)]
+    return SMLMData.IdealCamera(new_edges_x, new_edges_y)
 end
 
 function crop_camera(camera::SMLMData.SCMOSCamera, roi_x::UnitRange{Int}, roi_y::UnitRange{Int})
     # Slice pixel edges (need +1 for edges)
-    new_edges_x = camera.pixel_edges_x[roi_x.start:roi_x.stop+1]
-    new_edges_y = camera.pixel_edges_y[roi_y.start:roi_y.stop+1]
+    new_edges_x = camera.pixel_edges_x[roi_x.start:(roi_x.stop + 1)]
+    new_edges_y = camera.pixel_edges_y[roi_y.start:(roi_y.stop + 1)]
 
     # Helper to crop matrix or keep scalar
     function crop_param(param, roi_y, roi_x)
-        param isa Matrix ? param[roi_y, roi_x] : param
+        return param isa Matrix ? param[roi_y, roi_x] : param
     end
 
-    SMLMData.SCMOSCamera(
+    return SMLMData.SCMOSCamera(
         new_edges_x,
         new_edges_y,
         crop_param(camera.offset, roi_y, roi_x),
@@ -142,8 +148,8 @@ Crop image stack to specified pixel ROI.
 - `roi_x`: Pixel range in x (columns)
 - `roi_y`: Pixel range in y (rows)
 """
-function crop_images(images::AbstractArray{T,3}, roi_x::UnitRange{Int}, roi_y::UnitRange{Int}) where T
-    images[roi_y, roi_x, :]
+function crop_images(images::AbstractArray{T, 3}, roi_x::UnitRange{Int}, roi_y::UnitRange{Int}) where {T}
+    return images[roi_y, roi_x, :]
 end
 
 # ============================================================
@@ -192,8 +198,8 @@ struct StepInfo <: SMLMData.AbstractSMLMInfo
     info::Union{SMLMData.AbstractSMLMInfo, Nothing}
 end
 
-function StepInfo(number::Int, cfg::SMLMData.AbstractSMLMConfig, elapsed_s::Float64, summary::Dict{Symbol,Any}; info=nothing)
-    StepInfo(number, step_name(cfg), cfg, now(), elapsed_s, summary, info)
+function StepInfo(number::Int, cfg::SMLMData.AbstractSMLMConfig, elapsed_s::Float64, summary::Dict{Symbol, Any}; info = nothing)
+    return StepInfo(number, step_name(cfg), cfg, now(), elapsed_s, summary, info)
 end
 
 # ============================================================
@@ -421,7 +427,7 @@ end
 function Base.show(io::IO, r::AnalysisResult)
     n = length(r.smld.emitters)
     print(io, "AnalysisResult: $n localizations")
-    r.drift_model !== nothing && print(io, ", drift corrected")
+    return r.drift_model !== nothing && print(io, ", drift corrected")
 end
 
 # ============================================================
@@ -482,7 +488,7 @@ end
 
 # Varargs constructor: AnalysisConfig(step1, step2, ...; camera=cam, outdir="out/")
 function AnalysisConfig(steps::SMLMData.AbstractSMLMConfig...; camera::SMLMData.AbstractCamera, kwargs...)
-    AnalysisConfig(; camera=camera, steps=collect(SMLMData.AbstractSMLMConfig, steps), kwargs...)
+    return AnalysisConfig(; camera = camera, steps = collect(SMLMData.AbstractSMLMConfig, steps), kwargs...)
 end
 
 # ============================================================
@@ -497,26 +503,27 @@ end
 function _show_config(io::IO, cfg)
     T = typeof(cfg)
     vals = [string(f, "=", getfield(cfg, f)) for f in fieldnames(T)]
-    print(io, "$(nameof(T))($(join(vals, ", ")))")
+    return print(io, "$(nameof(T))($(join(vals, ", ")))")
 end
 
 function Base.show(io::IO, si::StepInfo)
-    print(io, "Step $(si.number): $(si.name) ($(round(si.elapsed_s, digits=2))s)")
+    return print(io, "Step $(si.number): $(si.name) ($(round(si.elapsed_s, digits = 2))s)")
 end
 
 function Base.show(io::IO, info::AnalysisInfo)
     n = length(info.step_infos)
-    print(io, "AnalysisInfo: $n steps, $(round(info.elapsed_s, digits=2))s")
+    return print(io, "AnalysisInfo: $n steps, $(round(info.elapsed_s, digits = 2))s")
 end
 
 function Base.show(io::IO, ::MIME"text/plain", info::AnalysisInfo)
-    println(io, "AnalysisInfo: $(length(info.step_infos)) steps, $(round(info.elapsed_s, digits=2))s")
+    println(io, "AnalysisInfo: $(length(info.step_infos)) steps, $(round(info.elapsed_s, digits = 2))s")
     for s in info.step_infos
-        println(io, "  $(s.number). $(s.name) ($(round(s.elapsed_s, digits=2))s)")
+        println(io, "  $(s.number). $(s.name) ($(round(s.elapsed_s, digits = 2))s)")
         for (k, v) in s.summary
             println(io, "      $k: $v")
         end
     end
+    return
 end
 
 # ============================================================
@@ -533,7 +540,7 @@ Supports up to 6 channels; provide explicit colors for more.
 function _default_colors(n::Int)
     defaults = [:cyan, :magenta, :yellow, :red, :green, :blue]
     n <= length(defaults) || throw(ArgumentError("Provide explicit colors for >$(length(defaults)) channels"))
-    defaults[1:n]
+    return defaults[1:n]
 end
 
 """
@@ -644,11 +651,14 @@ histories in `info.channels`. When a step name repeats (e.g. several `render` st
 returns the first; use [`stepinfos`](@ref) to get them all. (This differs from the removed
 `steps` Dict, which returned the LAST occurrence.)
 """
-function stepinfo(info::Union{AnalysisInfo,MultiTargetInfo}, name::Union{Symbol,AbstractString})
+function stepinfo(info::Union{AnalysisInfo, MultiTargetInfo}, name::Union{Symbol, AbstractString})
     key = String(name)
     idx = findfirst(si -> si.name == key, info.step_infos)
-    idx === nothing && throw(ArgumentError(
-        "no step named $(repr(key)); available step names: $(join(unique(si.name for si in info.step_infos), ", "))"))
+    idx === nothing && throw(
+        ArgumentError(
+            "no step named $(repr(key)); available step names: $(join(unique(si.name for si in info.step_infos), ", "))"
+        )
+    )
     return info.step_infos[idx]
 end
 
@@ -661,8 +671,11 @@ name is unknown or ambiguous but the config type is not, e.g. `stepinfo(info, Dr
 """
 function stepinfo(info::AnalysisInfo, T::Type{<:SMLMData.AbstractSMLMConfig})
     idx = findfirst(si -> si.config isa T, info.step_infos)
-    idx === nothing && throw(ArgumentError(
-        "no step with config isa $T; available step names: $(join(unique(si.name for si in info.step_infos), ", "))"))
+    idx === nothing && throw(
+        ArgumentError(
+            "no step with config isa $T; available step names: $(join(unique(si.name for si in info.step_infos), ", "))"
+        )
+    )
     return info.step_infos[idx]
 end
 
@@ -674,7 +687,7 @@ none). Use when a step type repeats, e.g. `stepinfos(info, :compositerender)` to
 several composite renders that the removed `steps` Dict hid behind suffixed keys. Same
 `MultiTargetInfo` caveat as [`stepinfo`](@ref): it searches `step_infos`, not `channels`.
 """
-stepinfos(info::Union{AnalysisInfo,MultiTargetInfo}, name::Union{Symbol,AbstractString}) =
+stepinfos(info::Union{AnalysisInfo, MultiTargetInfo}, name::Union{Symbol, AbstractString}) =
     filter(si -> si.name == String(name), info.step_infos)
 
 """
@@ -688,7 +701,7 @@ stepinfos(info::AnalysisInfo, T::Type{<:SMLMData.AbstractSMLMConfig}) =
 
 function Base.show(io::IO, mtr::MultiTargetResult)
     n = sum(length(s.emitters) for s in mtr.smlds)
-    print(io, "MultiTargetResult: $(length(mtr.labels)) channels, $n total localizations")
+    return print(io, "MultiTargetResult: $(length(mtr.labels)) channels, $n total localizations")
 end
 
 function Base.show(io::IO, ::MIME"text/plain", mtr::MultiTargetResult)
@@ -696,5 +709,5 @@ function Base.show(io::IO, ::MIME"text/plain", mtr::MultiTargetResult)
     for (i, label) in enumerate(mtr.labels)
         println(io, "  $label: $(length(mtr.smlds[i].emitters)) localizations")
     end
-    print(io, "Output: $(mtr.outdir)")
+    return print(io, "Output: $(mtr.outdir)")
 end

@@ -32,7 +32,7 @@ Configuration for pair cross-correlation g(r) between two channels.
     r_max::Float64 = 1.0
     dr::Float64 = 0.01
     edge_correction::Bool = true
-    channels::Tuple{Int,Int} = (1, 2)
+    channels::Tuple{Int, Int} = (1, 2)
 end
 
 """
@@ -40,11 +40,13 @@ end
 
 Compute pair cross-correlation g(r) between two channels. SMLDs pass through unmodified.
 """
-function crosscorr_step(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossCorrConfig;
-                         outdir::Union{String,Nothing}=nothing,
-                         step_number::Int=0,
-                         verbose::Int=Verbosity.STANDARD,
-                         labels::Vector{Symbol}=Symbol[])
+function crosscorr_step(
+        smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossCorrConfig;
+        outdir::Union{String, Nothing} = nothing,
+        step_number::Int = 0,
+        verbose::Int = Verbosity.STANDARD,
+        labels::Vector{Symbol} = Symbol[]
+    )
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
 
@@ -84,17 +86,17 @@ function crosscorr_step(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossCorrConfi
         end
     end
 
-    v >= Verbosity.PROGRESS && @info "  -> g(r) computed: $(length(r)) bins, peak=$(round(maximum(g; init=0.0), digits=2)) ($(round(t, digits=2))s)"
+    v >= Verbosity.PROGRESS && @info "  -> g(r) computed: $(length(r)) bins, peak=$(round(maximum(g; init = 0.0), digits = 2)) ($(round(t, digits = 2))s)"
 
     info = CrossCorrInfo(r, g, n_a, n_b, area, cfg.r_max, cfg.dr, label_a, label_b, t)
-    (smlds, info)
+    return (smlds, info)
 end
 
-_step_summary(info::CrossCorrInfo) = Dict{Symbol,Any}(
+_step_summary(info::CrossCorrInfo) = Dict{Symbol, Any}(
     :n_a => info.n_a,
     :n_b => info.n_b,
     :n_bins => length(info.r),
-    :peak_g => round(maximum(info.g; init=0.0), digits=3),
+    :peak_g => round(maximum(info.g; init = 0.0), digits = 3),
     :channel_a => info.channel_a,
     :channel_b => info.channel_b,
 )
@@ -105,12 +107,16 @@ _step_summary(info::CrossCorrInfo) = Dict{Symbol,Any}(
 Multi-target dispatch: pair cross-correlation. SMLDs pass through. `labels` is
 the only multi-target keyword this step reads (it does not use `colors`).
 """
-function analyze(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossCorrConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 labels::Vector{Symbol}=Symbol[])
-    t = @elapsed (smlds, cc_info) = crosscorr_step(smlds, cfg;
-        outdir=outdir, step_number=step_number, verbose=verbose, labels=labels)
-    (smlds, StepInfo(step_number, cfg, t, _step_summary(cc_info); info=cc_info))
+function analyze(
+        smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossCorrConfig;
+        outdir = nothing, step_number::Int = 0, verbose::Int = Verbosity.STANDARD,
+        labels::Vector{Symbol} = Symbol[]
+    )
+    t = @elapsed (smlds, cc_info) = crosscorr_step(
+        smlds, cfg;
+        outdir = outdir, step_number = step_number, verbose = verbose, labels = labels
+    )
+    return (smlds, StepInfo(step_number, cfg, t, _step_summary(cc_info); info = cc_info))
 end
 
 # ============================================================
@@ -141,8 +147,8 @@ function _compute_crosscorr(smld_a::SMLMData.BasicSMLD, smld_b::SMLMData.BasicSM
     # the annulus areas, and the r_centers all share one width. When r_max is not
     # an integer multiple of dr the last edge (n_bins*dr) extends just past r_max.
     n_bins = ceil(Int, cfg.r_max / cfg.dr)
-    r_edges = range(0.0, step=cfg.dr, length=n_bins + 1)
-    r_centers = [(r_edges[i] + r_edges[i+1]) / 2 for i in 1:n_bins]
+    r_edges = range(0.0, step = cfg.dr, length = n_bins + 1)
+    r_centers = [(r_edges[i] + r_edges[i + 1]) / 2 for i in 1:n_bins]
     search_radius = last(r_edges)   # = n_bins*dr, the outer edge of the last bin
 
     # Handle empty channels
@@ -161,9 +167,11 @@ function _compute_crosscorr(smld_a::SMLMData.BasicSMLD, smld_b::SMLMData.BasicSM
     # Ripley edge weights are computed against channel A's bounds (the A points are the
     # query centers). This correction assumes A and B share a FOV; full different-FOV
     # support (correlating over the A∩B intersection region) is a future enhancement.
-    if !(isapprox(x_min, xb_min; atol=1e-6) && isapprox(x_max, xb_max; atol=1e-6) &&
-         isapprox(y_min, yb_min; atol=1e-6) && isapprox(y_max, yb_max; atol=1e-6))
-        @warn "CrossCorr: channels A and B have different FOVs; edge correction assumes a shared FOV (intersection-region support is a future enhancement)." bounds_a=bounds bounds_b=(xb_min, xb_max, yb_min, yb_max)
+    if !(
+            isapprox(x_min, xb_min; atol = 1.0e-6) && isapprox(x_max, xb_max; atol = 1.0e-6) &&
+                isapprox(y_min, yb_min; atol = 1.0e-6) && isapprox(y_max, yb_max; atol = 1.0e-6)
+        )
+        @warn "CrossCorr: channels A and B have different FOVs; edge correction assumes a shared FOV (intersection-region support is a future enhancement)." bounds_a = bounds bounds_b = (xb_min, xb_max, yb_min, yb_max)
     end
 
     # Build KDTree from channel B
@@ -207,13 +215,13 @@ function _compute_crosscorr(smld_a::SMLMData.BasicSMLD, smld_b::SMLMData.BasicSM
     g = zeros(Float64, n_bins)
     for k in 1:n_bins
         r_inner = r_edges[k]
-        r_outer = r_edges[k+1]
+        r_outer = r_edges[k + 1]
         annulus_area = pi * (r_outer^2 - r_inner^2)
         expected = n_a * density_b * annulus_area
         g[k] = expected > 0 ? counts[k] / expected : 1.0
     end
 
-    (collect(r_centers), g, area)
+    return (collect(r_centers), g, area)
 end
 
 """
@@ -225,7 +233,7 @@ with radius r that falls inside the rectangular FOV defined by bounds.
 Returns a weight in (0, 1]. Points near boundaries get lower weights,
 which are inverted to up-weight their contributions.
 """
-function _ripley_edge_weight(x::Real, y::Real, r::Real, bounds::NTuple{4,<:Real})
+function _ripley_edge_weight(x::Real, y::Real, r::Real, bounds::NTuple{4, <:Real})
     x_min, x_max, y_min, y_max = bounds
 
     # r == 0: a zero-radius circle is a point fully inside the FOV → weight 1.0.
@@ -234,10 +242,10 @@ function _ripley_edge_weight(x::Real, y::Real, r::Real, bounds::NTuple{4,<:Real}
     r == 0 && return 1.0
 
     # Distances to each boundary
-    d_left   = x - x_min
-    d_right  = x_max - x
+    d_left = x - x_min
+    d_right = x_max - x
     d_bottom = y - y_min
-    d_top    = y_max - y
+    d_top = y_max - y
 
     # If circle fits entirely inside FOV, weight = 1
     if d_left >= r && d_right >= r && d_bottom >= r && d_top >= r
@@ -258,14 +266,16 @@ function _ripley_edge_weight(x::Real, y::Real, r::Real, bounds::NTuple{4,<:Real}
     # the corner region is double-counted. Check each of the 4 corners.
     # A corner at (cx, cy) contributes if both dx and dy < r AND
     # the corner is within the circle (sqrt(dx^2 + dy^2) < r)
-    corners = ((d_left, d_bottom), (d_left, d_top),
-               (d_right, d_bottom), (d_right, d_top))
+    corners = (
+        (d_left, d_bottom), (d_left, d_top),
+        (d_right, d_bottom), (d_right, d_top),
+    )
 
     for (dx, dy) in corners
         if dx < r && dy < r && dx^2 + dy^2 < r^2
             # The corner overlap angle needs to be added back
             # (it was subtracted twice, once for each boundary)
-            theta_outside -= acos(clamp(dx / r, -1.0, 1.0)) + acos(clamp(dy / r, -1.0, 1.0)) - pi/2
+            theta_outside -= acos(clamp(dx / r, -1.0, 1.0)) + acos(clamp(dy / r, -1.0, 1.0)) - pi / 2
         end
     end
 
@@ -280,7 +290,7 @@ end
 
 function _write_crosscorr_csv(dir::String, r::Vector{Float64}, g::Vector{Float64})
     filepath = joinpath(dir, "crosscorr_gr.csv")
-    open(filepath, "w") do io
+    return open(filepath, "w") do io
         println(io, "r,g")
         for i in eachindex(r)
             println(io, "$(r[i]),$(g[i])")
@@ -290,48 +300,53 @@ end
 
 function _write_crosscorr_stats(dir::String, cfg::CrossCorrConfig, info::CrossCorrInfo)
     filepath = joinpath(dir, "stats.md")
-    peak_g = maximum(info.g; init=0.0)
+    peak_g = maximum(info.g; init = 0.0)
     peak_r = length(info.g) > 0 ? info.r[argmax(info.g)] : 0.0
 
-    open(filepath, "w") do io
+    return open(filepath, "w") do io
         println(io, "# Cross-Correlation g(r) Statistics\n")
         println(io, "## Summary")
         println(io, "- **Channel A**: $(info.channel_a) ($(info.n_a) localizations)")
         println(io, "- **Channel B**: $(info.channel_b) ($(info.n_b) localizations)")
-        println(io, "- **FOV area**: $(round(info.area, digits=2)) μm²")
+        println(io, "- **FOV area**: $(round(info.area, digits = 2)) μm²")
         println(io, "- **r_max**: $(cfg.r_max) μm")
         println(io, "- **dr**: $(cfg.dr) μm")
         println(io, "- **Edge correction**: $(cfg.edge_correction ? "Ripley's isotropic" : "none")")
-        println(io, "- **Peak g(r)**: $(round(peak_g, digits=3)) at r = $(round(peak_r, digits=4)) μm")
-        println(io, "- **Time**: $(round(info.elapsed_s, digits=2))s")
+        println(io, "- **Peak g(r)**: $(round(peak_g, digits = 3)) at r = $(round(peak_r, digits = 4)) μm")
+        println(io, "- **Time**: $(round(info.elapsed_s, digits = 2))s")
     end
 end
 
-function _save_crosscorr_plot(dir::String, r::Vector{Float64}, g::Vector{Float64},
-                               label_a::Symbol, label_b::Symbol)
+function _save_crosscorr_plot(
+        dir::String, r::Vector{Float64}, g::Vector{Float64},
+        label_a::Symbol, label_b::Symbol
+    )
     isempty(r) && return
 
     peak_g = maximum(g)
     peak_r = r[argmax(g)]
 
-    fig = Figure(size=(700, 450))
-    ax = Axis(fig[1, 1],
-        xlabel="r (μm)",
-        ylabel="g(r)",
-        title="Cross-correlation: $label_a × $label_b",
+    fig = Figure(size = (700, 450))
+    ax = Axis(
+        fig[1, 1],
+        xlabel = "r (μm)",
+        ylabel = "g(r)",
+        title = "Cross-correlation: $label_a × $label_b",
     )
 
-    lines!(ax, r, g, color=:steelblue, linewidth=2)
-    hlines!(ax, [1.0], color=:gray40, linestyle=:dash, linewidth=1, label="CSR (g=1)")
+    lines!(ax, r, g, color = :steelblue, linewidth = 2)
+    hlines!(ax, [1.0], color = :gray40, linestyle = :dash, linewidth = 1, label = "CSR (g=1)")
 
     # Annotate peak if above CSR
     if peak_g > 1.05
-        scatter!(ax, [peak_r], [peak_g], color=:red, markersize=8)
-        text!(ax, peak_r, peak_g,
-            text="  g=$(round(peak_g, digits=2))",
-            fontsize=11, color=:red, align=(:left, :bottom))
+        scatter!(ax, [peak_r], [peak_g], color = :red, markersize = 8)
+        text!(
+            ax, peak_r, peak_g,
+            text = "  g=$(round(peak_g, digits = 2))",
+            fontsize = 11, color = :red, align = (:left, :bottom)
+        )
     end
 
-    axislegend(ax, position=:rt, framevisible=false)
-    save(joinpath(dir, "crosscorr_gr.png"), fig)
+    axislegend(ax, position = :rt, framevisible = false)
+    return save(joinpath(dir, "crosscorr_gr.png"), fig)
 end

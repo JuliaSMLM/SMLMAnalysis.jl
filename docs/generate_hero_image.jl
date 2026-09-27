@@ -22,11 +22,11 @@ sim = StaticSMLMConfig(
     nframes = 8000,
     ndatasets = 1,
 )
-pattern = Nmer2D(n=8, d=0.10)   # 100nm diameter octamers -- easier to resolve
-fluor = GenericFluor(photons=50000.0, k_off=20.0, k_on=0.04)
+pattern = Nmer2D(n = 8, d = 0.1)   # 100nm diameter octamers -- easier to resolve
+fluor = GenericFluor(photons = 50000.0, k_off = 20.0, k_on = 0.04)
 
 println("Simulating...")
-(_, sim_info) = simulate(sim; pattern=pattern, molecule=fluor, camera=camera)
+(_, sim_info) = simulate(sim; pattern = pattern, molecule = fluor, camera = camera)
 smld_model = sim_info.smld_model
 
 psf = MicroscopePSFs.GaussianPSF(psf_sigma)
@@ -34,26 +34,29 @@ println("Generating images...")
 function gen_images_for_dataset(smld, psf, dataset::Int; kwargs...)
     emitters_d = filter(e -> e.dataset == dataset, smld.emitters)
     smld_d = BasicSMLD(emitters_d, smld.camera, smld.n_frames, 1, smld.metadata)
-    (images, _) = gen_images(smld_d, psf; dataset=1, kwargs...)
-    images
+    (images, _) = gen_images(smld_d, psf; dataset = 1, kwargs...)
+    return images
 end
-images = gen_images_for_dataset(smld_model, psf, 1; bg=20.0, poisson_noise=true)
+images = gen_images_for_dataset(smld_model, psf, 1; bg = 20.0, poisson_noise = true)
 println("Images: $(size(images))")
 
 # Run pipeline
 println("Running pipeline...")
-(result, info) = analyze([images], AnalysisConfig(
-    camera = camera,
-    steps = [
-        DetectFitConfig(
-            boxer=BoxerConfig(boxsize=7, min_photons=500.0, psf_sigma=psf_sigma),
-            fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20)),
-        FilterConfig(photons=(500.0, Inf), precision=(0.0, 0.010), pvalue=(1e-3, 1.0), psf_sigma=:auto),
-        FrameConnectConfig(max_frame_gap=5, calibration=CalibrationConfig(clamp_k_to_one=true)),
-        DriftConfig(degree=1, dataset_mode=:continuous),
-    ],
-    verbose=Verbosity.PROGRESS,
-))
+(result, info) = analyze(
+    [images], AnalysisConfig(
+        camera = camera,
+        steps = [
+            DetectFitConfig(
+                boxer = BoxerConfig(boxsize = 7, min_photons = 500.0, psf_sigma = psf_sigma),
+                fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), iterations = 20)
+            ),
+            FilterConfig(photons = (500.0, Inf), precision = (0.0, 0.01), pvalue = (1.0e-3, 1.0), psf_sigma = :auto),
+            FrameConnectConfig(max_frame_gap = 5, calibration = CalibrationConfig(clamp_k_to_one = true)),
+            DriftConfig(degree = 1, dataset_mode = :continuous),
+        ],
+        verbose = Verbosity.PROGRESS,
+    )
+)
 
 smld = result.smld
 println("Localizations: $(length(smld.emitters))")
@@ -68,13 +71,15 @@ println("ROI emitters: $(length(roi_emitters))")
 outdir = joinpath(@__DIR__, "src", "assets")
 mkpath(outdir)
 
-(img, rinfo) = render(roi_smld, RenderConfig(
-    pixel_size=2.0,
-    colormap=:inferno,
-    clip_percentile=0.95,
-    scalebar=true,
-    scalebar_color=:white,
-    filename=joinpath(outdir, "render_gaussian.png"),
-))
+(img, rinfo) = render(
+    roi_smld, RenderConfig(
+        pixel_size = 2.0,
+        colormap = :inferno,
+        clip_percentile = 0.95,
+        scalebar = true,
+        scalebar_color = :white,
+        filename = joinpath(outdir, "render_gaussian.png"),
+    )
+)
 println("Rendered: $(rinfo.output_size)")
 println("Saved: $(joinpath(outdir, "render_gaussian.png"))")

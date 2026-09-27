@@ -25,8 +25,8 @@ dispatches on the step's config type to build exactly the keyword set its
 unsupported keyword.
 """
 _multitarget_extra_kwargs(::AbstractMultiTargetStep, colors::Vector{Symbol}, labels::Vector{Symbol}) = NamedTuple()
-_multitarget_extra_kwargs(::CompositeRenderConfig, colors::Vector{Symbol}, labels::Vector{Symbol}) = (colors=colors,)
-_multitarget_extra_kwargs(::CrossCorrConfig, colors::Vector{Symbol}, labels::Vector{Symbol}) = (labels=labels,)
+_multitarget_extra_kwargs(::CompositeRenderConfig, colors::Vector{Symbol}, labels::Vector{Symbol}) = (colors = colors,)
+_multitarget_extra_kwargs(::CrossCorrConfig, colors::Vector{Symbol}, labels::Vector{Symbol}) = (labels = labels,)
 
 """
     analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig) -> (MultiTargetResult, MultiTargetInfo)
@@ -118,13 +118,15 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
     for (i, step_cfg) in enumerate(config.steps)
         colors = _resolve_colors(step_cfg, config.colors)
         extra = _multitarget_extra_kwargs(step_cfg, colors, config.labels)
-        (state, step_info) = analyze(state, step_cfg;
-            outdir=composite_dir, step_number=i, verbose=v, extra...)
+        (state, step_info) = analyze(
+            state, step_cfg;
+            outdir = composite_dir, step_number = i, verbose = v, extra...
+        )
         push!(step_infos, step_info)
     end
 
     # Phase 3: save the final (aligned) per-channel SMLDs and point the channel results at them
-    _finalize_channels!(channel_results, state, config.labels, config.outdir; verbose=v)
+    _finalize_channels!(channel_results, state, config.labels, config.outdir; verbose = v)
 
     # Write composite readme
     _write_composite_readme!(composite_dir, config, state, step_infos)
@@ -133,13 +135,13 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
     _save_multitarget_config!(config)
 
     # Build result
-    elapsed_s = (time_ns() - t_start) / 1e9
+    elapsed_s = (time_ns() - t_start) / 1.0e9
     result = MultiTargetResult(config.labels, state, channel_results, step_infos, config.outdir)
     info = MultiTargetInfo(elapsed_s, channel_infos, step_infos)
 
-    v >= Verbosity.PROGRESS && @info "Multi-target complete: $(sum(length(s.emitters) for s in state)) total localizations ($(round(elapsed_s, digits=1))s)"
+    v >= Verbosity.PROGRESS && @info "Multi-target complete: $(sum(length(s.emitters) for s in state)) total localizations ($(round(elapsed_s, digits = 1))s)"
 
-    (result, info)
+    return (result, info)
 end
 
 """
@@ -159,9 +161,11 @@ than silently skipping the save (a caller relying on `_write_composite_readme!`
 right after this would otherwise hit a `BoundsError` or `MethodError` instead
 of a clear error).
 """
-function _finalize_channels!(channel_results::Dict{Symbol,AnalysisResult}, state,
-                             labels::Vector{Symbol}, outdir::String;
-                             verbose::Int=Verbosity.STANDARD)
+function _finalize_channels!(
+        channel_results::Dict{Symbol, AnalysisResult}, state,
+        labels::Vector{Symbol}, outdir::String;
+        verbose::Int = Verbosity.STANDARD
+    )
     if !(state isa Vector{<:SMLMData.BasicSMLD} && length(state) == length(labels))
         throw(ArgumentError("Multi-target steps must return a Vector with one BasicSMLD per channel, in label order; got $(typeof(state)) for labels $labels"))
     end
@@ -169,11 +173,11 @@ function _finalize_channels!(channel_results::Dict{Symbol,AnalysisResult}, state
         smld = state[i]
         cr = channel_results[label]
         smld_path = joinpath(outdir, "smld_$(label).h5")
-        save_smld(smld_path, smld; drift_model=cr.drift_model)
+        save_smld(smld_path, smld; drift_model = cr.drift_model)
         verbose >= Verbosity.PROGRESS && @info "  Saved $smld_path ($(length(smld.emitters)) localizations)"
         channel_results[label] = AnalysisResult(smld, cr.smld_connected, cr.drift_model)
     end
-    channel_results
+    return channel_results
 end
 
 """
@@ -182,11 +186,13 @@ end
 Write a README.md in the composite directory documenting the color scheme,
 channel labels, multi-target steps, and per-channel localization counts.
 """
-function _write_composite_readme!(composite_dir::String, config::MultiTargetConfig,
-                                  smlds::Vector{<:SMLMData.BasicSMLD},
-                                  step_infos::Vector{StepInfo})
+function _write_composite_readme!(
+        composite_dir::String, config::MultiTargetConfig,
+        smlds::Vector{<:SMLMData.BasicSMLD},
+        step_infos::Vector{StepInfo}
+    )
     filepath = joinpath(composite_dir, "README.md")
-    open(filepath, "w") do io
+    return open(filepath, "w") do io
         println(io, "# Composite Output")
         println(io)
         println(io, "## Color Scheme")
@@ -204,7 +210,7 @@ function _write_composite_readme!(composite_dir::String, config::MultiTargetConf
         println(io, "## Steps")
         println(io)
         for si in step_infos
-            println(io, "- **$(si.number). $(si.name)** ($(round(si.elapsed_s, digits=2))s)")
+            println(io, "- **$(si.number). $(si.name)** ($(round(si.elapsed_s, digits = 2))s)")
             for (k, v) in si.summary
                 println(io, "  - $k: $v")
             end
@@ -219,7 +225,7 @@ Serialize MultiTargetConfig to TOML file in the output directory.
 """
 function _save_multitarget_config!(config::MultiTargetConfig)
     filepath = joinpath(config.outdir, "multi_target_config.toml")
-    open(filepath, "w") do io
+    return open(filepath, "w") do io
         println(io, "# MultiTargetConfig")
         println(io, "type = \"MultiTargetConfig\"")
         println(io, "labels = [$(join(["\"$l\"" for l in config.labels], ", "))]")
@@ -235,7 +241,7 @@ function _save_multitarget_config!(config::MultiTargetConfig)
             # strategy, CrossAlignConfig's align) writes as `[steps.strategy]`, which TOML
             # attaches to this array-of-tables element, not a document-root `[strategy]`
             # that the next `[[steps]]` entry would collide with.
-            _write_config_fields!(io, s; table_prefix="steps.")
+            _write_config_fields!(io, s; table_prefix = "steps.")
             println(io)
         end
     end

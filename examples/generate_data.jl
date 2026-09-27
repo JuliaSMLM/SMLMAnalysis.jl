@@ -13,7 +13,7 @@ Usage:
 
 using SMLMAnalysis
 using SMLMSim   # simulation verbs are no longer re-exported by SMLMAnalysis;
-                # Nanoruler2D is a new pattern, not re-exported either
+# Nanoruler2D is a new pattern, not re-exported either
 using SMLMData: BasicSMLD
 using MicroscopePSFs
 using JLD2
@@ -31,8 +31,8 @@ Workaround for gen_images not respecting dataset parameter.
 function gen_images_for_dataset(smld, psf, dataset::Int; kwargs...)
     emitters_d = filter(e -> e.dataset == dataset, smld.emitters)
     smld_d = BasicSMLD(emitters_d, smld.camera, smld.n_frames, 1, smld.metadata)
-    (images, _) = gen_images(smld_d, psf; dataset=1, kwargs...)
-    images
+    (images, _) = gen_images(smld_d, psf; dataset = 1, kwargs...)
+    return images
 end
 
 # ============================================================================
@@ -53,21 +53,23 @@ function generate_single_target()
         nframes = n_frames,
         ndatasets = n_datasets,
     )
-    pattern = Nmer2D(n=8, d=0.05)
-    fluor = GenericFluor(photons=50000.0, k_off=20.0, k_on=0.04)
+    pattern = Nmer2D(n = 8, d = 0.05)
+    fluor = GenericFluor(photons = 50000.0, k_off = 20.0, k_on = 0.04)
 
     t = @elapsed begin
-        (_, sim_info) = simulate(sim_params; pattern=pattern, molecule=fluor, camera=camera)
+        (_, sim_info) = simulate(sim_params; pattern = pattern, molecule = fluor, camera = camera)
         smld_model = sim_info.smld_model
 
         psf = MicroscopePSFs.GaussianPSF(psf_sigma)
-        image_stacks = [gen_images_for_dataset(smld_model, psf, d; bg=20.0, poisson_noise=true)
-                        for d in 1:n_datasets]
-        images = cat(image_stacks...; dims=3)
+        image_stacks = [
+            gen_images_for_dataset(smld_model, psf, d; bg = 20.0, poisson_noise = true)
+                for d in 1:n_datasets
+        ]
+        images = cat(image_stacks...; dims = 3)
     end
-    println("  $(n_datasets) datasets x $(n_frames) frames, $(size(images)) ($(round(t, digits=1))s)")
+    println("  $(n_datasets) datasets x $(n_frames) frames, $(size(images)) ($(round(t, digits = 1))s)")
 
-    data = Dict{String,Any}(
+    data = Dict{String, Any}(
         "images" => images,
         "camera_nx" => 256,
         "camera_ny" => 128,
@@ -84,9 +86,9 @@ function generate_single_target()
             f[k] = v
         end
     end
-    println("  Saved: $path ($(round(filesize(path) / 1e6, digits=1)) MB)")
+    println("  Saved: $path ($(round(filesize(path) / 1.0e6, digits = 1)) MB)")
 
-    data
+    return data
 end
 
 # ============================================================================
@@ -107,21 +109,23 @@ function generate_lines()
         nframes = n_frames,
         ndatasets = n_datasets,
     )
-    pattern = Line2D(λ=50.0, endpoints=[(-0.4, 0.0), (0.4, 0.0)])
-    fluor = GenericFluor(photons=50000.0, k_off=20.0, k_on=0.04)
+    pattern = Line2D(λ = 50.0, endpoints = [(-0.4, 0.0), (0.4, 0.0)])
+    fluor = GenericFluor(photons = 50000.0, k_off = 20.0, k_on = 0.04)
 
     t = @elapsed begin
-        (_, sim_info) = simulate(sim_params; pattern=pattern, molecule=fluor, camera=camera)
+        (_, sim_info) = simulate(sim_params; pattern = pattern, molecule = fluor, camera = camera)
         smld_model = sim_info.smld_model
 
         psf = MicroscopePSFs.GaussianPSF(psf_sigma)
-        image_stacks = [gen_images_for_dataset(smld_model, psf, d; bg=20.0, poisson_noise=true)
-                        for d in 1:n_datasets]
-        images = cat(image_stacks...; dims=3)
+        image_stacks = [
+            gen_images_for_dataset(smld_model, psf, d; bg = 20.0, poisson_noise = true)
+                for d in 1:n_datasets
+        ]
+        images = cat(image_stacks...; dims = 3)
     end
-    println("  $(n_datasets) datasets x $(n_frames) frames, $(size(images)) ($(round(t, digits=1))s)")
+    println("  $(n_datasets) datasets x $(n_frames) frames, $(size(images)) ($(round(t, digits = 1))s)")
 
-    data = Dict{String,Any}(
+    data = Dict{String, Any}(
         "images" => images,
         "camera_nx" => 256,
         "camera_ny" => 128,
@@ -138,9 +142,9 @@ function generate_lines()
             f[k] = v
         end
     end
-    println("  Saved: $path ($(round(filesize(path) / 1e6, digits=1)) MB)")
+    println("  Saved: $path ($(round(filesize(path) / 1.0e6, digits = 1)) MB)")
 
-    data
+    return data
 end
 
 # ============================================================================
@@ -184,24 +188,28 @@ function generate_nanoruler()
     )
     # GATTAquant-style 3-mark ruler, 40 nm between adjacent marks, random
     # orientation/position per ruler (handled by SMLMSim's uniform2D placement).
-    pattern = Nanoruler2D(n=3, spacing=0.04)
-    fluor = GenericFluor(photons=50000.0, k_off=25.0, k_on=0.126)
+    pattern = Nanoruler2D(n = 3, spacing = 0.04)
+    fluor = GenericFluor(photons = 50000.0, k_off = 25.0, k_on = 0.126)
 
     t = @elapsed begin
         # state1=:equilibrium (simulate's default) starts each emitter in its
         # steady-state on/off split so the ~5-blinks count is unbiased.
-        (_, sim_info) = simulate(sim_params; pattern=pattern, molecule=fluor,
-                                 camera=camera, state1=:equilibrium)
+        (_, sim_info) = simulate(
+            sim_params; pattern = pattern, molecule = fluor,
+            camera = camera, state1 = :equilibrium
+        )
         smld_model = sim_info.smld_model
 
         psf = MicroscopePSFs.GaussianPSF(psf_sigma)
-        image_stacks = [gen_images_for_dataset(smld_model, psf, d; bg=20.0, poisson_noise=true)
-                        for d in 1:n_datasets]
-        images = cat(image_stacks...; dims=3)
+        image_stacks = [
+            gen_images_for_dataset(smld_model, psf, d; bg = 20.0, poisson_noise = true)
+                for d in 1:n_datasets
+        ]
+        images = cat(image_stacks...; dims = 3)
     end
-    println("  $(n_datasets) datasets x $(n_frames) frames, $(size(images)) ($(round(t, digits=1))s)")
+    println("  $(n_datasets) datasets x $(n_frames) frames, $(size(images)) ($(round(t, digits = 1))s)")
 
-    data = Dict{String,Any}(
+    data = Dict{String, Any}(
         "images" => images,
         "camera_nx" => 256,
         "camera_ny" => 128,
@@ -220,9 +228,9 @@ function generate_nanoruler()
             f[k] = v
         end
     end
-    println("  Saved: $path ($(round(filesize(path) / 1e6, digits=1)) MB)")
+    println("  Saved: $path ($(round(filesize(path) / 1.0e6, digits = 1)) MB)")
 
-    data
+    return data
 end
 
 # ============================================================================
@@ -241,13 +249,13 @@ Returns a Dict with dataset-specific keys. Key additions:
 The `image_stacks` field encodes dataset boundaries in the data structure,
 eliminating the need for `n_datasets` as a separate parameter.
 """
-function load_or_generate(name::String; force=false)
+function load_or_generate(name::String; force = false)
     path = joinpath(DATA_DIR, "$name.jld2")
 
     if !force && isfile(path)
         println("Loading cached data: $path")
-        t = @elapsed data = Dict{String,Any}(String(k) => v for (k, v) in pairs(load(path)))
-        println("  Loaded ($(round(t, digits=1))s)")
+        t = @elapsed data = Dict{String, Any}(String(k) => v for (k, v) in pairs(load(path)))
+        println("  Loaded ($(round(t, digits = 1))s)")
     else
         if name == "single_target"
             data = generate_single_target()
@@ -264,7 +272,7 @@ function load_or_generate(name::String; force=false)
     n_ds = data["n_datasets"]
     n_fr = data["n_frames"]
     imgs = data["images"]
-    data["image_stacks"] = [@view imgs[:, :, (d-1)*n_fr+1:d*n_fr] for d in 1:n_ds]
+    data["image_stacks"] = [@view imgs[:, :, ((d - 1) * n_fr + 1):(d * n_fr)] for d in 1:n_ds]
 
     return data
 end
@@ -289,6 +297,6 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     println()
     println("="^60)
-    println("Done ($(round(t_total, digits=1))s total)")
+    println("Done ($(round(t_total, digits = 1))s total)")
     println("="^60)
 end

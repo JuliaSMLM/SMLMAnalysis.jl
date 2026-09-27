@@ -67,7 +67,13 @@ end
         :EdgeClassifyInfo, :CellPolygon, :MultiCellMask,
     ]
     for n in public_names
-        @test (try; getglobal(SMLMAnalysis, n); true; catch; false; end)
+        @test (
+            try
+                getglobal(SMLMAnalysis, n); true
+            catch
+                false
+            end
+        )
     end
     @test SMLMAnalysis.AbstractCamera === SMLMAnalysis.SMLMData.AbstractCamera
 end
