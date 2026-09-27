@@ -89,8 +89,7 @@ using Distributions: Poisson, ccdf, Gamma, pdf
 # Upstream names reachable as SMLMAnalysis.Name without being exported (api_overview.md,
 # "Non-exported but public"; test/exports.jl checks each one resolves). Nothing in src uses
 # them, so test/qa/qa.jl exempts them from ExplicitImports' stale-import check.
-# The three SMLMData abstract types are extension hooks; importing AbstractCamera by name
-# also stops CairoMakie's unrelated Makie.AbstractCamera leaving the binding ambiguous.
+# The three SMLMData abstract types are extension hooks.
 using SMLMData: AbstractCamera, AbstractSMLMConfig, AbstractSMLMInfo
 using SMLMSim: Line2D
 using GaussMLE: fit
