@@ -4,8 +4,6 @@
 #   New format: Channel01/Zposition001/DataXXXX/DataXXXX (Group with nested Dataset)
 # With per-pixel calibration in Calibration/ group
 
-using HDF5
-
 # Helper to check if path exists in HDF5 file (works with nested paths).
 # HDF5.haskey only checks direct children, so probe by indexing; a missing path
 # throws (→ false) but a real interrupt must still propagate.

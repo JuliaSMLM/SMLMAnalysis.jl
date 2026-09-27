@@ -7,9 +7,6 @@
 # - Emitter2DFitSigma (GaussMLE: isotropic fitted σ)
 # - Emitter2DFitSigmaXY (GaussMLE: anisotropic fitted σx, σy)
 
-using HDF5
-using Dates
-
 const SMLD_FORMAT_VERSION = "1.3"  # v1.3: polygon / CellPolygon user metadata (edge-classify geometry); v1.2: Added σ_xy position covariance (round-trips Emitter2DFit/Sigma/SigmaXY); v1.1: PSF width fields
 
 # Version stamped into saved files ("unknown" if the module has no project version)

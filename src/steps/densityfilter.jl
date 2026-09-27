@@ -2,8 +2,6 @@
 Density filter step - removes isolated localizations by neighbor count
 """
 
-using NearestNeighbors
-
 """
     DensityFilterConfig <: AbstractSMLMConfig
 
