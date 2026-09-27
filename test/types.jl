@@ -59,6 +59,15 @@ using Statistics
     @test kept == [e_ok]
     @test n_dropped == 2
 
+    # A NaN in a diagnostic field (pvalue) is NOT a required-finite field --
+    # the emitter must be kept, not dropped.
+    e_nan_pvalue = GaussMLE.Emitter2DFitSigma{Float64}(
+        1.0, 1.0, 100.0, 5.0, 0.03, 0.01, 0.01, 0.0, 20.0, 0.5, 0.002, NaN, 1, 1, 0, 4
+    )
+    kept_pv, n_dropped_pv = SMLMAnalysis._drop_nonfinite_emitters([e_nan_pvalue])
+    @test kept_pv == [e_nan_pvalue]
+    @test n_dropped_pv == 0
+
     dfi = SMLMAnalysis.DensityFilterInfo(1000, 800, 5, 0.3)
     @test dfi.n_before == 1000
     @test dfi.threshold == 5
