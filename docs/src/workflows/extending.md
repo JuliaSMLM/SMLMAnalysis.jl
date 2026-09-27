@@ -169,5 +169,6 @@ in-repo recipe is the same five pieces, plus: put the work function in
 `src/steps/yourstep.jl`, `include` and `export` it from `src/SMLMAnalysis.jl`,
 add a docstring and an [API Reference](@ref) entry, and add a step page under
 [Pipeline Steps](@ref "Pipeline Steps: Overview"). Then open a pull request
-against `main` — CI runs the test suite (including a lowest-compat resolve) on
-every PR.
+against `main` — CI runs the Core and QA test groups (Core also at the lowest
+compatible dependency versions) on every PR. The Long group runs locally, with
+`GROUP=Long` or `GROUP=Everything`.
