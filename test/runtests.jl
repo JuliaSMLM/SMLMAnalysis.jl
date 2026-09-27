@@ -80,7 +80,13 @@ const SMLM_TEST_FULL = lowercase(get(ENV, "SMLM_TEST_FULL", "false")) in ("true"
         # `ambiguities=(recursive=false,)`: recursive ambiguity checking also flags
         # method ambiguities defined entirely inside our upstream dependencies
         # (SMLMData/SMLMRender/etc.), which are not ours to fix here.
-        Aqua.test_all(SMLMAnalysis; ambiguities=(recursive=false,))
+        # Skipped in the downgrade-compat CI job (SMLM_DOWNGRADE_CI=true): there the
+        # oldest-allowed upstream versions carry their own ambiguities, the action
+        # merges test extras into [deps] (so Aqua flags itself as stale), and the
+        # persistent-task probe cannot precompile. Aqua runs on every other job.
+        if get(ENV, "SMLM_DOWNGRADE_CI", "false") != "true"
+            Aqua.test_all(SMLMAnalysis; ambiguities=(recursive=false,))
+        end
     end
 
     @testset "docs cover every SMLMAnalysis-owned export" begin
