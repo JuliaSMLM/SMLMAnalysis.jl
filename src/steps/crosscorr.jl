@@ -102,15 +102,16 @@ _step_summary(info::CrossCorrInfo) = Dict{Symbol, Any}(
 )
 
 """
-    analyze(smlds::Vector{BasicSMLD}, cfg::CrossCorrConfig; outdir, step_number, verbose, labels) -> (smlds, StepInfo)
+    analyze(smlds::Vector{BasicSMLD}, cfg::CrossCorrConfig; outdir, step_number, verbose, labels, colors) -> (smlds, StepInfo)
 
-Multi-target dispatch: pair cross-correlation. SMLDs pass through. `labels` is
-the only multi-target keyword this step reads (it does not use `colors`).
+Multi-target dispatch: pair cross-correlation. SMLDs pass through. Accepts
+both `labels` and `colors` (every multi-target step does), but only reads
+`labels`.
 """
 function analyze(
         smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossCorrConfig;
         outdir = nothing, step_number::Int = 0, verbose::Int = Verbosity.STANDARD,
-        labels::Vector{Symbol} = Symbol[]
+        labels::Vector{Symbol} = Symbol[], colors::Vector{Symbol} = Symbol[]
     )
     t = @elapsed (smlds, cc_info) = crosscorr_step(
         smlds, cfg;

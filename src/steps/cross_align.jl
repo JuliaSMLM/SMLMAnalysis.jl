@@ -137,14 +137,15 @@ _step_summary(info::CrossAlignInfo) = Dict{Symbol, Any}(
 )
 
 """
-    analyze(smlds::Vector{BasicSMLD}, cfg::CrossAlignConfig; outdir, step_number, verbose) -> (aligned_smlds, StepInfo)
+    analyze(smlds::Vector{BasicSMLD}, cfg::CrossAlignConfig; outdir, step_number, verbose, labels, colors) -> (aligned_smlds, StepInfo)
 
-Multi-target dispatch: cross-channel alignment. Modifies SMLDs. Uses neither
-`colors` nor `labels`, so this step's `analyze` does not accept them.
+Multi-target dispatch: cross-channel alignment. Modifies SMLDs. Accepts both
+`labels` and `colors` (every multi-target step does), but uses neither.
 """
 function analyze(
         smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossAlignConfig;
-        outdir = nothing, step_number::Int = 0, verbose::Int = Verbosity.STANDARD
+        outdir = nothing, step_number::Int = 0, verbose::Int = Verbosity.STANDARD,
+        labels::Vector{Symbol} = Symbol[], colors::Vector{Symbol} = Symbol[]
     )
     t = @elapsed (aligned, ca_info) = crossalign_step(
         smlds, cfg;

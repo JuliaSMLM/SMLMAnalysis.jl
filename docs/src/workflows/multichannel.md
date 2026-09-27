@@ -109,7 +109,10 @@ stepinfo(info, :crossalign).info  # look up a cross-channel step by name (search
 
 Each multi-target step is a `<: AbstractMultiTargetStep` config dispatched on the
 channel `Vector{BasicSMLD}`. They are documented on their own pages — add them to
-`MultiTargetConfig.steps` in the order you want them to run:
+`MultiTargetConfig.steps` in the order you want them to run. Every step's
+`analyze` method is called with both `labels` and `colors` keywords (in addition
+to `outdir`, `step_number`, `verbose`) — a custom step's `analyze` signature must
+accept both, even if it only reads one of them:
 
 - **[Composite Render](@ref)** — overlay the channels into a single multi-color
   image, each tinted by its `colors` entry (per-step `colors` override the

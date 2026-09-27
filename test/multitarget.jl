@@ -7,6 +7,40 @@ using Random
 using TOML
 using Statistics
 
+# Test-local fixtures for the "multi-target steps receive labels and colors"
+# testset below. `struct` and `analyze` method definitions must be at module
+# top level (not inside a `@testset` body), so they live here.
+
+# A user `AbstractMultiTargetStep` that only records the keywords the
+# orchestrator called it with -- stands in for a real cross-channel step.
+const _recorded_labels_colors = Ref{Any}(nothing)
+
+struct _RecordingMultiTargetStep <: SMLMAnalysis.AbstractMultiTargetStep end
+
+function SMLMAnalysis.analyze(
+        smlds::Vector{<:SMLMAnalysis.BasicSMLD}, cfg::_RecordingMultiTargetStep;
+        outdir = nothing, step_number::Int = 0, verbose::Int = 0,
+        labels::Vector{Symbol} = Symbol[], colors::Vector{Symbol} = Symbol[]
+    )
+    _recorded_labels_colors[] = (labels, colors)
+    return (smlds, SMLMAnalysis.StepInfo(step_number, cfg, 0.0, Dict{Symbol, Any}()))
+end
+
+# A cheap per-channel step standing in for DetectFitConfig: hands back a
+# pre-built BasicSMLD without running real detection/fitting, so phase 1 of
+# `analyze(channels, MultiTargetConfig)` stays fast in this test.
+struct _FakeChannelStep <: SMLMAnalysis.AbstractSMLMConfig
+    smld::SMLMAnalysis.BasicSMLD
+end
+
+function SMLMAnalysis.analyze(
+        ::Any, cfg::_FakeChannelStep;
+        outdir = nothing, step_number::Int = 0, verbose::Int = 0,
+        checkpoint::Int = Checkpoint.EXPENSIVE
+    )
+    return (cfg.smld, SMLMAnalysis.StepInfo(step_number, cfg, 0.0, Dict{Symbol, Any}()))
+end
+
 @testset "Multi-target step types" begin
     # Type hierarchy
     @test SMLMAnalysis.AbstractMultiTargetStep <: SMLMAnalysis.AbstractSMLMConfig
@@ -161,6 +195,38 @@ end
         # exactly Vector{<:SMLMAnalysis.BasicSMLD}).
         @test_throws ArgumentError SMLMAnalysis._finalize_channels!(ch2, view(state, 1:2), labels, dir; verbose = 0)
     end
+end
+
+@testset "multi-target steps receive labels and colors" begin
+    # Every multi-target step's analyze() is called with both `labels` and
+    # `colors`, whether or not it reads either -- this must fail before the
+    # fix (the old `_multitarget_extra_kwargs` dispatch only forwarded the one
+    # keyword each built-in step declared, so a user step reading neither, or
+    # both, never saw them).
+    cam = IdealCamera(8, 8, 0.1)
+    mk(dx) = SMLMAnalysis.BasicSMLD(
+        [
+            SMLMAnalysis.Emitter2DFit{Float64}(
+                1.0 + dx, 1.0, 1000.0, 10.0, 0.01, 0.01, 50.0, 2.0; frame = 1
+            ),
+        ],
+        cam, 1, 1, Dict{String, Any}()
+    )
+    channel_cfg(smld) = AnalysisConfig(camera = cam, steps = [_FakeChannelStep(smld)])
+
+    mt = MultiTargetConfig(
+        labels = [:A, :B], colors = [:red, :green],
+        steps = [_RecordingMultiTargetStep()],
+        outdir = mktempdir(),
+    )
+    _recorded_labels_colors[] = nothing
+    analyze(
+        [
+            (zeros(Float32, 1, 1, 1), channel_cfg(mk(0.0))),
+            (zeros(Float32, 1, 1, 1), channel_cfg(mk(0.1))),
+        ], mt
+    )
+    @test _recorded_labels_colors[] == (mt.labels, mt.colors)
 end
 
 @testset "cross-align carries edge geometry with the emitters" begin

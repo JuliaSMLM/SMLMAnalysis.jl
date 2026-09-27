@@ -15,20 +15,6 @@ _resolve_colors(cfg::CompositeRenderConfig, defaults::Vector{Symbol}) = cfg.colo
 _resolve_colors(::AbstractMultiTargetStep, defaults::Vector{Symbol}) = defaults
 
 """
-    _multitarget_extra_kwargs(cfg, colors, labels) -> NamedTuple
-
-Multi-target step `analyze()` methods no longer carry a `kwargs...` catch-all,
-and each only declares the keyword(s) it actually reads (`CompositeRenderConfig`
-→ `colors`, `CrossCorrConfig` → `labels`, `CrossAlignConfig` → neither). This
-dispatches on the step's config type to build exactly the keyword set its
-`analyze` method accepts, so the orchestrator loop below never passes an
-unsupported keyword.
-"""
-_multitarget_extra_kwargs(::AbstractMultiTargetStep, colors::Vector{Symbol}, labels::Vector{Symbol}) = NamedTuple()
-_multitarget_extra_kwargs(::CompositeRenderConfig, colors::Vector{Symbol}, labels::Vector{Symbol}) = (colors = colors,)
-_multitarget_extra_kwargs(::CrossCorrConfig, colors::Vector{Symbol}, labels::Vector{Symbol}) = (labels = labels,)
-
-"""
     analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig) -> (MultiTargetResult, MultiTargetInfo)
 
 Run independent analysis pipelines for each channel, then execute multi-target
@@ -117,10 +103,10 @@ function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)
     state = smlds
     for (i, step_cfg) in enumerate(config.steps)
         colors = _resolve_colors(step_cfg, config.colors)
-        extra = _multitarget_extra_kwargs(step_cfg, colors, config.labels)
         (state, step_info) = analyze(
             state, step_cfg;
-            outdir = composite_dir, step_number = i, verbose = v, extra...
+            outdir = composite_dir, step_number = i, verbose = v,
+            labels = config.labels, colors = colors
         )
         push!(step_infos, step_info)
     end

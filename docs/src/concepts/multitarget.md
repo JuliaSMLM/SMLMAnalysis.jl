@@ -22,7 +22,11 @@ keeps exactly that idea and changes only two things:
 
 Everything else — the `analyze(state, step)` dispatch, the `(result, info)` tuple
 per step, the threaded state — is unchanged. A cross-channel step is simply an
-`analyze(::Vector{BasicSMLD}, ::AbstractMultiTargetStep)` method.
+`analyze(::Vector{BasicSMLD}, ::AbstractMultiTargetStep)` method. Every such
+method is called with `outdir`, `step_number`, `verbose`, `labels`, and `colors`
+keywords — the orchestrator passes `labels` and `colors` to every step
+regardless of which (if either) it reads, so a custom step's `analyze` method
+must accept both even if it uses neither.
 
 ## Two phases
 
