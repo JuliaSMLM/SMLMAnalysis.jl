@@ -68,6 +68,13 @@ using Statistics
     @test kept_pv == [e_nan_pvalue]
     @test n_dropped_pv == 0
 
+    # Once kept, the fit overlay must colour it the way the pvalue filter treats
+    # it (rejected), not green because both NaN comparisons are false.
+    cfg_pv = FilterConfig(pvalue = (1.0e-3, 1.0))
+    @test SMLMAnalysis._fit_box_color(e_nan_pvalue, cfg_pv, nothing) === :purple
+    smld_pv = SMLMAnalysis.BasicSMLD([e_nan_pvalue], IdealCamera(16, 16, 0.1), 1, 1, Dict{String, Any}())
+    @test isempty(SMLMAnalysis._filter_smld(smld_pv, cfg_pv).emitters)
+
     dfi = SMLMAnalysis.DensityFilterInfo(1000, 800, 5, 0.3)
     @test dfi.n_before == 1000
     @test dfi.threshold == 5
@@ -100,6 +107,15 @@ using Statistics
     smld_bad = SMLMAnalysis.BasicSMLD(bad_emitters, cam, 1, 1, Dict{String, Any}())
     @test_throws ArgumentError SMLMAnalysis.densityfilter_step(smld_bad, cfg_df)
 
+    # A finite σ_x that overflows once squared must throw too, not silently
+    # drop both emitters as having no neighbours.
+    huge_σ = [
+        SMLMAnalysis.Emitter2DFit(x, 0.0, 1000.0, 10.0, 1.0e200, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, i)
+            for (i, x) in enumerate((0.0, 1.0e199))
+    ]
+    smld_huge_σ = SMLMAnalysis.BasicSMLD(huge_σ, cam, 1, 1, Dict{String, Any}())
+    @test_throws ArgumentError SMLMAnalysis.densityfilter_step(smld_huge_σ, cfg_df)
+
     # IntensityFilter: non-finite photons rejected up front. Needs >=100
     # emitters, otherwise the step's own "too few emitters" early return
     # would skip the check before it is reached.
@@ -118,6 +134,9 @@ using Statistics
     bad_x_if = SMLMAnalysis.Emitter2DFit(NaN, 0.5, 1000.0, 10.0, 0.01, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, 1)
     smld_if_bad_x = SMLMAnalysis.BasicSMLD(vcat([bad_x_if], many), cam, 1, 1, Dict{String, Any}())
     @test_throws ArgumentError SMLMAnalysis.intensityfilter_step(smld_if_bad_x, IntensityFilterConfig())
+    # Below the 100-emitter "too few to estimate the field" shortcut as well.
+    smld_if_bad_x_99 = SMLMAnalysis.BasicSMLD(vcat([bad_x_if], many[1:98]), cam, 1, 1, Dict{String, Any}())
+    @test_throws ArgumentError SMLMAnalysis.intensityfilter_step(smld_if_bad_x_99, IntensityFilterConfig())
 
     # psf_sigma: an explicit (lo, hi) — including a 0.0 lower bound — is
     # always applied, unlike :auto's "skip when degenerate" behavior.
