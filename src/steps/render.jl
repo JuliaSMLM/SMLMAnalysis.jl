@@ -25,14 +25,16 @@ Render localizations to a super-resolution image. Returns `(render_image, Render
 # Returns
 `(render_image, RenderInfo)`
 """
-function render_step(smld::BasicSMLD, cfg::SMLMRender.RenderConfig;
-                     outdir::Union{String,Nothing}=nothing,
-                     step_number::Int=0,
-                     verbose::Int=Verbosity.STANDARD)
+function render_step(
+        smld::BasicSMLD, cfg::SMLMRender.RenderConfig;
+        outdir::Union{String, Nothing} = nothing,
+        step_number::Int = 0,
+        verbose::Int = Verbosity.STANDARD
+    )
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
 
-    v >= Verbosity.PROGRESS && @info "[$step_number] render" zoom=cfg.zoom colormap=cfg.colormap
+    v >= Verbosity.PROGRESS && @info "[$step_number] render" zoom = cfg.zoom colormap = cfg.colormap
 
     # Set filename into config if output dir exists and user didn't set one
     render_cfg = if dir !== nothing && cfg.filename === nothing
@@ -49,7 +51,8 @@ function render_step(smld::BasicSMLD, cfg::SMLMRender.RenderConfig;
         # trailing filename= overrides the splatted copy.
         SMLMRender.RenderConfig(;
             (f => getfield(cfg, f) for f in fieldnames(typeof(cfg)))...,
-            filename=filename)
+            filename = filename
+        )
     else
         cfg
     end
@@ -71,11 +74,11 @@ function render_step(smld::BasicSMLD, cfg::SMLMRender.RenderConfig;
         end
     end
 
-    v >= Verbosity.PROGRESS && @info "  → render $(render_info.output_size) ($(round(t, digits=2))s)"
-    (render_image, render_info)
+    v >= Verbosity.PROGRESS && @info "  → render $(render_info.output_size) ($(round(t, digits = 2))s)"
+    return (render_image, render_info)
 end
 
-_step_summary(info::SMLMRender.RenderInfo) = Dict{Symbol,Any}(
+_step_summary(info::SMLMRender.RenderInfo) = Dict{Symbol, Any}(
     :n_locs => info.n_emitters_rendered,
     :strategy => info.strategy,
     :output_size => info.output_size
@@ -91,25 +94,29 @@ operate on it. Use `render_step` or `SMLMRender.render` directly to get the imag
 `checkpoint` is accepted (like every other step's `analyze`) but unused: a
 render step produces an image, not an SMLD, so there is nothing to checkpoint.
 """
-function analyze(smld::BasicSMLD, cfg::SMLMRender.RenderConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE)
-    t = @elapsed (render_image, render_info) = render_step(smld, cfg;
-        outdir=outdir, step_number=step_number, verbose=verbose)
-    (smld, StepInfo(step_number, cfg, t, _step_summary(render_info); info=render_info))
+function analyze(
+        smld::BasicSMLD, cfg::SMLMRender.RenderConfig;
+        outdir = nothing, step_number::Int = 0, verbose::Int = Verbosity.STANDARD,
+        checkpoint::Int = Checkpoint.EXPENSIVE
+    )
+    t = @elapsed (render_image, render_info) = render_step(
+        smld, cfg;
+        outdir = outdir, step_number = step_number, verbose = verbose
+    )
+    return (smld, StepInfo(step_number, cfg, t, _step_summary(render_info); info = render_info))
 end
 
 function _write_render_stats(dir, cfg::SMLMRender.RenderConfig, render_info, n_locs, t)
     filepath = joinpath(dir, "stats.md")
-    open(filepath, "w") do io
+    return open(filepath, "w") do io
         println(io, "# Render Statistics\n")
         println(io, "## Summary")
         println(io, "- **Localizations**: $n_locs")
         println(io, "- **Emitters rendered**: $(render_info.n_emitters_rendered)")
         println(io, "- **Output size**: $(render_info.output_size)")
-        println(io, "- **Pixel size**: $(round(render_info.pixel_size_nm, digits=1)) nm")
+        println(io, "- **Pixel size**: $(round(render_info.pixel_size_nm, digits = 1)) nm")
         println(io, "- **Strategy**: $(render_info.strategy)")
         println(io, "- **Color mode**: $(render_info.color_mode)")
-        println(io, "- **Time**: $(round(t, digits=2))s")
+        println(io, "- **Time**: $(round(t, digits = 2))s")
     end
 end

@@ -1,99 +1,30 @@
+# Lab CI caller (admiral decision 0011). Copy to .github/workflows/CI.yml unchanged except the
+# `with:` lines; the rest is checked by hash. The jobs live in LidkeLab/.github.
 name: CI
+
 on:
   push:
-    branches:
-      - main
+    branches: [main, master]
     tags: ['*']
+    paths-ignore: ['**.md', 'dev/**', '.claude/**']
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore: ['**.md', 'dev/**', '.claude/**']
   workflow_dispatch:
+  schedule:
+    - cron: '23 5 1 * *'  # monthly
+
 concurrency:
-  # Skip intermediate builds: always.
-  # Cancel intermediate builds: only if it is a pull request build.
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  actions: write  # the cache step deletes the caches it replaces
+  contents: read
+
 jobs:
-  test:
-    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
-    permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
-      actions: write
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        version:
-          - '1.10'
-          - '1'
-          - 'pre'
-        os:
-          - ubuntu-latest
-        arch:
-          - x64
-    # The thorough tier (SMLM_TEST_FULL=1) runs locally, not in CI; CI runs the fast
-    # tier only, on this matrix plus the downgrade-compat job below.
-    steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
-        with:
-          version: ${{ matrix.version }}
-          arch: ${{ matrix.arch }}
-      - uses: julia-actions/cache@v2
-      - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
-      - uses: julia-actions/julia-processcoverage@v1
-      - uses: codecov/codecov-action@v5
-        with:
-          files: lcov.info
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
-  downgrade:
-    # Install every direct dependency at the LOWEST version our [compat] admits and run
-    # the tests. This is the check that catches a false compat floor (e.g. a lower bound
-    # that predates an API we call) before the registry hands that version to a user.
-    # Oldest-supported deps belong with the oldest supported Julia (compat floor
-    # julia = "1.10"); on Julia 1.13.1 the downgraded env fails to load the Statistics
-    # stdlib's SparseArraysExt before any test runs (reproduced on unchanged main).
-    name: Downgrade compat - Julia 1.10
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
-        with:
-          version: '1.10'
-      - uses: julia-actions/cache@v2
-      - uses: julia-actions/julia-downgrade-compat@v2
-        with:
-          skip: Dates,Logging,Random,Statistics,TOML,Test
-      - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
-        env:
-          SMLM_DOWNGRADE_CI: 'true'
-  docs:
-    name: Documentation
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write # needed to allow julia-actions/cache to proactively delete old caches that it has created
-      contents: write
-      statuses: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
-        with:
-          version: '1'
-      - uses: julia-actions/cache@v2
-      - name: Configure doc environment
-        shell: julia --project=docs --color=yes {0}
-        run: |
-          using Pkg
-          Pkg.develop(PackageSpec(path=pwd()))
-          Pkg.instantiate()
-      - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-docdeploy@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
+  ci:
+    uses: LidkeLab/.github/.github/workflows/julia-ci.yml@v2
+    with:
+      registered: true
+      runic: true

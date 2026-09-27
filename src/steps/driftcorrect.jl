@@ -22,20 +22,22 @@ for the pipeline's `StepInfo`.
 # Returns
 `(corrected_smld, DriftInfo, summary)`
 """
-function driftcorrect_step(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig;
-                           outdir::Union{String,Nothing}=nothing,
-                           step_number::Int=0,
-                           verbose::Int=Verbosity.STANDARD,
-                           checkpoint::Int=Checkpoint.EXPENSIVE)
+function driftcorrect_step(
+        smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig;
+        outdir::Union{String, Nothing} = nothing,
+        step_number::Int = 0,
+        verbose::Int = Verbosity.STANDARD,
+        checkpoint::Int = Checkpoint.EXPENSIVE
+    )
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
 
     # Log info
     if cfg.n_chunks > 0 || cfg.chunk_frames > 0
         chunks_info = cfg.n_chunks > 0 ? "$(cfg.n_chunks) chunks" : "$(cfg.chunk_frames) frames/chunk"
-        v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" degree=cfg.degree dataset_mode=cfg.dataset_mode chunks=chunks_info
+        v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" degree = cfg.degree dataset_mode = cfg.dataset_mode chunks = chunks_info
     else
-        v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" degree=cfg.degree dataset_mode=cfg.dataset_mode
+        v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" degree = cfg.degree dataset_mode = cfg.dataset_mode
     end
 
     # Config dispatch with verbose injected from pipeline verbosity
@@ -59,11 +61,11 @@ function driftcorrect_step(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig
     # Diagnostic warnings (always check, warn at PROGRESS level)
     intershift_threshold_nm = 500.0
     if cfg.dataset_mode == :registered && max_intershift > intershift_threshold_nm
-        v >= Verbosity.PROGRESS && @warn "  Large inter-dataset shifts detected ($(round(max_intershift, digits=1))nm). " *
+        v >= Verbosity.PROGRESS && @warn "  Large inter-dataset shifts detected ($(round(max_intershift, digits = 1))nm). " *
             "If data was acquired without registration, consider dataset_mode=:continuous"
     end
     if cfg.dataset_mode == :continuous && max_intershift > intershift_threshold_nm
-        v >= Verbosity.PROGRESS && @warn "  Large inter-dataset shifts ($(round(max_intershift, digits=1))nm) " *
+        v >= Verbosity.PROGRESS && @warn "  Large inter-dataset shifts ($(round(max_intershift, digits = 1))nm) " *
             "unexpected for continuous acquisition - check data alignment"
     end
 
@@ -73,16 +75,20 @@ function driftcorrect_step(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig
         _save_driftcorrect_outputs!(dir, drift_model, cfg, v, t, max_drift, inter_shifts, n_frames, converged, iterations, drift_info, corrected_smld)
 
         if checkpoint >= Checkpoint.EXPENSIVE
-            _save_step_smld(dir, corrected_smld;
-                            filename="smld_corrected.h5",
-                            drift_model=drift_model)
+            _save_step_smld(
+                dir, corrected_smld;
+                filename = "smld_corrected.h5",
+                drift_model = drift_model
+            )
         end
     end
 
-    v >= Verbosity.PROGRESS && @info "  -> max drift $(round(max_drift, digits=1))nm, inter-shift $(round(max_intershift, digits=1))nm ($(round(t, digits=2))s)"
-    summary = (drift_model=drift_model, n_datasets=n_datasets_val, inter_shifts=inter_shifts,
-               max_intershift=max_intershift, max_drift=max_drift)
-    (corrected_smld, drift_info, summary)
+    v >= Verbosity.PROGRESS && @info "  -> max drift $(round(max_drift, digits = 1))nm, inter-shift $(round(max_intershift, digits = 1))nm ($(round(t, digits = 2))s)"
+    summary = (
+        drift_model = drift_model, n_datasets = n_datasets_val, inter_shifts = inter_shifts,
+        max_intershift = max_intershift, max_drift = max_drift,
+    )
+    return (corrected_smld, drift_info, summary)
 end
 
 """
@@ -90,21 +96,25 @@ end
 
 Run drift correction on localizations.
 """
-function analyze(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 checkpoint::Int=Checkpoint.EXPENSIVE)
+function analyze(
+        smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig;
+        outdir = nothing, step_number::Int = 0, verbose::Int = Verbosity.STANDARD,
+        checkpoint::Int = Checkpoint.EXPENSIVE
+    )
     n_frames = smld.n_frames
-    t = @elapsed (corrected, drift_info, ds) = driftcorrect_step(smld, cfg;
-        outdir=outdir, step_number=step_number, verbose=verbose, checkpoint=checkpoint)
+    t = @elapsed (corrected, drift_info, ds) = driftcorrect_step(
+        smld, cfg;
+        outdir = outdir, step_number = step_number, verbose = verbose, checkpoint = checkpoint
+    )
 
     converged = hasproperty(drift_info, :converged) ? drift_info.converged : nothing
     iterations = hasproperty(drift_info, :iterations) ? drift_info.iterations : nothing
     entropy = hasproperty(drift_info, :entropy) ? drift_info.entropy : nothing
     backend = hasproperty(drift_info, :backend) ? drift_info.backend : nothing
 
-    summary = Dict{Symbol,Any}(
-        :max_drift_nm => round(ds.max_drift, digits=1),
-        :max_intershift_nm => round(ds.max_intershift, digits=1),
+    summary = Dict{Symbol, Any}(
+        :max_drift_nm => round(ds.max_drift, digits = 1),
+        :max_intershift_nm => round(ds.max_intershift, digits = 1),
         :n_datasets => ds.n_datasets,
         :n_frames => n_frames,
         :dataset_mode => cfg.dataset_mode,
@@ -115,7 +125,7 @@ function analyze(smld::BasicSMLD, cfg::SMLMDriftCorrection.DriftConfig;
         :backend => backend,
     )
 
-    (corrected, StepInfo(step_number, cfg, t, summary; info=drift_info))
+    return (corrected, StepInfo(step_number, cfg, t, summary; info = drift_info))
 end
 
 """Calculate inter-dataset shift magnitudes in nm (Euclidean distance)"""
@@ -127,7 +137,7 @@ function _calc_inter_shifts(drift_model)
         dy = drift_model.inter[ds].dm[2] * 1000
         push!(shifts, sqrt(dx^2 + dy^2))
     end
-    shifts
+    return shifts
 end
 
 """Calculate max intra-dataset drift using drift_trajectory"""
@@ -138,43 +148,47 @@ function _calc_max_drift(drift_model, n_frames)
     # Use drift_trajectory to get all drift values
     max_drift = 0.0
     for ds in 1:n_datasets
-        traj = DC.drift_trajectory(drift_model; dataset=ds)
+        traj = DC.drift_trajectory(drift_model; dataset = ds)
         # Note: traj.x and traj.y are in um, convert to nm
         max_drift = max(max_drift, maximum(abs.(traj.x)) * 1000, maximum(abs.(traj.y)) * 1000)
     end
-    max_drift
+    return max_drift
 end
 
-function _save_driftcorrect_outputs!(dir::String, drift_model, cfg::SMLMDriftCorrection.DriftConfig, v::Int, t::Float64,
-                             max_drift::Float64, inter_shifts::Vector{Float64}, n_frames::Int,
-                             converged::Union{Bool,Nothing}, iterations::Union{Int,Nothing}, drift_info,
-                             corrected_smld=nothing)
+function _save_driftcorrect_outputs!(
+        dir::String, drift_model, cfg::SMLMDriftCorrection.DriftConfig, v::Int, t::Float64,
+        max_drift::Float64, inter_shifts::Vector{Float64}, n_frames::Int,
+        converged::Union{Bool, Nothing}, iterations::Union{Int, Nothing}, drift_info,
+        corrected_smld = nothing
+    )
     mkpath(dir)
     _save_config!(dir, cfg)
     _save_info!(dir, drift_info)
 
     if v >= Verbosity.STANDARD
         _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n_frames, converged, iterations, drift_info)
-        _save_drift_figures(dir, drift_model, n_frames, cfg.dataset_mode; n_chunks=cfg.n_chunks)
+        _save_drift_figures(dir, drift_model, n_frames, cfg.dataset_mode; n_chunks = cfg.n_chunks)
         corrected_smld === nothing ||
             _save_drift_residual_variance(dir, corrected_smld, v)
     end
 
-    if v >= Verbosity.DETAILED
-        _save_drift_detailed(dir, drift_model, n_frames, inter_shifts; n_chunks=cfg.n_chunks)
+    return if v >= Verbosity.DETAILED
+        _save_drift_detailed(dir, drift_model, n_frames, inter_shifts; n_chunks = cfg.n_chunks)
     end
 end
 
-function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n_frames,
-                            converged::Union{Bool,Nothing}, iterations::Union{Int,Nothing},
-                            drift_info=nothing)
+function _write_drift_stats(
+        dir, cfg, drift_model, t, max_drift, inter_shifts, n_frames,
+        converged::Union{Bool, Nothing}, iterations::Union{Int, Nothing},
+        drift_info = nothing
+    )
     n_datasets = drift_model.ndatasets
     max_intershift = n_datasets > 1 ? maximum(inter_shifts[2:end]) : 0.0
 
     mode_str = cfg.dataset_mode == :continuous ? "Continuous" : "Registered"
 
     filepath = joinpath(dir, "stats.md")
-    open(filepath, "w") do io
+    return open(filepath, "w") do io
         println(io, "# Drift Correction Statistics\n")
         println(io, "## Summary")
         println(io, "- **Mode**: $mode_str ($(cfg.dataset_mode))")
@@ -183,19 +197,19 @@ function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n
             println(io, "- **Converged**: $(converged)")
             println(io, "- **Iterations**: $(iterations)")
         end
-        println(io, "- **Max intra-dataset drift**: $(round(max_drift, digits=1)) nm")
+        println(io, "- **Max intra-dataset drift**: $(round(max_drift, digits = 1)) nm")
         if n_datasets > 1
-            println(io, "- **Max inter-dataset shift**: $(round(max_intershift, digits=1)) nm")
+            println(io, "- **Max inter-dataset shift**: $(round(max_intershift, digits = 1)) nm")
         end
         println(io, "- **Datasets**: $n_datasets")
         println(io, "- **Frames per dataset**: $n_frames")
-        println(io, "- **Time**: $(round(t, digits=2))s")
+        println(io, "- **Time**: $(round(t, digits = 2))s")
 
         # Entropy and convergence diagnostics
         if drift_info !== nothing
             entropy = hasproperty(drift_info, :entropy) ? drift_info.entropy : nothing
             if entropy !== nothing
-                println(io, "- **Final entropy**: $(round(entropy, sigdigits=6))")
+                println(io, "- **Final entropy**: $(round(entropy, sigdigits = 6))")
             end
             backend = hasproperty(drift_info, :backend) ? drift_info.backend : nothing
             if backend !== nothing
@@ -224,7 +238,7 @@ function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n
             println(io, "| Dataset | Shift (nm) |")
             println(io, "|---------|------------|")
             for (ds, shift) in enumerate(inter_shifts)
-                println(io, "| $ds | $(round(shift, digits=1)) |")
+                println(io, "| $ds | $(round(shift, digits = 1)) |")
             end
         end
 
@@ -239,10 +253,10 @@ function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n
             h = drift_info.history
             println(io, "")
             println(io, "## Entropy History")
-            println(io, "- **Initial**: $(round(h[1], sigdigits=6))")
-            println(io, "- **Final**: $(round(h[end], sigdigits=6))")
+            println(io, "- **Initial**: $(round(h[1], sigdigits = 6))")
+            println(io, "- **Final**: $(round(h[end], sigdigits = 6))")
             if abs(h[1]) > 0
-                println(io, "- **Improvement**: $(round((h[end] - h[1]) / abs(h[1]) * 100, digits=2))%")
+                println(io, "- **Improvement**: $(round((h[end] - h[1]) / abs(h[1]) * 100, digits = 2))%")
             end
             println(io, "- **Iterations**: $(length(h))")
         end
@@ -257,7 +271,7 @@ function _write_drift_stats(dir, cfg, drift_model, t, max_drift, inter_shifts, n
 end
 
 """Format a possibly-nothing numeric value for stats output."""
-_fmt_corr(v) = v === nothing ? "N/A" : "$(round(v, sigdigits=3))"
+_fmt_corr(v) = v === nothing ? "N/A" : "$(round(v, sigdigits = 3))"
 
 """Write residual correlation section to stats.md."""
 function _write_residual_correlation!(io::IO, rc, n_datasets::Int)
@@ -285,7 +299,7 @@ function _write_residual_correlation!(io::IO, rc, n_datasets::Int)
         end
     end
 
-    if hasproperty(rc, :inter) && rc.inter !== nothing && n_datasets > 1
+    return if hasproperty(rc, :inter) && rc.inter !== nothing && n_datasets > 1
         inter_rc = rc.inter
         println(io, "")
         println(io, "### Inter-Dataset")
@@ -335,22 +349,28 @@ function _save_drift_residual_variance(dir, corrected_smld, v::Int)
 
     local intra, inter
     try
-        intra = DC.position_frame_correlation(smld_diag; K=20, mode=:intra)
+        intra = DC.position_frame_correlation(smld_diag; K = 20, mode = :intra)
         inter = smld_diag.n_datasets > 1 ?
-                DC.position_frame_correlation(smld_diag; K=20, mode=:inter) : nothing
+            DC.position_frame_correlation(smld_diag; K = 20, mode = :inter) : nothing
     catch err
         v >= Verbosity.PROGRESS &&
-            @warn "  residual-variance diagnostic failed; skipping" exception=err
+            @warn "  residual-variance diagnostic failed; skipping" exception = err
         return nothing
     end
 
-    fig = Figure(size=(1500, 400))
-    ax1 = Axis(fig[1, 1]; xlabel="Frame", ylabel="residual variance (nm²)",
-               title="Residual variance vs frame (flat = corrected)")
-    ax2 = Axis(fig[1, 2]; xlabel="Frame", ylabel="mean residual (nm)",
-               title="Systematic residual (should be 0)")
-    ax3 = Axis(fig[1, 3]; xlabel="Dataset", ylabel="|corr(residual, frame)|",
-               title="Per-dataset residual–frame correlation")
+    fig = Figure(size = (1500, 400))
+    ax1 = Axis(
+        fig[1, 1]; xlabel = "Frame", ylabel = "residual variance (nm²)",
+        title = "Residual variance vs frame (flat = corrected)"
+    )
+    ax2 = Axis(
+        fig[1, 2]; xlabel = "Frame", ylabel = "mean residual (nm)",
+        title = "Systematic residual (should be 0)"
+    )
+    ax3 = Axis(
+        fig[1, 3]; xlabel = "Dataset", ylabel = "|corr(residual, frame)|",
+        title = "Per-dataset residual–frame correlation"
+    )
 
     for pd in intra.per_dataset
         length(pd.frames) < 50 && continue
@@ -358,18 +378,22 @@ function _save_drift_residual_variance(dir, corrected_smld, v::Int)
             res === nothing && continue
             ctr, vv, mm = _bin_residuals(pd.frames, res .* 1000)   # um -> nm
             isempty(ctr) && continue
-            lines!(ax1, ctr, vv; color=(col, 0.5))
-            lines!(ax2, ctr, mm; color=(col, 0.5))
+            lines!(ax1, ctr, vv; color = (col, 0.5))
+            lines!(ax2, ctr, mm; color = (col, 0.5))
         end
     end
-    hlines!(ax2, [0.0]; color=(:black, 0.6), linestyle=:dash)
+    hlines!(ax2, [0.0]; color = (:black, 0.6), linestyle = :dash)
 
     dsx = [pd.dataset for pd in intra.per_dataset]
-    barplot!(ax3, dsx .- 0.2, [abs(pd.corr_x) for pd in intra.per_dataset];
-             width=0.4, color=(:steelblue, 0.8), label="x")
-    barplot!(ax3, dsx .+ 0.2, [abs(pd.corr_y) for pd in intra.per_dataset];
-             width=0.4, color=(:crimson, 0.8), label="y")
-    axislegend(ax3; position=:lt, framevisible=false)
+    barplot!(
+        ax3, dsx .- 0.2, [abs(pd.corr_x) for pd in intra.per_dataset];
+        width = 0.4, color = (:steelblue, 0.8), label = "x"
+    )
+    barplot!(
+        ax3, dsx .+ 0.2, [abs(pd.corr_y) for pd in intra.per_dataset];
+        width = 0.4, color = (:crimson, 0.8), label = "y"
+    )
+    axislegend(ax3; position = :lt, framevisible = false)
 
     if inter !== nothing && inter.residuals_x !== nothing
         ctrx, _, mmx = _bin_residuals(Float64.(inter.dataset_indices), inter.residuals_x .* 1000)
@@ -378,12 +402,14 @@ function _save_drift_residual_variance(dir, corrected_smld, v::Int)
         # n_datasets > 1 but every localization sits in one dataset): an axis with no
         # labelled plots makes axislegend throw and would take the whole step down.
         if !isempty(ctrx) || !isempty(ctry)
-            ax4 = Axis(fig[1, 4]; xlabel="Dataset index", ylabel="residual (nm)",
-                       title="Inter-dataset residual (registration)")
-            isempty(ctrx) || lines!(ax4, ctrx, mmx; color=:steelblue, label="x")
-            isempty(ctry) || lines!(ax4, ctry, mmy; color=:crimson, label="y")
-            hlines!(ax4, [0.0]; color=(:black, 0.6), linestyle=:dash)
-            axislegend(ax4; position=:lt, framevisible=false)
+            ax4 = Axis(
+                fig[1, 4]; xlabel = "Dataset index", ylabel = "residual (nm)",
+                title = "Inter-dataset residual (registration)"
+            )
+            isempty(ctrx) || lines!(ax4, ctrx, mmx; color = :steelblue, label = "x")
+            isempty(ctry) || lines!(ax4, ctry, mmy; color = :crimson, label = "y")
+            hlines!(ax4, [0.0]; color = (:black, 0.6), linestyle = :dash)
+            axislegend(ax4; position = :lt, framevisible = false)
         end
     end
 
@@ -394,18 +420,20 @@ function _save_drift_residual_variance(dir, corrected_smld, v::Int)
         println(io, "Residual of each localization vs the mean of its K=20 nearest neighbours,")
         println(io, "correlated with frame (intra) / dataset index (inter). Near-zero correlation")
         println(io, "means the drift model removed the systematic motion.\n")
-        println(io, "- **Localizations used**: $(length(smld_diag.emitters))",
-                    n > RESIDUAL_MAX_LOCS ? " (subsampled from $n)" : "")
-        println(io, "- **mean |corr| x**: $(round(intra.summary.mean_abs_corr_x, digits=4))")
-        println(io, "- **mean |corr| y**: $(round(intra.summary.mean_abs_corr_y, digits=4))")
+        println(
+            io, "- **Localizations used**: $(length(smld_diag.emitters))",
+            n > RESIDUAL_MAX_LOCS ? " (subsampled from $n)" : ""
+        )
+        println(io, "- **mean |corr| x**: $(round(intra.summary.mean_abs_corr_x, digits = 4))")
+        println(io, "- **mean |corr| y**: $(round(intra.summary.mean_abs_corr_y, digits = 4))")
         if inter !== nothing
-            println(io, "- **inter-dataset corr x**: $(round(inter.corr_x, digits=4))")
-            println(io, "- **inter-dataset corr y**: $(round(inter.corr_y, digits=4))")
+            println(io, "- **inter-dataset corr x**: $(round(inter.corr_x, digits = 4))")
+            println(io, "- **inter-dataset corr y**: $(round(inter.corr_y, digits = 4))")
         end
         println(io, "\n| Dataset | n_locs | corr_x | corr_y |")
         println(io, "|---------|--------|--------|--------|")
         for pd in intra.per_dataset
-            println(io, "| $(pd.dataset) | $(pd.n_locs) | $(round(pd.corr_x, digits=4)) | $(round(pd.corr_y, digits=4)) |")
+            println(io, "| $(pd.dataset) | $(pd.n_locs) | $(round(pd.corr_x, digits = 4)) | $(round(pd.corr_y, digits = 4)) |")
         end
     end
     return nothing
@@ -416,7 +444,7 @@ end
 `nbins` ADAPTS to the sample size: a fixed 40 bins silently produced empty panels on the
 sparse cells (576 locs over 5 datasets => ~3 per bin, all below the 5-point floor). Aim for
 ~25 points per bin, clamped to [5, 40]."""
-function _bin_residuals(x::AbstractVector, y::AbstractVector; nbins::Int=0)
+function _bin_residuals(x::AbstractVector, y::AbstractVector; nbins::Int = 0)
     (isempty(x) || length(x) != length(y)) && return (Float64[], Float64[], Float64[])
     nbins = nbins > 0 ? nbins : clamp(length(x) ÷ 25, 5, 40)
     lo, hi = extrema(x)
@@ -429,51 +457,51 @@ function _bin_residuals(x::AbstractVector, y::AbstractVector; nbins::Int=0)
         length(idx) < 5 && continue
         push!(ctr, l + w / 2); push!(vv, var(@view y[idx])); push!(mm, mean(@view y[idx]))
     end
-    (ctr, vv, mm)
+    return (ctr, vv, mm)
 end
 
 "rebuild an SMLD of the same type with a different emitter vector (for subsampling)"
 function _smld_with_emitters(smld::BasicSMLD, emitters)
-    BasicSMLD(emitters, smld.camera, smld.n_frames, smld.n_datasets, copy(smld.metadata))
+    return BasicSMLD(emitters, smld.camera, smld.n_frames, smld.n_datasets, copy(smld.metadata))
 end
 
-function _save_drift_figures(dir, drift_model, n_frames, dataset_mode::Symbol; n_chunks::Int=0)
+function _save_drift_figures(dir, drift_model, n_frames, dataset_mode::Symbol; n_chunks::Int = 0)
     DC = SMLMDriftCorrection
     n_datasets = drift_model.ndatasets
     continuous = dataset_mode == :continuous
 
-    if n_datasets == 1
+    return if n_datasets == 1
         # Single dataset - use drift_trajectory
-        traj = DC.drift_trajectory(drift_model; dataset=1)
+        traj = DC.drift_trajectory(drift_model; dataset = 1)
         drift_x = traj.x .* 1000  # um to nm
         drift_y = traj.y .* 1000
 
-        fig = Figure(size=(1200, 400))
+        fig = Figure(size = (1200, 400))
 
-        ax1 = Axis(fig[1, 1], xlabel="Frame", ylabel="X Drift (nm)", title="X Drift")
-        lines!(ax1, traj.frames, drift_x, color=:blue)
-        hlines!(ax1, [0], color=:gray, linestyle=:dash)
+        ax1 = Axis(fig[1, 1], xlabel = "Frame", ylabel = "X Drift (nm)", title = "X Drift")
+        lines!(ax1, traj.frames, drift_x, color = :blue)
+        hlines!(ax1, [0], color = :gray, linestyle = :dash)
 
-        ax2 = Axis(fig[1, 2], xlabel="Frame", ylabel="Y Drift (nm)", title="Y Drift")
-        lines!(ax2, traj.frames, drift_y, color=:red)
-        hlines!(ax2, [0], color=:gray, linestyle=:dash)
+        ax2 = Axis(fig[1, 2], xlabel = "Frame", ylabel = "Y Drift (nm)", title = "Y Drift")
+        lines!(ax2, traj.frames, drift_y, color = :red)
+        hlines!(ax2, [0], color = :gray, linestyle = :dash)
 
-        ax3 = Axis(fig[1, 3], xlabel="X (nm)", ylabel="Y (nm)", title="XY Path", aspect=DataAspect())
-        lines!(ax3, drift_x, drift_y, color=:black)
-        scatter!(ax3, [drift_x[1]], [drift_y[1]], color=:green, markersize=10)
-        scatter!(ax3, [drift_x[end]], [drift_y[end]], color=:red, markersize=10)
+        ax3 = Axis(fig[1, 3], xlabel = "X (nm)", ylabel = "Y (nm)", title = "XY Path", aspect = DataAspect())
+        lines!(ax3, drift_x, drift_y, color = :black)
+        scatter!(ax3, [drift_x[1]], [drift_y[1]], color = :green, markersize = 10)
+        scatter!(ax3, [drift_x[end]], [drift_y[end]], color = :red, markersize = 10)
 
         save(joinpath(dir, "drift_trajectory.png"), fig)
     else
         # Multi-dataset: always show global frame continuous view
-        _save_continuous_drift_figure(dir, drift_model, n_frames; n_chunks=n_chunks, continuous=continuous)
+        _save_continuous_drift_figure(dir, drift_model, n_frames; n_chunks = n_chunks, continuous = continuous)
     end
 end
 
 """Plot drift trajectory with global frame view for multi-dataset acquisitions.
 Uses drift_trajectory default mode (inter + intra per chunk) so boundary
 discontinuities between chunks are visible as gaps."""
-function _save_continuous_drift_figure(dir, drift_model, n_frames; n_chunks::Int=0, continuous::Bool=true)
+function _save_continuous_drift_figure(dir, drift_model, n_frames; n_chunks::Int = 0, continuous::Bool = true)
     DC = SMLMDriftCorrection
     n_datasets = drift_model.ndatasets
 
@@ -486,74 +514,82 @@ function _save_continuous_drift_figure(dir, drift_model, n_frames; n_chunks::Int
 
     mode_str = continuous ? "Continuous" : "Registered"
     label = n_chunks > 0 ? "Chunk" : "Dataset"
-    fig = Figure(size=(1200, 600))
+    fig = Figure(size = (1200, 600))
 
     total_frames = maximum(traj.frames)
 
-    colors = [:blue, :red, :green, :orange, :purple, :cyan, :magenta, :brown,
-              :darkblue, :darkred, :darkgreen, :darkorange, :violet, :teal, :pink, :chocolate,
-              :navy, :crimson, :forestgreen, :coral]
+    colors = [
+        :blue, :red, :green, :orange, :purple, :cyan, :magenta, :brown,
+        :darkblue, :darkred, :darkgreen, :darkorange, :violet, :teal, :pink, :chocolate,
+        :navy, :crimson, :forestgreen, :coral,
+    ]
 
     # Top row: X and Y drift vs frame, per-chunk segments
     top = fig[1, 1:2] = GridLayout()
-    ax1 = Axis(top[1, 1], xlabel="Global Frame", ylabel="X Drift (nm)",
-               title="X Drift ($(n_datasets) $(lowercase(label))s, $mode_str)")
-    hlines!(ax1, [0], color=:gray, linestyle=:dash)
+    ax1 = Axis(
+        top[1, 1], xlabel = "Global Frame", ylabel = "X Drift (nm)",
+        title = "X Drift ($(n_datasets) $(lowercase(label))s, $mode_str)"
+    )
+    hlines!(ax1, [0], color = :gray, linestyle = :dash)
 
-    ax2 = Axis(top[1, 2], xlabel="Global Frame", ylabel="Y Drift (nm)",
-               title="Y Drift")
-    hlines!(ax2, [0], color=:gray, linestyle=:dash)
+    ax2 = Axis(
+        top[1, 2], xlabel = "Global Frame", ylabel = "Y Drift (nm)",
+        title = "Y Drift"
+    )
+    hlines!(ax2, [0], color = :gray, linestyle = :dash)
 
     for ds in 1:n_datasets
         mask = traj.dataset .== ds
         c = colors[mod1(ds, length(colors))]
-        lines!(ax1, traj.frames[mask], drift_x[mask], color=c)
-        lines!(ax2, traj.frames[mask], drift_y[mask], color=c)
+        lines!(ax1, traj.frames[mask], drift_x[mask], color = c)
+        lines!(ax2, traj.frames[mask], drift_y[mask], color = c)
     end
     xlims!(ax1, 1, total_frames)
     xlims!(ax2, 1, total_frames)
 
     # Bottom row: XY trajectory per-chunk
     bottom = fig[2, 1:2] = GridLayout()
-    ax3 = Axis(bottom[1, 1], xlabel="X (nm)", ylabel="Y (nm)",
-               title="XY Drift Trajectory", aspect=DataAspect())
+    ax3 = Axis(
+        bottom[1, 1], xlabel = "X (nm)", ylabel = "Y (nm)",
+        title = "XY Drift Trajectory", aspect = DataAspect()
+    )
 
     for ds in 1:n_datasets
         mask = traj.dataset .== ds
         c = colors[mod1(ds, length(colors))]
-        lines!(ax3, drift_x[mask], drift_y[mask], color=c, linewidth=1.0, label="$label $ds")
+        lines!(ax3, drift_x[mask], drift_y[mask], color = c, linewidth = 1.0, label = "$label $ds")
     end
 
     # Mark start and end
     first_idx = argmin(traj.frames)
     last_idx = argmax(traj.frames)
-    scatter!(ax3, [drift_x[first_idx]], [drift_y[first_idx]], color=:green, markersize=12, label="Start")
-    scatter!(ax3, [drift_x[last_idx]], [drift_y[last_idx]], color=:red, markersize=12, label="End")
+    scatter!(ax3, [drift_x[first_idx]], [drift_y[first_idx]], color = :green, markersize = 12, label = "Start")
+    scatter!(ax3, [drift_x[last_idx]], [drift_y[last_idx]], color = :red, markersize = 12, label = "End")
 
     if n_datasets <= 8
-        Legend(bottom[1, 2], ax3, framevisible=false)
+        Legend(bottom[1, 2], ax3, framevisible = false)
     end
 
-    save(joinpath(dir, "drift_trajectory.png"), fig)
+    return save(joinpath(dir, "drift_trajectory.png"), fig)
 end
 
-function _save_drift_detailed(dir, drift_model, n_frames, inter_shifts; n_chunks::Int=0)
+function _save_drift_detailed(dir, drift_model, n_frames, inter_shifts; n_chunks::Int = 0)
     DC = SMLMDriftCorrection
     n_datasets = drift_model.ndatasets
 
     filepath = joinpath(dir, "per_dataset.md")
-    open(filepath, "w") do io
+    return open(filepath, "w") do io
         label = n_chunks > 0 ? "Chunk" : "Dataset"
         println(io, "# Per-$label Drift Details\n")
         println(io, "| $label | Max X (nm) | Max Y (nm) | Inter-Shift (nm) |")
         println(io, "|---------|------------|------------|------------------|")
 
         for ds in 1:n_datasets
-            traj = DC.drift_trajectory(drift_model; dataset=ds)
+            traj = DC.drift_trajectory(drift_model; dataset = ds)
             drift_x = traj.x .* 1000  # um to nm
             drift_y = traj.y .* 1000
             inter = inter_shifts[ds]
-            println(io, "| $ds | $(round(maximum(abs.(drift_x)), digits=1)) | $(round(maximum(abs.(drift_y)), digits=1)) | $(round(inter, digits=1)) |")
+            println(io, "| $ds | $(round(maximum(abs.(drift_x)), digits = 1)) | $(round(maximum(abs.(drift_y)), digits = 1)) | $(round(inter, digits = 1)) |")
         end
     end
 end

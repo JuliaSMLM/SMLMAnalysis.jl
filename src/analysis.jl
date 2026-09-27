@@ -23,13 +23,14 @@ end
 Logging.min_enabled_level(tl::TeeLogger) = minimum(Logging.min_enabled_level(l) for l in tl.loggers)
 
 function Logging.shouldlog(tl::TeeLogger, level, _module, group, id)
-    any(Logging.shouldlog(l, level, _module, group, id) for l in tl.loggers)
+    return any(Logging.shouldlog(l, level, _module, group, id) for l in tl.loggers)
 end
 
 function Logging.handle_message(tl::TeeLogger, args...; kwargs...)
     for l in tl.loggers
         Logging.handle_message(l, args...; kwargs...)
     end
+    return
 end
 
 Logging.catch_exceptions(::TeeLogger) = true
@@ -44,7 +45,7 @@ enough to flush before termination) can leave the file missing the tail of
 what was actually logged. Delegating every other logger method to `logger`
 keeps this a transparent wrapper.
 """
-struct FlushingLogger{L<:Logging.AbstractLogger} <: Logging.AbstractLogger
+struct FlushingLogger{L <: Logging.AbstractLogger} <: Logging.AbstractLogger
     logger::L
     io::IO
 end
@@ -55,7 +56,7 @@ Logging.catch_exceptions(fl::FlushingLogger) = Logging.catch_exceptions(fl.logge
 
 function Logging.handle_message(fl::FlushingLogger, args...; kwargs...)
     Logging.handle_message(fl.logger, args...; kwargs...)
-    flush(fl.io)
+    return flush(fl.io)
 end
 
 """
@@ -76,11 +77,11 @@ function _with_log_file(f, outdir)
         open(logpath, "w")
     catch err
         err isa Union{Base.IOError, SystemError} || rethrow()
-        @warn "Could not open log file; continuing without file logging" logpath exception=(err, catch_backtrace())
+        @warn "Could not open log file; continuing without file logging" logpath exception = (err, catch_backtrace())
         return f()
     end
 
-    try
+    return try
         println(io, "=== SMLMAnalysis $(Dates.now()) ===")
         flush(io)
         file_logger = FlushingLogger(Logging.SimpleLogger(io, Logging.Info), io)
@@ -99,31 +100,34 @@ end
 # ============================================================
 
 """Normalize input data to Vector{AbstractArray{<:Real,3}} for uniform processing."""
-function _normalize_data(data::Vector{<:AbstractArray{<:Real,3}})
-    data
+function _normalize_data(data::Vector{<:AbstractArray{<:Real, 3}})
+    return data
 end
 
-function _normalize_data(data::AbstractArray{<:Real,3})
-    [data]
+function _normalize_data(data::AbstractArray{<:Real, 3})
+    return [data]
 end
 
 # Fallback: anything else (e.g. a file path String, mistaking this for the
 # file-based DetectFitConfig path) gets a message naming what IS accepted,
 # instead of the bare MethodError multiple dispatch would otherwise give.
 function _normalize_data(data)
-    throw(ArgumentError(
-        "analyze(data, config::AnalysisConfig): data must be a Vector{<:AbstractArray{<:Real,3}} " *
-        "or an AbstractArray{<:Real,3} (or `nothing` for a file-based DetectFitConfig pipeline); " *
-        "got $(typeof(data))"))
+    throw(
+        ArgumentError(
+            "analyze(data, config::AnalysisConfig): data must be a Vector{<:AbstractArray{<:Real,3}} " *
+                "or an AbstractArray{<:Real,3} (or `nothing` for a file-based DetectFitConfig pipeline); " *
+                "got $(typeof(data))"
+        )
+    )
 end
 
 """Apply ROI cropping to data."""
-function _apply_roi(data::Vector{<:AbstractArray{<:Real,3}}, roi)
-    [crop_images(img, roi.x, roi.y) for img in data]
+function _apply_roi(data::Vector{<:AbstractArray{<:Real, 3}}, roi)
+    return [crop_images(img, roi.x, roi.y) for img in data]
 end
 
-function _apply_roi(data::AbstractArray{<:Real,3}, roi)
-    crop_images(data, roi.x, roi.y)
+function _apply_roi(data::AbstractArray{<:Real, 3}, roi)
+    return crop_images(data, roi.x, roi.y)
 end
 
 # ============================================================
@@ -182,7 +186,7 @@ function analyze(data, config::AnalysisConfig)
         camera = crop_camera(camera, config.roi.x, config.roi.y)
     end
 
-    _run_pipeline(_normalize_data(data), config.steps, camera, config.outdir, config.verbose, config.checkpoint; roi=config.roi)
+    return _run_pipeline(_normalize_data(data), config.steps, camera, config.outdir, config.verbose, config.checkpoint; roi = config.roi)
 end
 
 """
@@ -199,12 +203,14 @@ Convenience varargs form. Builds AnalysisConfig from positional step configs and
     camera=cam, outdir="output/")
 ```
 """
-function analyze(data, steps::SMLMData.AbstractSMLMConfig...;
-                 camera::SMLMData.AbstractCamera,
-                 roi=nothing,
-                 kwargs...)
-    config = AnalysisConfig(steps...; camera=camera, roi=roi, kwargs...)
-    analyze(data, config)
+function analyze(
+        data, steps::SMLMData.AbstractSMLMConfig...;
+        camera::SMLMData.AbstractCamera,
+        roi = nothing,
+        kwargs...
+    )
+    config = AnalysisConfig(steps...; camera = camera, roi = roi, kwargs...)
+    return analyze(data, config)
 end
 
 # ============================================================
@@ -236,12 +242,15 @@ function analyze(config::AnalysisConfig)
     # ROI, so silently returning full-frame coordinates would contradict the config.
     # Reject the combination rather than mislead. (To crop file-based data, load it
     # and call analyze(images, config), or restrict via DetectFitConfig.)
-    config.roi === nothing || throw(ArgumentError(
-        "AnalysisConfig.roi is not supported for file-based analyze(config): the ROI " *
-        "crop is not applied when images are loaded from disk, so coordinates would be " *
-        "full-frame despite the ROI. Load the images and use analyze(images, config) to " *
-        "apply the crop, or remove the roi."))
-    _run_pipeline(nothing, config.steps, config.camera, config.outdir, config.verbose, config.checkpoint; roi=config.roi)
+    config.roi === nothing || throw(
+        ArgumentError(
+            "AnalysisConfig.roi is not supported for file-based analyze(config): the ROI " *
+                "crop is not applied when images are loaded from disk, so coordinates would be " *
+                "full-frame despite the ROI. Load the images and use analyze(images, config) to " *
+                "apply the crop, or remove the roi."
+        )
+    )
+    return _run_pipeline(nothing, config.steps, config.camera, config.outdir, config.verbose, config.checkpoint; roi = config.roi)
 end
 
 # Allow analyze(nothing, config) so multi-target can pass nothing for file-based channels
@@ -291,7 +300,7 @@ function _warn_stale_step_dirs(outdir::String, steps::Vector{SMLMData.AbstractSM
         isdir(joinpath(outdir, entry)) && occursin(r"^\d\d_", entry) && !(entry in produced)
     end
     isempty(stale) && return
-    @warn "outdir already contains step directories this run does not produce (not deleted)" outdir stale=sort(stale)
+    return @warn "outdir already contains step directories this run does not produce (not deleted)" outdir stale = sort(stale)
 end
 
 # ============================================================
@@ -308,11 +317,13 @@ Julia's method dispatch on `(state_type, config_type)`.
 Wrong step ordering produces a MethodError — e.g., FilterConfig before
 DetectFitConfig gives `no method matching analyze(::Vector{...}, ::FilterConfig)`.
 """
-function _run_pipeline(initial_state, steps::Vector{SMLMData.AbstractSMLMConfig},
-                       camera::SMLMData.AbstractCamera,
-                       outdir::Union{String,Nothing}, v::Int,
-                       cp_level::Int=Checkpoint.EXPENSIVE;
-                       roi=nothing)
+function _run_pipeline(
+        initial_state, steps::Vector{SMLMData.AbstractSMLMConfig},
+        camera::SMLMData.AbstractCamera,
+        outdir::Union{String, Nothing}, v::Int,
+        cp_level::Int = Checkpoint.EXPENSIVE;
+        roi = nothing
+    )
     # AnalysisConfig already validates verbose/checkpoint at construction, but
     # _run_pipeline is itself callable directly (bypassing AnalysisConfig), so
     # re-validate here rather than let an out-of-range level misbehave silently
@@ -349,8 +360,10 @@ function _run_pipeline(initial_state, steps::Vector{SMLMData.AbstractSMLMConfig}
                 cp_level
             end
 
-            (state, step_info) = analyze(state, cfg;
-                outdir=outdir, step_number=i, verbose=v, checkpoint=cp)
+            (state, step_info) = analyze(
+                state, cfg;
+                outdir = outdir, step_number = i, verbose = v, checkpoint = cp
+            )
 
             push!(step_infos, step_info)
 
@@ -376,16 +389,16 @@ function _run_pipeline(initial_state, steps::Vector{SMLMData.AbstractSMLMConfig}
     end
     result = AnalysisResult(last_smld, smld_connected, drift_model)
 
-    elapsed_s = (time_ns() - t_start) / 1e9
+    elapsed_s = (time_ns() - t_start) / 1.0e9
     info = AnalysisInfo(elapsed_s, step_infos)
 
     if outdir !== nothing
         _write_summary(outdir, step_infos, last_smld)
     end
 
-    v >= Verbosity.PROGRESS && @info "Pipeline complete: $(length(last_smld.emitters)) localizations ($(round(elapsed_s, digits=2))s)"
+    v >= Verbosity.PROGRESS && @info "Pipeline complete: $(length(last_smld.emitters)) localizations ($(round(elapsed_s, digits = 2))s)"
 
-    (result, info)
+    return (result, info)
 end
 
 # ============================================================
@@ -401,10 +414,12 @@ Mirrors the per-step `_save_config!` (which writes each step's config into its
 own subdir) but captures what those don't: the camera, the global ROI crop,
 verbosity, checkpoint level, and a manifest of the step sequence.
 """
-function _save_pipeline_config!(dir::String, steps, camera::SMLMData.AbstractCamera,
-                                roi, verbose::Int, checkpoint::Int)
+function _save_pipeline_config!(
+        dir::String, steps, camera::SMLMData.AbstractCamera,
+        roi, verbose::Int, checkpoint::Int
+    )
     filepath = joinpath(dir, "config.toml")
-    open(filepath, "w") do io
+    return open(filepath, "w") do io
         println(io, "# AnalysisConfig")
         println(io, "type = \"AnalysisConfig\"")
         println(io, "verbose = $verbose")
@@ -455,6 +470,7 @@ function _write_camera!(io::IO, cam::SMLMData.AbstractCamera)
             println(io, "$f = \"matrix($(size(v, 1))x$(size(v, 2)))\"")
         end
     end
+    return
 end
 
 # ============================================================
@@ -463,7 +479,7 @@ end
 
 function _write_summary(outdir::String, step_infos::Vector{StepInfo}, smld)
     filepath = joinpath(outdir, "summary.md")
-    open(filepath, "w") do io
+    return open(filepath, "w") do io
         println(io, "# Analysis Summary\n")
         println(io, "Generated: $(Dates.now())")
         println(io, "")
@@ -490,11 +506,11 @@ function _write_summary(outdir::String, step_infos::Vector{StepInfo}, smld)
             else
                 ""
             end
-            println(io, "| $(s.number) | $(s.name) | $(round(s.elapsed_s, digits=2))s | $result_str |")
+            println(io, "| $(s.number) | $(s.name) | $(round(s.elapsed_s, digits = 2))s | $result_str |")
         end
 
         println(io, "")
-        println(io, "**Total time**: $(round(total_time, digits=2))s")
+        println(io, "**Total time**: $(round(total_time, digits = 2))s")
 
         if smld !== nothing
             println(io, "")

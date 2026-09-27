@@ -40,11 +40,13 @@ end
 
 Render a multi-channel composite image. SMLDs pass through unmodified.
 """
-function composite_render_step(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CompositeRenderConfig;
-                               outdir::Union{String,Nothing}=nothing,
-                               step_number::Int=0,
-                               verbose::Int=Verbosity.STANDARD,
-                               colors::Vector{Symbol}=Symbol[])
+function composite_render_step(
+        smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CompositeRenderConfig;
+        outdir::Union{String, Nothing} = nothing,
+        step_number::Int = 0,
+        verbose::Int = Verbosity.STANDARD,
+        colors::Vector{Symbol} = Symbol[]
+    )
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
 
@@ -70,17 +72,18 @@ function composite_render_step(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::Composi
 
     local render_info
     t = @elapsed begin
-        (_, render_info) = SMLMRender.render(smlds;
-            colors=colors,
-            strategy=cfg.strategy,
-            zoom=cfg.zoom,
-            clip_percentile=cp,
-            normalize_each=ne,
-            filename=filename,
-            scalebar=cfg.scalebar,
-            scalebar_length=cfg.scalebar_length,
-            scalebar_position=cfg.scalebar_position,
-            scalebar_color=cfg.scalebar_color,
+        (_, render_info) = SMLMRender.render(
+            smlds;
+            colors = colors,
+            strategy = cfg.strategy,
+            zoom = cfg.zoom,
+            clip_percentile = cp,
+            normalize_each = ne,
+            filename = filename,
+            scalebar = cfg.scalebar,
+            scalebar_length = cfg.scalebar_length,
+            scalebar_position = cfg.scalebar_position,
+            scalebar_color = cfg.scalebar_color,
         )
     end
 
@@ -92,13 +95,13 @@ function composite_render_step(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::Composi
         end
     end
 
-    v >= Verbosity.PROGRESS && @info "  -> composite $(render_info.output_size) ($(round(t, digits=2))s)"
+    v >= Verbosity.PROGRESS && @info "  -> composite $(render_info.output_size) ($(round(t, digits = 2))s)"
 
     info = CompositeRenderInfo(render_info, Symbol(strategy_name), cfg.zoom, length(smlds), t)
-    (smlds, info)
+    return (smlds, info)
 end
 
-_step_summary(info::CompositeRenderInfo) = Dict{Symbol,Any}(
+_step_summary(info::CompositeRenderInfo) = Dict{Symbol, Any}(
     :strategy => info.strategy,
     :zoom => info.zoom,
     :n_channels => info.n_channels,
@@ -106,22 +109,26 @@ _step_summary(info::CompositeRenderInfo) = Dict{Symbol,Any}(
 )
 
 """
-    analyze(smlds::Vector{BasicSMLD}, cfg::CompositeRenderConfig; outdir, step_number, verbose, colors) -> (smlds, StepInfo)
+    analyze(smlds::Vector{BasicSMLD}, cfg::CompositeRenderConfig; outdir, step_number, verbose, labels, colors) -> (smlds, StepInfo)
 
-Multi-target dispatch: composite render. SMLDs pass through. `colors` is the
-only multi-target keyword this step reads (it does not use `labels`).
+Multi-target dispatch: composite render. SMLDs pass through. Accepts both
+`labels` and `colors` (every multi-target step does), but only reads `colors`.
 """
-function analyze(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CompositeRenderConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD,
-                 colors::Vector{Symbol}=Symbol[])
-    t = @elapsed (smlds, cr_info) = composite_render_step(smlds, cfg;
-        outdir=outdir, step_number=step_number, verbose=verbose, colors=colors)
-    (smlds, StepInfo(step_number, cfg, t, _step_summary(cr_info); info=cr_info))
+function analyze(
+        smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CompositeRenderConfig;
+        outdir = nothing, step_number::Int = 0, verbose::Int = Verbosity.STANDARD,
+        labels::Vector{Symbol} = Symbol[], colors::Vector{Symbol} = Symbol[]
+    )
+    t = @elapsed (smlds, cr_info) = composite_render_step(
+        smlds, cfg;
+        outdir = outdir, step_number = step_number, verbose = verbose, colors = colors
+    )
+    return (smlds, StepInfo(step_number, cfg, t, _step_summary(cr_info); info = cr_info))
 end
 
 function _write_composite_render_stats(dir, cfg::CompositeRenderConfig, render_info, smlds, t)
     filepath = joinpath(dir, "stats.md")
-    open(filepath, "w") do io
+    return open(filepath, "w") do io
         println(io, "# Composite Render Statistics\n")
         println(io, "## Summary")
         println(io, "- **Strategy**: $(nameof(typeof(cfg.strategy)))")
@@ -131,7 +138,7 @@ function _write_composite_render_stats(dir, cfg::CompositeRenderConfig, render_i
             println(io, "  - Channel $i: $(length(smld.emitters)) localizations")
         end
         println(io, "- **Output size**: $(render_info.output_size)")
-        println(io, "- **Pixel size**: $(round(render_info.pixel_size_nm, digits=1)) nm")
-        println(io, "- **Time**: $(round(t, digits=2))s")
+        println(io, "- **Pixel size**: $(round(render_info.pixel_size_nm, digits = 1)) nm")
+        println(io, "- **Time**: $(round(t, digits = 2))s")
     end
 end

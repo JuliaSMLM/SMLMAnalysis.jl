@@ -35,10 +35,12 @@ end
 
 Align multiple SMLDs to a common reference using entropy-based alignment.
 """
-function crossalign_step(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossAlignConfig;
-                         outdir::Union{String,Nothing}=nothing,
-                         step_number::Int=0,
-                         verbose::Int=Verbosity.STANDARD)
+function crossalign_step(
+        smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossAlignConfig;
+        outdir::Union{String, Nothing} = nothing,
+        step_number::Int = 0,
+        verbose::Int = Verbosity.STANDARD
+    )
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
 
@@ -63,10 +65,10 @@ function crossalign_step(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossAlignCon
         end
     end
 
-    v >= Verbosity.PROGRESS && @info "  -> aligned $(length(smlds)) channels, max shift $(round(max_shift_nm, digits=1))nm ($(round(t, digits=2))s)"
+    v >= Verbosity.PROGRESS && @info "  -> aligned $(length(smlds)) channels, max shift $(round(max_shift_nm, digits = 1))nm ($(round(t, digits = 2))s)"
 
     info = CrossAlignInfo(align_info, align_info.shifts, max_shift_nm, t)
-    (aligned_smlds, info)
+    return (aligned_smlds, info)
 end
 
 """
@@ -97,8 +99,10 @@ the aligned data if you need the mask there.
 `align_smld`) and is never mutated here — its correction is the identity
 anyway.
 """
-function _align_edge_geometry!(aligned::Vector{<:SMLMData.BasicSMLD},
-                                info::SMLMDriftCorrection.AlignInfo)
+function _align_edge_geometry!(
+        aligned::Vector{<:SMLMData.BasicSMLD},
+        info::SMLMDriftCorrection.AlignInfo
+    )
     for i in 2:length(aligned)
         md = aligned[i].metadata
         (haskey(md, "edge_outer_polygon") || haskey(md, "edge_cells")) || continue
@@ -115,43 +119,50 @@ function _align_edge_geometry!(aligned::Vector{<:SMLMData.BasicSMLD},
         end
         if haskey(md, "edge_cells")
             md["edge_cells"] = SMLMClustering.CellPolygon[
-                SMLMClustering.CellPolygon(tf.(c.outer),
-                    Vector{NTuple{2,Float64}}[tf.(h) for h in c.holes])
-                for c in md["edge_cells"]
+                SMLMClustering.CellPolygon(
+                    tf.(c.outer),
+                    Vector{NTuple{2, Float64}}[tf.(h) for h in c.holes]
+                )
+                    for c in md["edge_cells"]
             ]
         end
     end
-    aligned
+    return aligned
 end
 
-_step_summary(info::CrossAlignInfo) = Dict{Symbol,Any}(
-    :max_shift_nm => round(info.max_shift_nm, digits=1),
+_step_summary(info::CrossAlignInfo) = Dict{Symbol, Any}(
+    :max_shift_nm => round(info.max_shift_nm, digits = 1),
     :n_channels => length(info.shifts),
     :method => info.align_info.method,
 )
 
 """
-    analyze(smlds::Vector{BasicSMLD}, cfg::CrossAlignConfig; outdir, step_number, verbose) -> (aligned_smlds, StepInfo)
+    analyze(smlds::Vector{BasicSMLD}, cfg::CrossAlignConfig; outdir, step_number, verbose, labels, colors) -> (aligned_smlds, StepInfo)
 
-Multi-target dispatch: cross-channel alignment. Modifies SMLDs. Uses neither
-`colors` nor `labels`, so this step's `analyze` does not accept them.
+Multi-target dispatch: cross-channel alignment. Modifies SMLDs. Accepts both
+`labels` and `colors` (every multi-target step does), but uses neither.
 """
-function analyze(smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossAlignConfig;
-                 outdir=nothing, step_number::Int=0, verbose::Int=Verbosity.STANDARD)
-    t = @elapsed (aligned, ca_info) = crossalign_step(smlds, cfg;
-        outdir=outdir, step_number=step_number, verbose=verbose)
-    (aligned, StepInfo(step_number, cfg, t, _step_summary(ca_info); info=ca_info))
+function analyze(
+        smlds::Vector{<:SMLMData.BasicSMLD}, cfg::CrossAlignConfig;
+        outdir = nothing, step_number::Int = 0, verbose::Int = Verbosity.STANDARD,
+        labels::Vector{Symbol} = Symbol[], colors::Vector{Symbol} = Symbol[]
+    )
+    t = @elapsed (aligned, ca_info) = crossalign_step(
+        smlds, cfg;
+        outdir = outdir, step_number = step_number, verbose = verbose
+    )
+    return (aligned, StepInfo(step_number, cfg, t, _step_summary(ca_info); info = ca_info))
 end
 
 function _write_crossalign_stats(dir, cfg::CrossAlignConfig, align_info, shifts_nm, max_shift_nm, t)
     filepath = joinpath(dir, "stats.md")
-    open(filepath, "w") do io
+    return open(filepath, "w") do io
         println(io, "# Cross-Channel Alignment Statistics\n")
         println(io, "## Summary")
         println(io, "- **Method**: $(cfg.align.method)")
         println(io, "- **Channels**: $(length(align_info.shifts))")
-        println(io, "- **Max shift**: $(round(max_shift_nm, digits=1)) nm")
-        println(io, "- **Time**: $(round(t, digits=2))s")
+        println(io, "- **Max shift**: $(round(max_shift_nm, digits = 1)) nm")
+        println(io, "- **Time**: $(round(t, digits = 2))s")
         println(io)
         println(io, "## Per-Channel Shifts")
         println(io, "| Channel | X (nm) | Y (nm) | Magnitude (nm) |")
@@ -159,9 +170,9 @@ function _write_crossalign_stats(dir, cfg::CrossAlignConfig, align_info, shifts_
         for (i, s) in enumerate(shifts_nm)
             mag = sqrt(sum(s .^ 2))
             if length(s) >= 2
-                println(io, "| $i | $(round(s[1], digits=1)) | $(round(s[2], digits=1)) | $(round(mag, digits=1)) |")
+                println(io, "| $i | $(round(s[1], digits = 1)) | $(round(s[2], digits = 1)) | $(round(mag, digits = 1)) |")
             else
-                println(io, "| $i | $(round(s[1], digits=1)) | - | $(round(mag, digits=1)) |")
+                println(io, "| $i | $(round(s[1], digits = 1)) | - | $(round(mag, digits = 1)) |")
             end
         end
     end
