@@ -439,3 +439,24 @@ end
         end
     end
 end
+
+@testset "load_smart_h5 with an integer frame_range returns one frame" begin
+    # `data[:, :, frame_range]` returns a Matrix (not a 3-D array) for an Int
+    # frame_range -- a single frame index, not just a range, is a supported
+    # (and documented) call shape.
+    mktempdir() do dir
+        path = joinpath(dir, "smart.h5")
+        data = rand(UInt16, 8, 6, 3)
+        SMLMAnalysis.HDF5.h5open(path, "w") do f
+            g = SMLMAnalysis.HDF5.create_group(f, "Main")
+            g["data"] = data
+        end
+
+        frame = load_smart_h5(path; frame_range = 2)
+        @test frame isa Matrix
+        @test frame == data[:, :, 2]
+
+        frames = load_smart_h5(path; frame_range = 2:3)
+        @test size(frames) == (8, 6, 2)
+    end
+end

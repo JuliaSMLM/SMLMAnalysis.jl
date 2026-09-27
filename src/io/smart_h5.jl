@@ -48,10 +48,13 @@ Load image data from a SMART microscope HDF5 file.
 
 # Arguments
 - `filepath::String`: Path to the HDF5 file
-- `frame_range`: Optional range of frames to load (e.g., 1:1000). If nothing, loads all frames.
+- `frame_range`: Optional range of frames to load (e.g., 1:1000), or a single frame
+  index (e.g., 5), which returns that one frame as a `Matrix`. If nothing, loads
+  all frames.
 
 # Returns
-- `data::Array{UInt16, 3}`: Image data (width, height, frames)
+- `data::Array{UInt16, 3}`: Image data (width, height, frames) for a range or `nothing`;
+  `Matrix{UInt16}` (width, height) for a single frame index.
 
 # Example
 ```julia
@@ -60,6 +63,9 @@ data = load_smart_h5("data/experiment.h5")
 
 # Load first 1000 frames
 data = load_smart_h5("data/experiment.h5", frame_range=1:1000)
+
+# Load a single frame
+frame5 = load_smart_h5("data/experiment.h5", frame_range=5)
 ```
 """
 function load_smart_h5(filepath::String; frame_range = nothing)
