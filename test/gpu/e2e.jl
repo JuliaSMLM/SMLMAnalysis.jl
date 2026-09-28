@@ -54,12 +54,13 @@ function _match(truth, fits; lat = 0.2, ax = 0.4)
     return out
 end
 
-# Errors (nm) of the matched fits for the truth emitters selected by `keep`.
+# Errors (nm) of the matched fits for the truth emitters selected by `keep`. Typed, so that
+# no match gives empty Float64 vectors, whose mean and _rmse are NaN and fail the floors.
 function _errors(truth, fits, pairs, keep)
     sel = [(i, k) for (i, k) in pairs if keep(truth[i])]
-    dx = [(fits[k].x - truth[i].x) * 1000 for (i, k) in sel]
-    dy = [(fits[k].y - truth[i].y) * 1000 for (i, k) in sel]
-    dz = [(fits[k].z - truth[i].z) * 1000 for (i, k) in sel]
+    dx = Float64[(fits[k].x - truth[i].x) * 1000 for (i, k) in sel]
+    dy = Float64[(fits[k].y - truth[i].y) * 1000 for (i, k) in sel]
+    dz = Float64[(fits[k].z - truth[i].z) * 1000 for (i, k) in sel]
     return dx, dy, dz, length(sel) / count(keep, truth)
 end
 _rmse(v) = sqrt(mean(abs2, v))
@@ -196,9 +197,11 @@ _rmse(v) = sqrt(mean(abs2, v))
         (dx, dy, dz, recall) = _errors(seen, dfits, pairs, t -> true)
         # Chance: the same fits against the truth 250 frames away, which shares only the grid.
         chance = jac(seen, [(; f..., frame = mod1(f.frame + 250, n_frames)) for f in shifted(0)])
-        # z matched laterally only (0.15 µm), so a wrong z is scored rather than dropped.
+        # z matched laterally only (0.15 µm), so a wrong z is scored rather than dropped. An
+        # untrained model can match nothing; cor then throws, so NaN stands in and fails the floor.
         zpairs = _match(seen, dfits; lat = 0.15, ax = Inf)
-        zcorr = cor([seen[i].z for (i, _) in zpairs], [dfits[k].z for (_, k) in zpairs])
+        zcorr = isempty(zpairs) ? NaN :
+            cor(Float64[seen[i].z for (i, _) in zpairs], Float64[dfits[k].z for (_, k) in zpairs])
         @info "E2E DeepFit arm" n_fits = length(dfits) jaccard_shift_m1_0_p1 = (jshift[-1], jshift[0], jshift[1]) jaccard chance recall bias_nm =
             (mean(dx), mean(dy), mean(dz)) rmse_nm = (_rmse(dx), _rmse(dy), _rmse(dz)) zcorr n_zpairs = length(zpairs)
         # Production bars (Jaccard 0.7, RMSE 40/40/80 nm), which short training need not meet.
