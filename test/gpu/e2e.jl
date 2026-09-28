@@ -170,15 +170,18 @@ _rmse(v) = sqrt(mean(abs2, v))
 
         # 6. DeepFit arm: train DECODE on psf.h5 (settings of SMLMDeepFit's
         # examples/train_decode.jl, photons and bg of the movie), then infer on the movie with
-        # the 100-count pedestal the training data carry. The 100 epochs are that file's demo
-        # length, so this arm shows integration and learning, not production quality.
+        # the 100-count pedestal the training data carry. That file's demo length, 100
+        # epochs, stops while the model still climbs: over four runs Jaccard spread from
+        # 0.13 to 0.68. At 200 epochs it was 0.69 and 0.81 (seeds 13 and 42), near a
+        # plateau. That is still short training, so this arm shows integration and
+        # learning, not production quality.
         dfdir = joinpath(dir, "deepfit")
         decode = SMLMDeepFit.Decode(;
             sz = 40, ρ = 1.0, photons = 3000.0, bg = 10.0, minz = -0.5, maxz = 0.5, bgmaxz = 0.8,
             pixelsize = px, n_train = 2000, n_test = 200, psffile = psf_path, savepath = dfdir
         )
         tcfg = SMLMDeepFit.TrainConfig(;
-            traintype = decode, epochs = 100, batchsize = 50,
+            traintype = decode, epochs = 200, batchsize = 50,
             optimiser = SMLMDeepFit.Optimisers.Adam(1.0f-4), patience = 200, data_refresh_interval = 50,
             seed = 42, use_reactant = SMLMDeepFit.REACTANT_AVAILABLE[], use_cuda = true, savepath = dfdir, infotime = 5,
             checktime = 50, tblogger = false
@@ -209,7 +212,7 @@ _rmse(v) = sqrt(mean(abs2, v))
         zcorr = cor([seen[i].z for (i, _) in zpairs], [dfits[k].z for (_, k) in zpairs])
         @info "E2E DeepFit arm" n_fits = length(dfits) jaccard_shift_m1_0_p1 = (jshift[-1], jshift[0], jshift[1]) jaccard chance recall bias_nm =
             (mean(dx), mean(dy), mean(dz)) rmse_nm = (_rmse(dx), _rmse(dy), _rmse(dz)) zcorr n_zpairs = length(zpairs)
-        # Production bars (Jaccard 0.7, RMSE 40/40/80 nm), which demo training is not expected to meet.
+        # Production bars (Jaccard 0.7, RMSE 40/40/80 nm), which short training need not meet.
         @info "E2E DeepFit arm against production bars" jaccard_ge_0_7 = jaccard >= 0.7 rmse_le_40_40_80 =
             _rmse(dx) <= 40 && _rmse(dy) <= 40 && _rmse(dz) <= 80
         # Floors that show learning:
