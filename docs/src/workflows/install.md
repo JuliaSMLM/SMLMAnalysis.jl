@@ -54,11 +54,20 @@ Two groups of steps load only when their packages are present, as Julia package
 | `SMLMAnalysisPSFLearningExt` | `PSFLearning` | the `psflearning` step: learn a PSF from a bead z-stack and write `psf.h5` |
 | `SMLMAnalysisDeepFitExt` | `SMLMDeepFit` | the `deepfit_training` and `deepfit_inference` steps |
 
-Neither package is registered yet, so add both to your environment from their
-clones, for example
-`Pkg.develop([PackageSpec(path = "../PSFLearning"), PackageSpec(path = "../SMLMDeepFit")])`.
-Both use Reactant, so run these steps on **Julia 1.12**, and require a recent
-Reactant (`Pkg.add(name = "Reactant", version = "0.2.264")`): left alone, the
+Neither package is registered yet, so add both by git URL, pinned to a commit:
+
+```julia
+using Pkg
+Pkg.add([
+    PackageSpec(url = "https://github.com/JuliaSMLM/PSFLearning.jl", rev = "<commit>"),
+    PackageSpec(url = "https://github.com/JuliaSMLM/SMLMDeepFit.jl", rev = "<commit>"),
+])
+Pkg.add(name = "Reactant", version = "0.2.264")
+```
+
+The commits this version of SMLMAnalysis was tested with are the `rev` entries
+in `test/gpu/Project.toml`. Both packages use Reactant, so run these steps on
+**Julia 1.12**, and require a recent Reactant as above: left alone, the
 resolver picked Reactant 0.2.24 in our test, which does not build on Julia 1.12.
 
 On a CUDA machine, **load SMLMAnalysis before PSFLearning**:
