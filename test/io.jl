@@ -131,3 +131,19 @@ end
         @test m2["empty_polygon"] isa Vector{NTuple{2, Float64}} && isempty(m2["empty_polygon"])
     end
 end
+
+@testset "config.toml keeps each key in its own table" begin
+    # A TOML table owns every key after its header. DetectFitConfig's plain fields
+    # (h5_format, qe) come after its nested boxer and fitter configs, and GaussMLEConfig's
+    # iterations after its psf_model; each must parse back where it belongs.
+    io = IOBuffer()
+    SMLMAnalysis._write_config_fields!(io, DetectFitConfig())
+    parsed = TOML.parse(String(take!(io)))
+    @test parsed["h5_format"] == "auto"
+    @test parsed["qe"] == 1.0
+    @test !haskey(parsed["boxer"], "qe")
+    @test !haskey(parsed["fitter"], "qe")
+    @test parsed["fitter"]["iterations"] == 20
+    @test !haskey(parsed["fitter"]["psf_model"], "iterations")
+    @test parsed["fitter"]["psf_model"]["type"] == "GaussianXYNBS"
+end
