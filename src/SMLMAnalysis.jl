@@ -278,13 +278,18 @@ end
 # entry point, and the first `analyze()` in a fresh session otherwise pays
 # ~1 min of JIT.
 #
+# It runs at the default verbosity with an outdir, because most of that first
+# call is compiling the per-step figure and stats writers (CairoMakie), not the
+# steps themselves. Drift correction is included for the same reason.
+#
 # Invariants that keep the workload safe to run during precompilation:
 #   - backend = :cpu      → on BOTH the boxer and the fitter: no GPU kernels
 #                           (uncacheable, no device on CI, and the boxer's GPU
 #                           path polls NVML, which some GPUs do not support)
-#   - outdir  = nothing   → no disk writes
+#   - outdir  = temp dir  → removed when the workload ends
+#   - logger  → devnull   → no build-time log spam; the log formatting still
+#                           compiles
 #   - GaussianXYNBS       → Emitter2DFitSigma, the path the examples exercise
-#   - verbose = SILENT    → no build-time log spam
 #   - seeded, dense data  → deterministic and never empty; sparse localization
 #                           sets crash downstream reductions over emitter arrays
 #
@@ -293,35 +298,44 @@ end
 using PrecompileTools: @setup_workload, @compile_workload
 
 @setup_workload begin
-    # Setup (NOT cached): synthesize a small single-dataset image stack.
+    # Setup (NOT cached): synthesize a small two-dataset image stack, so drift
+    # correction has a registration between datasets to run.
     Random.seed!(1)
     cam = IdealCamera(32, 32, 0.1)
-    sim = StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 1)
+    sim = StaticSMLMConfig(density = 5.0, σ_psf = 0.13, nframes = 50, ndatasets = 2)
     (_, si) = simulate(
         sim;
         pattern = Nmer2D(n = 8, d = 0.05),
         molecule = GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 0.04),
         camera = cam
     )
-    (imgs, _) = gen_images(
-        si.smld_model, MicroscopePSFs.GaussianPSF(0.13);
-        dataset = 1, bg = 20.0, poisson_noise = true
-    )
+    imgs = [
+        gen_images(
+            si.smld_model, MicroscopePSFs.GaussianPSF(0.13);
+            dataset = d, bg = 20.0, poisson_noise = true
+        )[1] for d in 1:2
+    ]
 
     @compile_workload begin
-        # Cached: the detect/fit → filter → frame-connect → render pipeline.
-        cfg = AnalysisConfig(
-            DetectFitConfig(
-                boxer = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
-                fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)
-            ),
-            FilterConfig(photons = (100.0, Inf)),
-            FrameConnectConfig(max_frame_gap = 2),
-            RenderConfig(zoom = 10);
-            camera = cam,
-            verbose = Verbosity.SILENT,
-        )
-        analyze([imgs], cfg)
+        # Cached: detect/fit → filter → frame-connect → drift → render, with
+        # each step's output files.
+        mktempdir() do dir
+            cfg = AnalysisConfig(
+                DetectFitConfig(
+                    boxer = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
+                    fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)
+                ),
+                FilterConfig(photons = (100.0, Inf)),
+                FrameConnectConfig(max_frame_gap = 2),
+                DriftConfig(degree = 1),
+                RenderConfig(zoom = 5);
+                camera = cam,
+                outdir = dir,
+            )
+            Logging.with_logger(Logging.ConsoleLogger(devnull)) do
+                analyze(imgs, cfg)
+            end
+        end
     end
 end
 
