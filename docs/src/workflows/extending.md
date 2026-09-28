@@ -170,5 +170,6 @@ in-repo recipe is the same five pieces, plus: put the work function in
 add a docstring and an [API Reference](@ref) entry, and add a step page under
 [Pipeline Steps](@ref "Pipeline Steps: Overview"). Then open a pull request
 against `main` — CI runs the Core and QA test groups (Core also at the lowest
-compatible dependency versions) on every PR. The Long group runs locally, with
-`GROUP=Long` or `GROUP=Everything`.
+compatible dependency versions) on every PR, except one that changes only Markdown
+files, `dev/` or `.claude/`. The Long group runs locally, with `GROUP=Long` or
+`GROUP=Everything`.

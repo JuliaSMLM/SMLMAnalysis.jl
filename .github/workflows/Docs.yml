@@ -18,7 +18,7 @@ jobs:
     # Inert while there is no pull_request trigger; keeps drafts unbuilt if one is added back.
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60  # a cold portable-target build of a large package runs ~15 min
     permissions:
       actions: write # needed to allow julia-actions/cache to proactively delete old caches that it has created
       contents: write
