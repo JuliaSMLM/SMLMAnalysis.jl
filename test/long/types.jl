@@ -116,9 +116,9 @@ using Statistics
     smld_huge_σ = SMLMAnalysis.BasicSMLD(huge_σ, cam, 1, 1, Dict{String, Any}())
     @test_throws ArgumentError SMLMAnalysis.densityfilter_step(smld_huge_σ, cfg_df)
 
-    # IntensityFilter: non-finite photons rejected up front. Needs >=100
-    # emitters, otherwise the step's own "too few emitters" early return
-    # would skip the check before it is reached.
+    # IntensityFilter: non-finite photons rejected up front, at 100 emitters.
+    # The finite check runs before the step's "too few emitters" shortcut, so
+    # a 99-emitter input is rejected too (tested for a NaN x below).
     many = [SMLMAnalysis.Emitter2DFit(0.01i, 0.01i, 1000.0, 10.0, 0.01, 0.01, 0.0, 1.0, 1.0, i, 1, 0, i) for i in 2:100]
     bad_photon = SMLMAnalysis.Emitter2DFit(0.5, 0.5, NaN, 10.0, 0.01, 0.01, 0.0, 1.0, 1.0, 1, 1, 0, 1)
     smld_ifbad = SMLMAnalysis.BasicSMLD(vcat([bad_photon], many), cam, 1, 1, Dict{String, Any}())
