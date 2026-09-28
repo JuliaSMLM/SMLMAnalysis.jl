@@ -17,7 +17,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
 PSFLearning = {url = "https://github.com/JuliaSMLM/PSFLearning.jl", rev = "b2a2283d9110f5cb148f4350ccc11381fc65141e"}  # main
-SMLMDeepFit = {url = "https://github.com/JuliaSMLM/SMLMDeepFit.jl", rev = "c48d9b22ab3c6c14911407f233c7b9e031643ac1"}  # feat/framework-extensibility
+SMLMDeepFit = {url = "https://github.com/JuliaSMLM/SMLMDeepFit.jl", rev = "ab8d8212c3f353708835ca8d5d5ce05120068c65"}  # feat/framework-extensibility
 
 [compat]
 # Without this floor the resolver picks Reactant 0.2.24, which does not build on Julia 1.12.
