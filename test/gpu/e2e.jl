@@ -189,26 +189,25 @@ _rmse(v) = sqrt(mean(abs2, v))
 
         icfg = SMLMDeepFit.DeepFitConfig(; model_path = result.model_path, ccdoffset = 0.0f0, camera = cam)
         (smld, _) = analyze(movie .+ 100, icfg; outdir = outdir, step_number = 3)
-        # DeepFit's window n covers frames n..n+2 and predicts the centre frame, n+1, but
-        # SMLMDeepFit stamps its fits with n. Fits sit in their own frame when shift 0 matches
-        # best. Until then the arm is scored at shift +1; when this flips to an unexpected pass,
-        # SMLMDeepFit's fix has landed: score at shift 0 (fits1 = shifted(0)) and drop this test.
-        shifted(s) = [(x = e.x, y = e.y, z = e.z, frame = e.frame + s) for e in smld.emitters]
+        # DeepFit's window n covers frames n..n+2 and predicts the centre frame, n+1, which
+        # SMLMDeepFit (2ed50d5 on) stamps on its fits. So fits sit in their own frame: shift 0
+        # matches best, and shifts -1 and +1 are reported beside it.
+        dfits = smld.emitters
+        shifted(s) = [(x = e.x, y = e.y, z = e.z, frame = e.frame + s) for e in dfits]
         jac(t, f) = (p = _match(t, f); length(p) / (length(t) + length(f) - length(p)))
         jshift = Dict(s => jac(truth, shifted(s)) for s in (-1, 0, 1))
-        @test_broken jshift[0] >= max(jshift[-1], jshift[1])
-        fits1 = shifted(1)
+        @test jshift[0] >= max(jshift[-1], jshift[1])
         # The first and last frames are no window's centre, so they never get fits.
         seen = [t for t in truth if 2 <= t.frame <= n_frames - 1]
-        pairs = _match(seen, fits1)
-        jaccard = length(pairs) / (length(seen) + length(fits1) - length(pairs))
-        (dx, dy, dz, recall) = _errors(seen, fits1, pairs, t -> true)
+        pairs = _match(seen, dfits)
+        jaccard = length(pairs) / (length(seen) + length(dfits) - length(pairs))
+        (dx, dy, dz, recall) = _errors(seen, dfits, pairs, t -> true)
         # Chance: the same fits against the truth 250 frames away, which shares only the grid.
-        chance = jac(seen, [(; f..., frame = mod1(f.frame + 250, n_frames)) for f in fits1])
+        chance = jac(seen, [(; f..., frame = mod1(f.frame + 250, n_frames)) for f in shifted(0)])
         # z matched laterally only (0.15 µm), so a wrong z is scored rather than dropped.
-        zpairs = _match(seen, fits1; lat = 0.15, ax = Inf)
-        zcorr = cor([seen[i].z for (i, _) in zpairs], [fits1[k].z for (_, k) in zpairs])
-        @info "E2E DeepFit arm (fits at frame +1)" n_fits = length(fits1) jaccard_shift_m1_0_p1 = (jshift[-1], jshift[0], jshift[1]) jaccard chance recall bias_nm =
+        zpairs = _match(seen, dfits; lat = 0.15, ax = Inf)
+        zcorr = cor([seen[i].z for (i, _) in zpairs], [dfits[k].z for (_, k) in zpairs])
+        @info "E2E DeepFit arm" n_fits = length(dfits) jaccard_shift_m1_0_p1 = (jshift[-1], jshift[0], jshift[1]) jaccard chance recall bias_nm =
             (mean(dx), mean(dy), mean(dz)) rmse_nm = (_rmse(dx), _rmse(dy), _rmse(dz)) zcorr n_zpairs = length(zpairs)
         # Production bars (Jaccard 0.7, RMSE 40/40/80 nm), which demo training is not expected to meet.
         @info "E2E DeepFit arm against production bars" jaccard_ge_0_7 = jaccard >= 0.7 rmse_le_40_40_80 =
