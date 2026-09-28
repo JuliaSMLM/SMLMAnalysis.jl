@@ -318,23 +318,32 @@ using PrecompileTools: @setup_workload, @compile_workload
 
     @compile_workload begin
         # Cached: detect/fit → filter → frame-connect → drift → render, with
-        # each step's output files.
-        mktempdir() do dir
-            cfg = AnalysisConfig(
-                DetectFitConfig(
-                    boxer = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
-                    fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)
-                ),
-                FilterConfig(photons = (100.0, Inf)),
-                FrameConnectConfig(max_frame_gap = 2),
-                DriftConfig(degree = 1),
-                RenderConfig(zoom = 5);
-                camera = cam,
-                outdir = dir,
-            )
-            Logging.with_logger(Logging.ConsoleLogger(devnull)) do
-                analyze(imgs, cfg)
+        # each step's output files. A throwing workload (a read-only TMPDIR, an
+        # upstream release that throws) must not make the package fail to
+        # install, so it only warns; test/upstream_smoke.jl tests this pipeline.
+        try
+            mktempdir() do dir
+                cfg = AnalysisConfig(
+                    DetectFitConfig(
+                        boxer = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
+                        fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)
+                    ),
+                    FilterConfig(photons = (100.0, Inf)),
+                    FrameConnectConfig(max_frame_gap = 2),
+                    DriftConfig(degree = 1),
+                    RenderConfig(zoom = 5);
+                    camera = cam,
+                    outdir = dir,
+                    verbose = Verbosity.STANDARD,
+                )
+                Logging.with_logger(Logging.ConsoleLogger(devnull)) do
+                    analyze(imgs, cfg)
+                end
             end
+        catch err
+            @warn "SMLMAnalysis precompile workload failed; the package still works" exception = (
+                err, catch_backtrace(),
+            )
         end
     end
 end
