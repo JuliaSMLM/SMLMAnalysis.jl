@@ -27,6 +27,14 @@ SMLMSim = "5a0a87e4-02d4-41f5-bf26-b8c94c784a04"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
+[weakdeps]
+PSFLearning = "d2b3f1d3-fa58-4719-8204-38bc00c1528e"
+SMLMDeepFit = "cd1e22bb-7bb2-459d-a82d-93d34b459d6b"
+
+[extensions]
+SMLMAnalysisDeepFitExt = "SMLMDeepFit"
+SMLMAnalysisPSFLearningExt = "PSFLearning"
+
 [compat]
 Aqua = "0.8"
 CairoMakie = "0.15.6"
@@ -41,12 +49,14 @@ MicroscopePSFs = "0.5"
 NearestNeighbors = "0.4.26"
 Optim = "1.13.3, 2"
 Pkg = "1"
+PSFLearning = "0.1"
 PrecompileTools = "1.2.1"
 Random = "1"
 SMLMBaGoL = "0.4"
 SMLMBoxer = "0.3"
 SMLMClustering = "0.4.3"
 SMLMData = "0.7"
+SMLMDeepFit = "0.1"
 SMLMDriftCorrection = "0.2.8"
 SMLMFrameConnection = "0.3.4"
 SMLMRender = "0.4"
