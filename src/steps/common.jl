@@ -442,24 +442,31 @@ file, needs it.
 _toml_key(k) = (s = string(k); occursin(r"^[A-Za-z0-9_-]+$", s) ? s : "\"" * escape_string(s) * "\"")
 
 function _write_config_fields!(io::IO, cfg; section::String = "", table_prefix::String = "")
+    # Two passes. A TOML table owns every key written after its header, so this struct's
+    # plain keys go first and its nested tables after them; in one pass, a key that
+    # followed a nested table would parse as a member of that table.
+    nested = Symbol[]
     for f in fieldnames(typeof(cfg))
         v = getfield(cfg, f)
         v isa SMLMData.AbstractCamera && continue
         v === nothing && continue
-        key = section == "" ? string(f) : "$(section).$(f)"
         if _is_config_struct(v)
-            # Nested config -> TOML section
-            # Header carries the full key path so a config nested two deep lands
-            # under its parent table, not at the root.
-            path = section == "" ? [string(f)] : [split(section, '.')..., string(f)]
-            println(io, "\n[$(table_prefix)$(join(_toml_key.(path), '.'))]")
-            println(io, "type = \"$(nameof(typeof(v)))\"")
-            _write_config_fields!(io, v; section = key, table_prefix = table_prefix)
+            push!(nested, f)
         else
             # Every scalar value goes through _toml_value for valid TOML
             # (escaped strings, tuple/range/vector arrays, inf/nan floats).
             println(io, "$(_toml_key(f)) = $(_toml_value(v))")
         end
+    end
+    for f in nested
+        v = getfield(cfg, f)
+        key = section == "" ? string(f) : "$(section).$(f)"
+        # Nested config -> TOML section. The header carries the full key path so a
+        # config nested two deep lands under its parent table, not at the root.
+        path = section == "" ? [string(f)] : [split(section, '.')..., string(f)]
+        println(io, "\n[$(table_prefix)$(join(_toml_key.(path), '.'))]")
+        println(io, "type = \"$(nameof(typeof(v)))\"")
+        _write_config_fields!(io, v; section = key, table_prefix = table_prefix)
     end
     return
 end

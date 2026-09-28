@@ -92,6 +92,9 @@ end
         parsed = TOML.parsefile(joinpath(dir, "multi_target_config.toml"))
         @test length(parsed["steps"]) == 3
         @test haskey(parsed["steps"][1], "strategy")
+        # zoom follows the nested strategy field; it must stay on the step, not in [steps.strategy]
+        @test parsed["steps"][1]["zoom"] == 20.0
+        @test !haskey(parsed["steps"][1]["strategy"], "zoom")
         @test haskey(parsed["steps"][2], "align")
         @test haskey(parsed["steps"][3], "strategy")
     end
