@@ -90,22 +90,11 @@ _rmse(v) = sqrt(mean(abs2, v))
         stack = Float32.(max.(counts .- 20.0, 0.0))
         recovered(c) = abs(c[6] + 0.5) <= 0.05 && abs(c[11] - 0.1) <= 0.05   # rad
 
-        # 3. Learn through SMLMAnalysis's psflearning step, which writes psf.h5.
-        # PSFLearning's bead-stack loss has no intensity parameter, so from this photon-scale
-        # stack learn_psf converges to wrong coefficients (Noll 6 about -0.30 for -0.50).
-        # PSFLearning owns the fix; this flips to an unexpected pass when it lands.
-        (_, photon_info) = analyze(stack, cfg; z_positions = z_positions)
-        pc = photon_info.info.coeffs
-        @info "E2E learn from the photon-scale stack (known broken)" pc[6] pc[11]
-        @test_broken recovered(pc)
-        # Until then the arms below learn from the stack rescaled to the forward model's own
-        # scale, which measures them against a correctly learned PSF.
-        scale0 = sum(PSFLearning.forward_images(fwd, zero(gt), Float32[0])) /
-            maximum(sum(stack; dims = (2, 3)))
+        # 3. Learn through SMLMAnalysis's psflearning step, which writes psf.h5. From this
+        # photon-scale stack learn_psf once converged to wrong coefficients (Noll 6 about -0.30
+        # for -0.50); PSFLearning 4e49d73 rescales the stack to the model's own scale first.
         outdir = joinpath(dir, "out")
-        (_, learn_info) = analyze(
-            stack .* Float32(scale0), cfg; z_positions = z_positions, outdir = outdir, step_number = 1
-        )
+        (_, learn_info) = analyze(stack, cfg; z_positions = z_positions, outdir = outdir, step_number = 1)
         psf_path = joinpath(SMLMAnalysis.step_outdir(outdir, 1, cfg), "psf.h5")
         @test isfile(psf_path)
         learned = MicroscopePSFs.load_psf(psf_path)
