@@ -466,7 +466,17 @@ function _write_config_fields!(io::IO, cfg; section::String = "", table_prefix::
         path = section == "" ? [string(f)] : [split(section, '.')..., string(f)]
         println(io, "\n[$(table_prefix)$(join(_toml_key.(path), '.'))]")
         println(io, "type = \"$(nameof(typeof(v)))\"")
-        _write_config_fields!(io, v; section = key, table_prefix = table_prefix)
+        if v isa GaussMLE.PSFModel
+            # A PSF model can hold a whole tabulated PSF (SplinePSFModel's spline), so
+            # record its plain number/tuple fields and never recurse into it.
+            for g in fieldnames(typeof(v))
+                w = getfield(v, g)
+                (w isa Union{Number, Symbol, AbstractString} || (w isa Tuple && all(x -> x isa Number, w))) &&
+                    println(io, "$(_toml_key(g)) = $(_toml_value(w))")
+            end
+        else
+            _write_config_fields!(io, v; section = key, table_prefix = table_prefix)
+        end
     end
     return
 end
