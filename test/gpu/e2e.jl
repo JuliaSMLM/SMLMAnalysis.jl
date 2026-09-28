@@ -88,16 +88,24 @@ _rmse(v) = sqrt(mean(abs2, v))
         Random.seed!(21)   # poisson_noise draws from the global RNG
         counts = SMLMSim.poisson_noise(Float64.(raw) .* (20000 / sum(raw[9, :, :])) .+ 20.0)
         stack = Float32.(max.(counts .- 20.0, 0.0))
-        # learn_psf's bead loss has no intensity parameter: from a photon-scale stack it
-        # converges to wrong coefficients (astigmatism -0.30 for -0.50). Rescale the stack
-        # to the forward model's own scale until PSFLearning handles it (reported to admiral).
-        scale0 = sum(PSFLearning.forward_images(fwd, zero(gt), Float32[0])) /
-            maximum(sum(stack; dims = (2, 3)))
-        stack .*= Float32(scale0)
+        recovered(c) = abs(c[6] + 0.5) <= 0.05 && abs(c[11] - 0.1) <= 0.05   # rad
 
         # 3. Learn through SMLMAnalysis's psflearning step, which writes psf.h5.
+        # PSFLearning's bead-stack loss has no intensity parameter, so from this photon-scale
+        # stack learn_psf converges to wrong coefficients (Noll 6 about -0.30 for -0.50).
+        # PSFLearning owns the fix; this flips to an unexpected pass when it lands.
+        (_, photon_info) = analyze(stack, cfg; z_positions = z_positions)
+        pc = photon_info.info.coeffs
+        @info "E2E learn from the photon-scale stack (known broken)" pc[6] pc[11]
+        @test_broken recovered(pc)
+        # Until then the arms below learn from the stack rescaled to the forward model's own
+        # scale, which measures them against a correctly learned PSF.
+        scale0 = sum(PSFLearning.forward_images(fwd, zero(gt), Float32[0])) /
+            maximum(sum(stack; dims = (2, 3)))
         outdir = joinpath(dir, "out")
-        (_, learn_info) = analyze(stack, cfg; z_positions = z_positions, outdir = outdir, step_number = 1)
+        (_, learn_info) = analyze(
+            stack .* Float32(scale0), cfg; z_positions = z_positions, outdir = outdir, step_number = 1
+        )
         psf_path = joinpath(SMLMAnalysis.step_outdir(outdir, 1, cfg), "psf.h5")
         @test isfile(psf_path)
         learned = MicroscopePSFs.load_psf(psf_path)
@@ -106,6 +114,7 @@ _rmse(v) = sqrt(mean(abs2, v))
         coeffs = learn_info.info.coeffs
         @info "E2E learned coefficients (truth: Noll 6 = -0.5, Noll 11 = 0.1)" coeffs[6] coeffs[11] seconds =
             learn_info.elapsed_s
+        @test recovered(coeffs)
 
         # 4. Movie with the true PSF: 64x64 pixels of 0.1 µm, 9 emitters per frame on a
         # jittered 3x3 grid (at least 1.7 µm apart), 3000 photons, bg 10, z uniform in ±0.5 µm.
@@ -124,8 +133,7 @@ _rmse(v) = sqrt(mean(abs2, v))
         (movie, _) = SMLMAnalysis.gen_images(smld_true, truth_psf; bg = 10.0, poisson_noise = true, support = 1.0)
 
         # 5. GaussMLE arm: DetectFit with psf_file, and a control with the true PSF saved the
-        # same way. Accept set |z| <= 0.35 µm (GaussMLE.jl#18: fits 0.4-0.5 µm from focus
-        # can land on the wrong side of focus).
+        # same way, over the whole ±0.5 µm; the 0.4-0.5 µm band is also reported on its own.
         control_path = _save_psf_file(joinpath(dir, "truth_psf.h5"), truth_psf)
         gmle = Dict{String, Any}()
         for (arm, path) in (("learned", psf_path), ("control", control_path))
@@ -138,7 +146,7 @@ _rmse(v) = sqrt(mean(abs2, v))
             fits = smld.emitters
             pairs = _match(truth, fits)
             gmle[arm] = (
-                accept = _errors(truth, fits, pairs, t -> abs(t.z) <= 0.35),
+                accept = _errors(truth, fits, pairs, t -> true),
                 band = _errors(truth, fits, pairs, t -> abs(t.z) >= 0.4),
             )
             (dx, dy, dz, recall) = gmle[arm].accept
@@ -155,9 +163,6 @@ _rmse(v) = sqrt(mean(abs2, v))
         @test _rmse(dx) <= min(15, 1.25 * _rmse(cx))
         @test _rmse(dy) <= min(15, 1.25 * _rmse(cy))
         @test _rmse(dz) <= min(50, 1.25 * _rmse(cz))
-        # Fails today (GaussMLE.jl#18); flips to an unexpected pass once the z start is fixed.
-        (bx, by, bz, _) = gmle["learned"].band
-        @test_broken _rmse(bz) <= 50
 
         # 6. DeepFit arm: train DECODE on psf.h5 (settings of SMLMDeepFit's
         # examples/train_decode.jl, photons and bg of the movie), then infer on the movie with
