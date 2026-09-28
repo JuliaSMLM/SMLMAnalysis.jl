@@ -35,6 +35,11 @@ SMLMDeepFit = "cd1e22bb-7bb2-459d-a82d-93d34b459d6b"
 SMLMAnalysisDeepFitExt = "SMLMDeepFit"
 SMLMAnalysisPSFLearningExt = "PSFLearning"
 
+[sources]
+# GaussMLE's SplinePSFModel (G-1, GaussMLE.jl#18) is not released yet. Drop this line and
+# raise the GaussMLE compat once the release that contains it is registered.
+GaussMLE = {url = "https://github.com/JuliaSMLM/GaussMLE.jl", rev = "52758fce8e5dc3cac79eb6cfa65a6459c3adb91e"}  # feat/spline-psf-model
+
 [compat]
 Aqua = "0.8"
 CairoMakie = "0.15.6"

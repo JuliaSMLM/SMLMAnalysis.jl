@@ -71,9 +71,31 @@ camera options:
 | `datasets` | `nothing` | subset of source slots to include |
 | `h5_format` | `:auto` | `:auto`, `:smart`, or `:mic` (see [I/O & Resume](@ref)) |
 | `pixel_size`, `qe` | `nothing`, `1.0` | build an SCMOS camera from MIC H5 calibration when `camera` is unset |
+| `psf_file` | `""` | a learned 3D PSF file to fit with (see below) |
 
 PSF models (from GaussMLE) include `GaussianXYNB`, `GaussianXYNBS` (free width),
 `GaussianXYNBSXSY` (elliptical), and `AstigmaticXYZNB` (3D).
+
+### A learned 3D PSF
+
+Set `psf_file` to a PSF saved as MicroscopePSFs HDF5, such as the `psf.h5` that
+`PSFLearning.save_psf` writes. The file must hold a 3D `SplinePSF`. DetectFit then
+fits x, y, z, photons and background with GaussMLE's `SplinePSFModel` at the
+camera's pixel size, and the localizations are 3D. Leave `fitter.psf_model` at its
+default: setting both is an error.
+
+```julia
+DetectFitConfig(boxer = BoxerConfig(boxsize = 15, psf_sigma = 0.15),
+                psf_file = "calibration/psf.h5")
+```
+
+!!! warning "Axial range"
+    Keep emitters within about ±0.35 µm of focus for now. With an astigmatic test PSF
+    (0.5 rad RMS astigmatism, NA 1.4), fits of emitters 0.4-0.5 µm from focus often
+    converge to a local optimum on the other side of focus, with about a third of the
+    photons: 122 of 200 simulated emitters in that band, against none of 200 at
+    0.3-0.4 µm. The fix, a better starting point in z for `SplinePSFModel`, is tracked
+    on [GaussMLE.jl#18](https://github.com/JuliaSMLM/GaussMLE.jl/pull/18).
 
 ```julia
 config = AnalysisConfig(
