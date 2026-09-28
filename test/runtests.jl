@@ -20,8 +20,10 @@ testfiles(g) = sort(
 
 # Layout check: a test file must never silently not run.
 for g in keys(CFG)
-    g in GROUPS || error("test_groups.toml: unknown group $g (allowed: $(join(GROUPS, ", ")))")
-    isdir(folder(g)) && !isempty(testfiles(g)) || error("group $g is declared but $(folder(g)) has no .jl files")
+    g in GROUPS ||
+        error("test_groups.toml: unknown group $g (allowed: $(join(GROUPS, ", ")))")
+    isdir(folder(g)) && !isempty(testfiles(g)) ||
+        error("group $g is declared but $(folder(g)) has no .jl files")
 end
 for d in readdir(TESTDIR)
     isdir(joinpath(TESTDIR, d)) || continue
@@ -33,9 +35,11 @@ end
 function unmet(g)
     for r in get(CFG[g], "requires", String[])
         if r == "cuda"
-            Base.find_package("CUDA") === nothing && return "CUDA.jl is not in the $g environment"
+            Base.find_package("CUDA") === nothing &&
+                return "CUDA.jl is not in the $g environment"
             Core.eval(Main, :(import CUDA))
-            Base.invokelatest(() -> Main.CUDA.functional()) || return "CUDA.functional() is false"
+            Base.invokelatest(() -> Main.CUDA.functional()) ||
+                return "CUDA.functional() is false"
         elseif r == "data"
             p = expanduser(get(CFG[g], "data_path", ""))
             isempty(p) && error("test_groups.toml: $g requires data but sets no data_path")
@@ -43,14 +47,17 @@ function unmet(g)
         elseif r == "hardware"
             get(ENV, "TEST_HARDWARE", "") == "1" || return "TEST_HARDWARE=1 is not set"
         else
-            error("test_groups.toml: $g has unknown requirement \"$r\" (cuda, data, hardware)")
+            error(
+                "test_groups.toml: $g has unknown requirement \"$r\" (cuda, data, hardware)"
+            )
         end
     end
     return nothing
 end
 
-# A group with its own test/<group>/Project.toml runs in a temporary copy of that environment
-# with the package developed into it, so its dependencies (CUDA) never enter the Core env.
+# A group with its own test/<group>/Project.toml runs in a temporary copy of that
+# environment with the package developed into it, so its dependencies (CUDA) never
+# enter the Core env.
 function with_group_env(f, g)
     proj = joinpath(folder(g), "Project.toml")
     (g != "Core" && isfile(proj)) || return f()
@@ -69,7 +76,10 @@ end
 function counts(ts)
     c = Test.get_test_counts(ts)  # a Tuple before Julia 1.11, a TestCounts after
     return c isa Tuple ? (pass = c[1] + c[5], fail = 0, error = 0, broken = c[4] + c[8]) :
-        (pass = c.passes + c.cumulative_passes, fail = 0, error = 0, broken = c.broken + c.cumulative_broken)
+        (
+            pass = c.passes + c.cumulative_passes, fail = 0, error = 0,
+            broken = c.broken + c.cumulative_broken,
+        )
 end
 
 # Runs group g: each file in its own module (like SafeTestsets) and its own @testset.
