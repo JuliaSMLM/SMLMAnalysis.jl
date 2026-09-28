@@ -30,11 +30,10 @@ end
 
     # 64x64 frames of 0.1 µm pixels; 9 emitters per frame on a jittered 3x3 grid, at
     # least 1.7 µm apart so 15-pixel boxes never overlap.
-    # Frames 1-100 (the acceptance set): z uniform in ±0.35 µm. The plan asked for ±0.5,
-    # but GaussMLE's SplinePSFModel fits emitters 0.4-0.5 µm from focus into a local
-    # optimum on the other side of focus (admiral's ruling: accept at ±0.35 and keep the
-    # outer band as a broken check until GaussMLE fixes the z start; GaussMLE.jl#18).
-    # Frames 101-140 (the outer band): |z| uniform in [0.4, 0.5] µm, either sign.
+    # Frames 1-100 (the acceptance set): z uniform in ±0.5 µm.
+    # Frames 101-140 (the outer band): |z| uniform in [0.4, 0.5] µm, either sign. Fits
+    # there used to land on the wrong side of focus until GaussMLE started spline fits at
+    # the best z of a likelihood scan (GaussMLE.jl#18); the band keeps that fixed.
     rng = Xoshiro(11)
     px, n_accept, n_frames = 0.1, 100, 140
     cam = IdealCamera(64, 64, px)
@@ -43,7 +42,7 @@ end
     for f in 1:n_frames, cx in centres, cy in centres
         x = cx + 0.4 * rand(rng) - 0.2
         y = cy + 0.4 * rand(rng) - 0.2
-        z = f <= n_accept ? 0.7 * rand(rng) - 0.35 :
+        z = f <= n_accept ? rand(rng) - 0.5 :
             (rand(rng, Bool) ? 1 : -1) * (0.4 + 0.1 * rand(rng))
         push!(
             truth,
@@ -95,7 +94,7 @@ end
         rmse(v) = sqrt(mean(abs2, v))
 
         (dx, dy, dz, recall) = errors(filter(t -> t.frame <= n_accept, truth))
-        @info "psf_file acceptance, z in ±0.35 µm" recall bias_nm = (mean(dx), mean(dy), mean(dz)) rmse_nm =
+        @info "psf_file acceptance, z in ±0.5 µm" recall bias_nm = (mean(dx), mean(dy), mean(dz)) rmse_nm =
             (rmse(dx), rmse(dy), rmse(dz))
         @test recall >= 0.95
         @test abs(mean(dx)) <= 3
@@ -105,13 +104,12 @@ end
         @test rmse(dy) <= 15
         @test rmse(dz) <= 50
 
-        # The outer band fails today (GaussMLE.jl#18). These flip to unexpected passes,
-        # and so fail, once the z start is fixed: then fold the band into the acceptance set.
         (bx, by, bz, brecall) = errors(filter(t -> t.frame > n_accept, truth))
-        @info "psf_file outer band, |z| in [0.4, 0.5] µm (known broken)" brecall rmse_nm =
+        @info "psf_file outer band, |z| in [0.4, 0.5] µm" brecall bias_nm = (mean(bx), mean(by), mean(bz)) rmse_nm =
             (rmse(bx), rmse(by), rmse(bz))
-        @test_broken rmse(bz) <= 50
-        @test_broken rmse(bx) <= 15 && rmse(by) <= 15
+        @test brecall >= 0.95
+        @test rmse(bz) <= 50
+        @test rmse(bx) <= 15 && rmse(by) <= 15
 
         # The step's config.toml records the file and the model's type, not the spline.
         toml_path = joinpath(SMLMAnalysis.step_outdir(outdir, 1, cfg), "config.toml")

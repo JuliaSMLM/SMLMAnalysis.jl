@@ -29,10 +29,9 @@ localizations via GaussMLE in a single step, with per-dataset processing.
 - `psf_file::String = ""`: a PSF saved as MicroscopePSFs HDF5, such as `psf.h5` from
   `PSFLearning.save_psf`. It must hold a 3D `SplinePSF`. When set, detectfit loads it once
   and fits x, y, z, photons and background with `GaussMLE.SplinePSFModel` at the camera's
-  pixel size, giving `Emitter3DFit` localizations. Leave `fitter.psf_model` at its default
+  pixel size, giving 3D localizations. Leave `fitter.psf_model` at its default
   (`GaussianXYNBS()`); the fitter keeps its other settings and uses the spline model's
-  default constraints. For now, keep emitters within about ±0.35 µm of focus: farther
-  out, fits can converge on the wrong side of focus (see the Detection & Fitting page).
+  default constraints.
 
 # Data Source Keywords (for file-based workflows)
 - `path`: Single H5 file path

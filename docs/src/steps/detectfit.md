@@ -89,14 +89,6 @@ DetectFitConfig(boxer = BoxerConfig(boxsize = 15, psf_sigma = 0.15),
                 psf_file = "calibration/psf.h5")
 ```
 
-!!! warning "Axial range"
-    Keep emitters within about ±0.35 µm of focus for now. With an astigmatic test PSF
-    (0.5 rad RMS astigmatism, NA 1.4), fits of emitters 0.4-0.5 µm from focus often
-    converge to a local optimum on the other side of focus, with about a third of the
-    photons: 122 of 200 simulated emitters in that band, against none of 200 at
-    0.3-0.4 µm. The fix, a better starting point in z for `SplinePSFModel`, is tracked
-    on [GaussMLE.jl#18](https://github.com/JuliaSMLM/GaussMLE.jl/pull/18).
-
 ```julia
 config = AnalysisConfig(
     camera = cam,
