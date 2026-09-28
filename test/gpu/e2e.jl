@@ -134,11 +134,15 @@ _rmse(v) = sqrt(mean(abs2, v))
 
         # 5. GaussMLE arm: DetectFit with psf_file, and a control with the true PSF saved the
         # same way, over the whole ±0.5 µm; the 0.4-0.5 µm band is also reported on its own.
+        # Detection psf_sigma = 0.22 µm is the true PSF's equivalent Gaussian sigma (the sigma
+        # with its peak-to-integral ratio) averaged over the tested ±0.5 µm: 0.16 µm in focus,
+        # 0.34 µm at z = +0.5 µm. SMLMBoxer's photon estimate assumes that Gaussian; with the
+        # in-focus width (0.15) about half of the z > +0.4 µm emitters gave no ROI, in both arms.
         control_path = _save_psf_file(joinpath(dir, "truth_psf.h5"), truth_psf)
         gmle = Dict{String, Any}()
         for (arm, path) in (("learned", psf_path), ("control", control_path))
             dcfg = DetectFitConfig(
-                boxer = BoxerConfig(boxsize = 15, psf_sigma = 0.15, backend = :cpu),
+                boxer = BoxerConfig(boxsize = 15, psf_sigma = 0.22, backend = :cpu),
                 fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu),
                 camera = cam, psf_file = path
             )
