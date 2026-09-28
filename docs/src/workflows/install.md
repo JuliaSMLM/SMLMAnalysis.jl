@@ -44,6 +44,34 @@ julia -t auto --project=. -e 'using Pkg; Pkg.instantiate()'
 
 Then `using SMLMAnalysis` as above.
 
+## Optional extensions
+
+Two groups of steps load only when their packages are present, as Julia package
+**extensions** (weak dependencies), so you do not pay their load cost otherwise:
+
+| Extension | Activated by | Adds |
+|-----------|--------------|------|
+| `SMLMAnalysisPSFLearningExt` | `PSFLearning` | the `psflearning` step: learn a PSF from a bead z-stack and write `psf.h5` |
+| `SMLMAnalysisDeepFitExt` | `SMLMDeepFit` | the `deepfit_training` and `deepfit_inference` steps |
+
+Neither package is registered yet, so add both to your environment from their
+clones, for example
+`Pkg.develop([PackageSpec(path = "../PSFLearning"), PackageSpec(path = "../SMLMDeepFit")])`.
+Both use Reactant, so run these steps on **Julia 1.12**, and require a recent
+Reactant (`Pkg.add(name = "Reactant", version = "0.2.264")`): left alone, the
+resolver picked Reactant 0.2.24 in our test, which does not build on Julia 1.12.
+
+On a CUDA machine, **load SMLMAnalysis before PSFLearning**:
+
+```julia
+using SMLMAnalysis, SMLMDeepFit, PSFLearning
+```
+
+SMLMAnalysis loads NVIDIA's cuDNN library (through SMLMBoxer), and that library
+fails to initialise if Reactant's own bundled cuDNN is already loaded
+(`undefined symbol ... libcudnn_graph.so.9`). Loading PSFLearning first
+triggers exactly that.
+
 ## Verifying the install
 
 A quick end-to-end check on simulated data (the simulation verbs come from
