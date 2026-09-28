@@ -25,6 +25,15 @@ localizations via GaussMLE in a single step, with per-dataset processing.
 - `boxer::BoxerConfig`: Detection parameters (boxsize, min_photons, psf_sigma, etc.)
 - `fitter::GaussMLEConfig`: Fitting parameters (psf_model, iterations, constraints, etc.)
 
+# Learned PSF
+- `psf_file::String = ""`: a PSF saved as MicroscopePSFs HDF5, such as `psf.h5` from
+  `PSFLearning.save_psf`. It must hold a 3D `SplinePSF`. When set, detectfit loads it once
+  and fits x, y, z, photons and background with `GaussMLE.SplinePSFModel` at the camera's
+  pixel size, giving `Emitter3DFit` localizations. Leave `fitter.psf_model` at its default
+  (`GaussianXYNBS()`); the fitter keeps its other settings and uses the spline model's
+  default constraints. For now, keep emitters within about ±0.35 µm of focus: farther
+  out, fits can converge on the wrong side of focus (see the Detection & Fitting page).
+
 # Data Source Keywords (for file-based workflows)
 - `path`: Single H5 file path
 - `paths`: Vector of H5 file paths (one per dataset)
@@ -67,17 +76,20 @@ localizations via GaussMLE in a single step, with per-dataset processing.
     # per-gallery-frame MP4s written under <step>/frame_movies/. nothing -> 20 fps fallback.
     movie_fps::Union{Float64, Nothing} = nothing
 
+    # Learned PSF file (MicroscopePSFs HDF5, 3D SplinePSF); "" fits with fitter.psf_model.
+    psf_file::String = ""
+
     # `datasets` accepts any AbstractVector{Int} at the call site (e.g. a UnitRange
     # like `1:19`) but is stored as a concrete Vector{Int} so the field type isn't
     # the abstract AbstractVector{Int}.
     function DetectFitConfig(
             boxer, fitter, camera, path, paths, dataset_frames,
-            datasets, h5_format, pixel_size, qe, movie_fps
+            datasets, h5_format, pixel_size, qe, movie_fps, psf_file
         )
         new(
             boxer, fitter, camera, path, paths, dataset_frames,
             datasets === nothing ? nothing : collect(Int, datasets),
-            h5_format, pixel_size, qe, movie_fps
+            h5_format, pixel_size, qe, movie_fps, psf_file
         )
     end
 end
@@ -155,6 +167,7 @@ function detectfit(
         verbose::Int = Verbosity.STANDARD,
         checkpoint::Int = Checkpoint.EXPENSIVE
     )
+    cfg = _resolve_psf(cfg, camera)
     v = verbose
     dir = step_outdir(outdir, step_number, cfg)
 
@@ -163,7 +176,7 @@ function detectfit(
     data = _select_sources(data, cfg.datasets)
     n_datasets_val = length(data)
 
-    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_datasets = n_datasets_val psf_model = typeof(cfg.fitter.psf_model)
+    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg))" n_datasets = n_datasets_val psf_model = nameof(typeof(cfg.fitter.psf_model))
 
     # `data` is already materialized; the core iterates it directly.
     return _detectfit_core(
@@ -371,6 +384,7 @@ function detectfit(
         checkpoint::Int = Checkpoint.EXPENSIVE
     )
     (cfg.path !== nothing || cfg.paths !== nothing) || throw(ArgumentError("File-based detectfit requires path or paths in config"))
+    cfg = _resolve_psf(cfg, camera)
     sources = _resolve_file_sources(cfg)
 
     # Apply dataset selection (Option C: uniform across all source modes)
@@ -381,7 +395,7 @@ function detectfit(
     dir = step_outdir(outdir, step_number, cfg)
     n_datasets_val = length(sources)
 
-    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg)) [file-based]" n_datasets = n_datasets_val psf_model = typeof(cfg.fitter.psf_model)
+    v >= Verbosity.PROGRESS && @info "[$step_number] $(step_name(cfg)) [file-based]" n_datasets = n_datasets_val psf_model = nameof(typeof(cfg.fitter.psf_model))
 
     # Lazy per-dataset load: the generator loads one stack at a time as the core
     # iterates, so only a single dataset is resident in memory at once.
@@ -389,6 +403,55 @@ function detectfit(
     return _detectfit_core(
         image_stacks, camera, cfg; outdir = outdir, dir = dir, v = v, checkpoint = checkpoint,
         n_datasets_val = n_datasets_val, selected_indices = selected_indices
+    )
+end
+
+# ============================================================
+# Learned PSF
+# ============================================================
+
+"""
+    _resolve_psf(cfg::DetectFitConfig, camera::AbstractCamera) -> DetectFitConfig
+
+Return `cfg` unchanged when `cfg.psf_file` is empty. Otherwise load the file with
+`MicroscopePSFs.load_psf` and return a copy of `cfg` whose fitter uses
+`GaussMLE.SplinePSFModel` built from that PSF at the camera's pixel size.
+
+Throws `ArgumentError` when `fitter.psf_model` is not the default `GaussianXYNBS()`
+(the file and the model would compete), when the file does not exist, or when it holds
+anything but a 3D `SplinePSF`. Both detectfit entry points call this once, so pipeline,
+standalone `analyze` and direct `detectfit` calls all fit with the file's PSF.
+"""
+function _resolve_psf(cfg::DetectFitConfig, camera::SMLMData.AbstractCamera)
+    isempty(cfg.psf_file) && return cfg
+    cfg.fitter.psf_model == GaussianXYNBS() || throw(
+        ArgumentError(
+            "DetectFitConfig: set psf_file or fitter.psf_model, not both: psf_file builds the " *
+                "PSF model, but fitter.psf_model is $(nameof(typeof(cfg.fitter.psf_model))) " *
+                "rather than the default GaussianXYNBS()"
+        )
+    )
+    isfile(cfg.psf_file) ||
+        throw(ArgumentError("DetectFitConfig: psf_file $(repr(cfg.psf_file)) does not exist"))
+    psf = MicroscopePSFs.load_psf(cfg.psf_file)
+    (psf isa MicroscopePSFs.SplinePSF && psf.z_range !== nothing) || throw(
+        ArgumentError(
+            "DetectFitConfig: psf_file must hold a 3D SplinePSF (for example from " *
+                "PSFLearning.save_psf), but $(repr(cfg.psf_file)) holds a " *
+                (psf isa MicroscopePSFs.SplinePSF ? "2D SplinePSF" : string(nameof(typeof(psf))))
+        )
+    )
+    pixel_size = camera.pixel_edges_x[2] - camera.pixel_edges_x[1]
+    model = GaussMLE.SplinePSFModel(psf; pixel_size = pixel_size)
+    f = cfg.fitter
+    # constraints are left out on purpose: the old ones belong to the Gaussian model.
+    fitter = GaussMLEConfig(;
+        backend = f.backend, psf_model = model, iterations = f.iterations,
+        batch_size = f.batch_size, auto_timeout = f.auto_timeout,
+        gpu_timeout = f.gpu_timeout, on_wait = f.on_wait
+    )
+    return DetectFitConfig(;
+        fitter = fitter, [g => getfield(cfg, g) for g in fieldnames(DetectFitConfig) if g != :fitter]...
     )
 end
 
@@ -763,7 +826,7 @@ function _write_detectfit_stats(dir, smld, cfg, t, n_rois, n_fits, n_datasets, n
         println(io, "- psf_sigma: $(cfg.boxer.psf_sigma)")
         println(io, "")
         println(io, "## Fit Parameters")
-        println(io, "- psf_model: $(typeof(cfg.fitter.psf_model))")
+        println(io, "- psf_model: $(nameof(typeof(cfg.fitter.psf_model)))")
         println(io, "- iterations: $(cfg.fitter.iterations)")
         println(io, "")
         println(io, "## Distributions\n")
