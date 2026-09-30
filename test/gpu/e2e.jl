@@ -160,15 +160,19 @@ _rmse(v) = sqrt(mean(abs2, v))
 
         # 6. DeepFit arm: train DECODE on psf.h5 (settings of SMLMDeepFit's
         # examples/train_decode.jl, photons and bg of the movie), then infer on the movie with
-        # the 100-count pedestal the training data carry. That file's demo length, 100
-        # epochs, stops while the model still climbs: over four runs Jaccard spread from
-        # 0.13 to 0.68. At 200 epochs it was 0.69 and 0.81 (seeds 13 and 42), near a
-        # plateau. That is still short training, so this arm shows integration and
-        # learning, not production quality.
+        # the 100-count pedestal the training data carry. The data model and the input scale
+        # are set here, not left to SMLMDeepFit's defaults, so that a change of default cannot
+        # move this baseline: bg_v2 (one Poisson draw over emitters plus a flat background, as
+        # this movie is drawn) and input scale 1 (the network sees raw counts). That file's
+        # demo length, 100 epochs, stops while the model still climbs: over four runs Jaccard
+        # spread from 0.13 to 0.68. At 200 epochs it was 0.69 and 0.81 (seeds 13 and 42), near
+        # a plateau. That is still short training, so this arm shows integration and learning,
+        # not production quality.
         dfdir = joinpath(dir, "deepfit")
         decode = SMLMDeepFit.Decode(;
             sz = 40, ρ = 1.0, photons = 3000.0, bg = 10.0, minz = -0.5, maxz = 0.5, bgmaxz = 0.8,
-            pixelsize = px, n_train = 2000, n_test = 200, psffile = psf_path, savepath = dfdir
+            pixelsize = px, n_train = 2000, n_test = 200, psffile = psf_path, savepath = dfdir,
+            data_model = "bg_v2", input_scale = 1.0f0
         )
         tcfg = SMLMDeepFit.TrainConfig(;
             traintype = decode, epochs = 200, batchsize = 50,
@@ -180,7 +184,10 @@ _rmse(v) = sqrt(mean(abs2, v))
         @test isfile(result.model_path)
         @info "E2E DeepFit training" best_epoch = train_info.info.best_epoch seconds = train_info.elapsed_s
 
-        icfg = SMLMDeepFit.DeepFitConfig(; model_path = result.model_path, ccdoffset = 0.0f0, camera = cam)
+        # input_scale must equal the scale the model file records, or DeepFitConfig throws.
+        icfg = SMLMDeepFit.DeepFitConfig(;
+            model_path = result.model_path, ccdoffset = 0.0f0, camera = cam, input_scale = 1.0f0
+        )
         (smld, _) = analyze(movie .+ 100, icfg; outdir = outdir, step_number = 3)
         # DeepFit's window n covers frames n..n+2 and predicts the centre frame, n+1, which
         # SMLMDeepFit (2ed50d5 on) stamps on its fits. So fits sit in their own frame: shift 0
