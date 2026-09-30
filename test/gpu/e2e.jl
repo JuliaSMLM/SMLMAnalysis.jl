@@ -93,7 +93,8 @@ _rmse(v) = sqrt(mean(abs2, v))
 
         # 3. Learn through SMLMAnalysis's psflearning step, which writes psf.h5. From this
         # photon-scale stack learn_psf once converged to wrong coefficients (Noll 6 about -0.30
-        # for -0.50); PSFLearning 4e49d73 rescales the stack to the model's own scale first.
+        # for -0.50); PSFLearning PR #4 (merged 2bc0daa) rescales the stack to the model's own
+        # scale first.
         outdir = joinpath(dir, "out")
         (_, learn_info) = analyze(stack, cfg; z_positions = z_positions, outdir = outdir, step_number = 1)
         psf_path = joinpath(SMLMAnalysis.step_outdir(outdir, 1, cfg), "psf.h5")
@@ -164,10 +165,10 @@ _rmse(v) = sqrt(mean(abs2, v))
         # are set here, not left to SMLMDeepFit's defaults, so that a change of default cannot
         # move this baseline: bg_v2 (one Poisson draw over emitters plus a flat background, as
         # this movie is drawn) and input scale 1 (the network sees raw counts). That file's
-        # demo length, 100 epochs, stops while the model still climbs: over four runs Jaccard
-        # spread from 0.13 to 0.68. At 200 epochs it was 0.69 and 0.81 (seeds 13 and 42), near
-        # a plateau. That is still short training, so this arm shows integration and learning,
-        # not production quality.
+        # demo length, 100 epochs, stopped while the model still climbed (Jaccard 0.13 to 0.68
+        # over four runs, on SMLMDeepFit's earlier defaults). At 200 epochs it was 0.77, 0.84
+        # and 0.77 (seeds 42, 13 and 7; 0.18 by chance). That is still short training, so this
+        # arm shows integration and learning, not production quality.
         dfdir = joinpath(dir, "deepfit")
         decode = SMLMDeepFit.Decode(;
             sz = 40, ρ = 1.0, photons = 3000.0, bg = 10.0, minz = -0.5, maxz = 0.5, bgmaxz = 0.8,
