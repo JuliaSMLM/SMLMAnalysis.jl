@@ -15,5 +15,6 @@ Documenter = "1"
 # registry, including SMLMBaGoL and SMLMClustering, so no other source
 # overrides are needed. The old ../../SMLMBaGoL / ../../SMLMClustering path
 # overrides broke the CI docs build, where those sibling checkouts don't exist.
+SMLMClustering = "0.4.3"
 [sources]
 SMLMAnalysis = {path = ".."}
