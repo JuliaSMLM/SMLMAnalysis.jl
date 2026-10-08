@@ -75,8 +75,6 @@ println("="^60)
     ); outdir = OUTPUT_DIR, step_number = 1, verbose = Verbosity.STANDARD
 )
 
-smld_raw = smld  # Raw SMLD from detectfit, before filtering
-
 println("  Fitted emitters: $(length(smld.emitters))")
 println("  Mean photons: $(round(mean([e.photons for e in smld.emitters]), digits = 0))")
 println("  Mean precision: $(round(mean([e.σ_x for e in smld.emitters]) * 1000, digits = 1)) nm")
@@ -100,7 +98,7 @@ n_before = length(smld.emitters)
         photons = (500.0, Inf),
         precision = (0.0, 0.015),
         pvalue = (1.0e-3, 1.0)
-    ); smld_raw = smld_raw, outdir = OUTPUT_DIR, step_number = 2, verbose = Verbosity.STANDARD
+    ); outdir = OUTPUT_DIR, step_number = 2, verbose = Verbosity.STANDARD
 )
 
 n_after = length(smld.emitters)
