@@ -14,7 +14,7 @@ authors:
     given-names: Keith A.
     email: klidke@unm.edu
     affiliation: "University of New Mexico"
-version: 0.1.0
+version: 0.1.1
 license: MIT
 repository-code: "https://github.com/JuliaSMLM/SMLMAnalysis.jl"
 url: "https://JuliaSMLM.github.io/SMLMAnalysis.jl/"
