@@ -55,8 +55,8 @@ function driftcorrect_step(
     inter_shifts = _calc_inter_shifts(drift_model)
     max_intershift = n_datasets_val > 1 ? maximum(inter_shifts[2:end]) : 0.0
 
-    # Calculate max intra-dataset drift
-    max_drift = _calc_max_drift(drift_model, n_frames)
+    # Calculate max drift (mode-aware reference frame, see _drift_nm)
+    max_drift = _calc_max_drift(drift_model, cfg.dataset_mode)
 
     # Diagnostic warnings (always check, warn at PROGRESS level)
     intershift_threshold_nm = 500.0
@@ -83,7 +83,9 @@ function driftcorrect_step(
         end
     end
 
-    v >= Verbosity.PROGRESS && @info "  -> max drift $(round(max_drift, digits = 1))nm, inter-shift $(round(max_intershift, digits = 1))nm ($(round(t, digits = 2))s)"
+    v >= Verbosity.PROGRESS && @info "  -> max drift $(round(max_drift, digits = 1))nm " *
+        "from $(_drift_reference(cfg.dataset_mode)), max inter-dataset shift " *
+        "$(round(max_intershift, digits = 1))nm ($(round(t, digits = 2))s)"
     summary = (
         drift_model = drift_model, n_datasets = n_datasets_val, inter_shifts = inter_shifts,
         max_intershift = max_intershift, max_drift = max_drift,
@@ -140,17 +142,41 @@ function _calc_inter_shifts(drift_model)
     return shifts
 end
 
-"""Calculate max intra-dataset drift using drift_trajectory"""
-function _calc_max_drift(drift_model, n_frames)
-    DC = SMLMDriftCorrection
-    n_datasets = drift_model.ndatasets
+"""
+    _drift_nm(drift_model, ds, dataset_mode) -> (dx, dy)
 
-    # Use drift_trajectory to get all drift values
+Per-axis drift of model dataset `ds` in nm, measured from a reference frame.
+`:continuous`: the acquisition's first frame (the first point of
+`drift_trajectory(drift_model; dataset = 1)`), so the inter shifts of later chunks
+are accumulated drift and stay in it. Otherwise (`:registered`): this dataset's own
+first frame, which cancels its inter shift (a registration offset, reported by
+`_calc_inter_shifts`).
+"""
+function _drift_nm(drift_model, ds::Int, dataset_mode::Symbol)
+    DC = SMLMDriftCorrection
+    traj = DC.drift_trajectory(drift_model; dataset = ds)
+    ref = dataset_mode == :continuous ? DC.drift_trajectory(drift_model; dataset = 1) : traj
+    return ((traj.x .- ref.x[1]) .* 1000, (traj.y .- ref.y[1]) .* 1000)
+end
+
+"""Words for the reference frame of `_drift_nm` in `dataset_mode`, for the outputs."""
+function _drift_reference(dataset_mode::Symbol)
+    dataset_mode == :continuous && return "the acquisition's first frame"
+    return "each dataset's first frame"
+end
+
+"""
+    _calc_max_drift(drift_model, dataset_mode) -> nm
+
+Largest per-axis drift (nm) over all datasets, from `_drift_nm`. In `:registered` mode
+this excludes each dataset's inter shift, which `_calc_inter_shifts` reports. In
+`:continuous` mode the inter shifts are accumulated drift, so they are included.
+"""
+function _calc_max_drift(drift_model, dataset_mode::Symbol)
     max_drift = 0.0
-    for ds in 1:n_datasets
-        traj = DC.drift_trajectory(drift_model; dataset = ds)
-        # Note: traj.x and traj.y are in um, convert to nm
-        max_drift = max(max_drift, maximum(abs.(traj.x)) * 1000, maximum(abs.(traj.y)) * 1000)
+    for ds in 1:drift_model.ndatasets
+        dx, dy = _drift_nm(drift_model, ds, dataset_mode)
+        max_drift = max(max_drift, maximum(abs.(dx)), maximum(abs.(dy)))
     end
     return max_drift
 end
@@ -173,7 +199,10 @@ function _save_driftcorrect_outputs!(
     end
 
     return if v >= Verbosity.DETAILED
-        _save_drift_detailed(dir, drift_model, n_frames, inter_shifts; n_chunks = cfg.n_chunks)
+        _save_drift_detailed(
+            dir, drift_model, n_frames, inter_shifts, cfg.dataset_mode;
+            n_chunks = cfg.n_chunks
+        )
     end
 end
 
@@ -197,7 +226,10 @@ function _write_drift_stats(
             println(io, "- **Converged**: $(converged)")
             println(io, "- **Iterations**: $(iterations)")
         end
-        println(io, "- **Max intra-dataset drift**: $(round(max_drift, digits = 1)) nm")
+        println(
+            io, "- **Max drift**: $(round(max_drift, digits = 1)) nm from " *
+                _drift_reference(cfg.dataset_mode)
+        )
         if n_datasets > 1
             println(io, "- **Max inter-dataset shift**: $(round(max_intershift, digits = 1)) nm")
         end
@@ -573,21 +605,21 @@ function _save_continuous_drift_figure(dir, drift_model, n_frames; n_chunks::Int
     return save(joinpath(dir, "drift_trajectory.png"), fig)
 end
 
-function _save_drift_detailed(dir, drift_model, n_frames, inter_shifts; n_chunks::Int = 0)
-    DC = SMLMDriftCorrection
+function _save_drift_detailed(
+        dir, drift_model, n_frames, inter_shifts, dataset_mode::Symbol; n_chunks::Int = 0
+    )
     n_datasets = drift_model.ndatasets
 
     filepath = joinpath(dir, "per_dataset.md")
     return open(filepath, "w") do io
         label = n_chunks > 0 ? "Chunk" : "Dataset"
         println(io, "# Per-$label Drift Details\n")
+        println(io, "Drift measured from $(_drift_reference(dataset_mode)).\n")
         println(io, "| $label | Max X (nm) | Max Y (nm) | Inter-Shift (nm) |")
         println(io, "|---------|------------|------------|------------------|")
 
         for ds in 1:n_datasets
-            traj = DC.drift_trajectory(drift_model; dataset = ds)
-            drift_x = traj.x .* 1000  # um to nm
-            drift_y = traj.y .* 1000
+            drift_x, drift_y = _drift_nm(drift_model, ds, dataset_mode)
             inter = inter_shifts[ds]
             println(io, "| $ds | $(round(maximum(abs.(drift_x)), digits = 1)) | $(round(maximum(abs.(drift_y)), digits = 1)) | $(round(inter, digits = 1)) |")
         end
