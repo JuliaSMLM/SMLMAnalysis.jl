@@ -36,13 +36,23 @@ using Statistics
     @test res_bf.k_bleach > 0
 end
 
-@testset "Driftcorrect max drift is intra-only" begin
-    # Dataset 2 sits 5 um off (inter shift) and has a P1 intra drift of 0.1 um (+-100 nm over
-    # the frames). max_drift_nm must report only the intra excursion; the inter shift is
-    # reported separately by _calc_inter_shifts.
+@testset "Driftcorrect max drift is measured within one dataset" begin
+    # Dataset 2 sits 5 um off (inter shift) and drifts with a P1 intra term running -0.1 to
+    # +0.1 um over its frames. max_drift_nm measures from dataset 2's first frame, so the
+    # excursion is 0.2 um = 200 nm and the 5 um inter shift never enters it; _calc_inter_shifts
+    # reports the shift separately.
     m = SMLMDriftCorrection.LegendrePolynomial(2, 2, 100; degree = 1)
     m.inter[2].dm[1] = 5.0
     m.intra[2].dm[1].coefficients = [0.1]
-    @test SMLMAnalysis._calc_max_drift(m, 100) ≈ 100.0 atol = 1.0e-6
+    @test SMLMAnalysis._calc_max_drift(m, 100) ≈ 200.0 atol = 1.0e-6
     @test SMLMAnalysis._calc_inter_shifts(m)[2] ≈ 5000.0 atol = 1.0e-6
+
+    # One dataset with traj(frame 1) = 0, as continuous-mode normalization pins it: the
+    # since-first-frame value equals the old drift_trajectory excursion.
+    m1 = SMLMDriftCorrection.LegendrePolynomial(2, 1, 100; degree = 1)
+    m1.inter[1].dm[1] = 0.1
+    m1.intra[1].dm[1].coefficients = [0.1]
+    old = maximum(abs.(SMLMDriftCorrection.drift_trajectory(m1; dataset = 1).x)) * 1000
+    @test old ≈ 200.0 atol = 1.0e-6
+    @test SMLMAnalysis._calc_max_drift(m1, 100) ≈ old atol = 1.0e-6
 end
