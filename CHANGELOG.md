@@ -31,8 +31,8 @@ the last number (0.1.Z) is non-breaking; one that raises the middle number
   in 0.2.7 and 0.2.8 that could shift whole datasets by microns while reporting convergence.
   Registered-mode results from SMLMAnalysis 0.1.0 with SMLMDriftCorrection 0.2.8 should be
   checked (`max_intershift_nm`) or rerun.
-- From SMLMDriftCorrection 0.2.9, `DriftConfig.shift_scale` is unused; a non-default value
-  logs a one-time warning.
+- `DriftConfig.shift_scale` has had no effect since SMLMDriftCorrection 0.2.7. From 0.2.9 a
+  non-default value logs a one-time warning; drop the setting to silence it.
 
 ## [0.1.0] - 2026-10-11
 
