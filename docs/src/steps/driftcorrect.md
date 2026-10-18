@@ -101,7 +101,7 @@ The step's `StepInfo.summary` reports the headline numbers:
 
 | field | meaning |
 |---|---|
-| `max_drift_nm` | largest intra-dataset drift excursion (nm) |
+| `max_drift_nm` | largest intra-dataset drift excursion (nm) (excludes the dataset's inter shift) |
 | `max_intershift_nm` | largest inter-dataset shift (nm), multi-dataset only |
 | `dataset_mode`, `quality` | the mode/quality actually used |
 | `converged`, `iterations` | for `:iterative` quality |

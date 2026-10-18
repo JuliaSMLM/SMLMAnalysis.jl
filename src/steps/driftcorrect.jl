@@ -83,7 +83,7 @@ function driftcorrect_step(
         end
     end
 
-    v >= Verbosity.PROGRESS && @info "  -> max drift $(round(max_drift, digits = 1))nm, inter-shift $(round(max_intershift, digits = 1))nm ($(round(t, digits = 2))s)"
+    v >= Verbosity.PROGRESS && @info "  -> max intra-dataset drift $(round(max_drift, digits = 1))nm, max inter-dataset shift $(round(max_intershift, digits = 1))nm ($(round(t, digits = 2))s)"
     summary = (
         drift_model = drift_model, n_datasets = n_datasets_val, inter_shifts = inter_shifts,
         max_intershift = max_intershift, max_drift = max_drift,
@@ -140,7 +140,10 @@ function _calc_inter_shifts(drift_model)
     return shifts
 end
 
-"""Calculate max intra-dataset drift using drift_trajectory"""
+"""Calculate max intra-dataset drift (nm) using drift_trajectory.
+
+Intra-only: drift_trajectory returns inter + intra per dataset, so each dataset's inter shift is
+subtracted first. The inter shift is reported separately by `_calc_inter_shifts`."""
 function _calc_max_drift(drift_model, n_frames)
     DC = SMLMDriftCorrection
     n_datasets = drift_model.ndatasets
@@ -150,7 +153,9 @@ function _calc_max_drift(drift_model, n_frames)
     for ds in 1:n_datasets
         traj = DC.drift_trajectory(drift_model; dataset = ds)
         # Note: traj.x and traj.y are in um, convert to nm
-        max_drift = max(max_drift, maximum(abs.(traj.x)) * 1000, maximum(abs.(traj.y)) * 1000)
+        intra_x = traj.x .- drift_model.inter[ds].dm[1]
+        intra_y = traj.y .- drift_model.inter[ds].dm[2]
+        max_drift = max(max_drift, maximum(abs.(intra_x)) * 1000, maximum(abs.(intra_y)) * 1000)
     end
     return max_drift
 end

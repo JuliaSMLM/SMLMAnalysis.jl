@@ -35,3 +35,14 @@ using Statistics
     @test res_bf.N_0 >= 0        # physical bound held
     @test res_bf.k_bleach > 0
 end
+
+@testset "Driftcorrect max drift is intra-only" begin
+    # Dataset 2 sits 5 um off (inter shift) and has a P1 intra drift of 0.1 um (+-100 nm over
+    # the frames). max_drift_nm must report only the intra excursion; the inter shift is
+    # reported separately by _calc_inter_shifts.
+    m = SMLMDriftCorrection.LegendrePolynomial(2, 2, 100; degree = 1)
+    m.inter[2].dm[1] = 5.0
+    m.intra[2].dm[1].coefficients = [0.1]
+    @test SMLMAnalysis._calc_max_drift(m, 100) ≈ 100.0 atol = 1.0e-6
+    @test SMLMAnalysis._calc_inter_shifts(m)[2] ≈ 5000.0 atol = 1.0e-6
+end
