@@ -21,6 +21,9 @@ the last number (0.1.Z) is non-breaking; one that raises the middle number
   - Registered-mode values are not comparable with 0.1.0: the inter shift is no longer
     included, and a steady drift now reads its full first-to-last size.
   - Anything that gates on `max_drift_nm` must also check `max_intershift_nm`.
+  - `04_driftcorrect/stats.md` now reads `**Max drift**: <x> nm from <reference>` where
+    0.1.0 read `**Max intra-dataset drift**: <x> nm`. Scripts should read
+    `stepinfo(info, :driftcorrect).summary[:max_drift_nm]` rather than parse the file.
 
 ### Changed
 
