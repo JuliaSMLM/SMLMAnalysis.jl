@@ -140,10 +140,17 @@ function _calc_inter_shifts(drift_model)
     return shifts
 end
 
-"""Calculate max intra-dataset drift (nm) using drift_trajectory.
+"""
+    _since_first_frame_nm(traj) -> (dx, dy)
 
-Intra-only: drift_trajectory returns inter + intra per dataset, so each dataset's inter shift is
-subtracted first. The inter shift is reported separately by `_calc_inter_shifts`."""
+Per-axis drift of one dataset's trajectory (um from `drift_trajectory`), in nm and measured from
+that dataset's first frame. The dataset's inter shift is constant within it, so it cancels here.
+"""
+_since_first_frame_nm(traj) = ((traj.x .- traj.x[1]) .* 1000, (traj.y .- traj.y[1]) .* 1000)
+
+"""Largest drift (nm) within one dataset, measured from that dataset's first frame.
+
+Excludes the inter-dataset shift, which `_calc_inter_shifts` reports."""
 function _calc_max_drift(drift_model, n_frames)
     DC = SMLMDriftCorrection
     n_datasets = drift_model.ndatasets
@@ -152,10 +159,8 @@ function _calc_max_drift(drift_model, n_frames)
     max_drift = 0.0
     for ds in 1:n_datasets
         traj = DC.drift_trajectory(drift_model; dataset = ds)
-        # Note: traj.x and traj.y are in um, convert to nm
-        intra_x = traj.x .- drift_model.inter[ds].dm[1]
-        intra_y = traj.y .- drift_model.inter[ds].dm[2]
-        max_drift = max(max_drift, maximum(abs.(intra_x)) * 1000, maximum(abs.(intra_y)) * 1000)
+        dx, dy = _since_first_frame_nm(traj)
+        max_drift = max(max_drift, maximum(abs.(dx)), maximum(abs.(dy)))
     end
     return max_drift
 end
@@ -586,13 +591,12 @@ function _save_drift_detailed(dir, drift_model, n_frames, inter_shifts; n_chunks
     return open(filepath, "w") do io
         label = n_chunks > 0 ? "Chunk" : "Dataset"
         println(io, "# Per-$label Drift Details\n")
-        println(io, "| $label | Max X (nm) | Max Y (nm) | Inter-Shift (nm) |")
-        println(io, "|---------|------------|------------|------------------|")
+        println(io, "| $label | Max intra X (nm) | Max intra Y (nm) | Inter-Shift (nm) |")
+        println(io, "|---------|------------------|------------------|------------------|")
 
         for ds in 1:n_datasets
             traj = DC.drift_trajectory(drift_model; dataset = ds)
-            drift_x = traj.x .* 1000  # um to nm
-            drift_y = traj.y .* 1000
+            drift_x, drift_y = _since_first_frame_nm(traj)  # from this dataset's first frame
             inter = inter_shifts[ds]
             println(io, "| $ds | $(round(maximum(abs.(drift_x)), digits = 1)) | $(round(maximum(abs.(drift_y)), digits = 1)) | $(round(inter, digits = 1)) |")
         end
