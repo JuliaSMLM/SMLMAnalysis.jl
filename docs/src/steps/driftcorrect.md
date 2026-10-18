@@ -101,11 +101,18 @@ The step's `StepInfo.summary` reports the headline numbers:
 
 | field | meaning |
 |---|---|
-| `max_drift_nm` | largest drift within one dataset, measured from its first frame (nm); excludes the inter-dataset shift |
+| `max_drift_nm` | largest drift excursion (nm); see below |
 | `max_intershift_nm` | largest inter-dataset shift (nm), multi-dataset only |
 | `dataset_mode`, `quality` | the mode/quality actually used |
 | `converged`, `iterations` | for `:iterative` quality |
 | `entropy`, `backend` | final entropy and compute backend |
+
+`max_drift_nm` is measured from a reference frame that depends on `dataset_mode`.
+In `:continuous` it is the acquisition's first frame, so the shifts between chunks
+are accumulated drift and count toward it. In `:registered` it is each dataset's
+own first frame. There an inter shift is a registration offset between independent
+acquisitions, so it is excluded from `max_drift_nm` and reported as
+`max_intershift_nm`.
 
 Sanity checks: a sensible `max_drift_nm` is tens to a few hundred nm over a long
 acquisition; the `drift_trajectory.png` should look like a smooth wander, not

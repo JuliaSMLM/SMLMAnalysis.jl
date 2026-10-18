@@ -500,7 +500,7 @@ function _write_summary(outdir::String, step_infos::Vector{StepInfo}, smld)
             elseif haskey(s.summary, :compression)
                 "$(s.summary[:compression])x compression"
             elseif haskey(s.summary, :max_drift_nm)
-                "$(s.summary[:max_drift_nm])nm max intra drift"
+                "$(s.summary[:max_drift_nm])nm max drift"
             elseif haskey(s.summary, :strategy)
                 "$(s.summary[:strategy])"
             else
