@@ -7,6 +7,20 @@ the last number (0.1.Z) is non-breaking; one that raises the middle number
 
 ## [Unreleased]
 
+### Changed
+
+- The SMART and MIC H5 readers follow the lab image layout (decision 0040): images load as
+  `[y, x]` then frame and camera maps as `(ny, nx)`. A dataset's `dimension_order`
+  attribute decides its stored layout; untagged SMART files and untagged MIC files whose
+  `Metadata` `Writer` does not start with `MicroscopeSeqSR` (MATLAB `MIC_SEQ_SRcollect`)
+  are legacy `[x, y]`, converted once at load together with their calibration maps.
+  - Legacy MATLAB MIC data and maps now load transposed relative to 0.1.1, so
+    localizations from those files swap x and y relative to 0.1.1 runs.
+  - Tagged SMART files (`dimension_order` present) are no longer transposed twice; this
+    also differs from 0.1.1.
+  - `load_smart_h5_info` reports `width`/`height` as `nx`/`ny`; an unrecognized
+    `dimension_order` throws `ArgumentError`.
+
 ## [0.1.1] - 2026-10-18
 
 ### Fixed
