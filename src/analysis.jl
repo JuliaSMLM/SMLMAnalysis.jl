@@ -153,6 +153,10 @@ Returns a tuple of (AnalysisResult, AnalysisInfo) following the JuliaSMLM tuple-
 - `data`: Image data - one of:
   - `Vector{AbstractArray{<:Real,3}}`: Multiple datasets (primary path)
   - `AbstractArray{<:Real,3}`: Single dataset
+
+  Each array is `(ny, nx, frames)`, `[y, x]` then frame, and the camera's per-pixel
+  maps are `(ny, nx)` (lab image layout, decision 0040; SMLMDocs
+  [`pixels.md`](https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/)).
 - `config`: AnalysisConfig with camera, steps, and output settings
 
 # Example

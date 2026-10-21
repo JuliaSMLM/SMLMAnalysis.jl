@@ -2,11 +2,34 @@
 Import functions for SMART microscope HDF5 data format.
 
 The SMART microscope stores data in HDF5 files with structure:
-- /Main/data: 3D array (width, height, frames) of UInt16 camera data
+- /Main/data: 3D array of UInt16 camera data, stored `(ny, nx, frames)` for a `[y, x]`
+  `dimension_order` tag, `(nx, ny, frames)` for an `[x, y]` tag or no tag (legacy)
 - /Main/camera: Empty group (metadata elsewhere)
 - /Main/laser_XXX: Laser control data
 - /Main/stage_XXX: Stage position data
+
+Image layout (lab decision 0040, SMLMDocs `pixels.md`
+<https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/>): every loader returns images
+as `[y, x]` then frame. A dataset's stored layout comes from its `dimension_order`
+attribute; files without it (SMART files written before 2026-01-29) are legacy `[x, y]`
+and are converted once, at load.
 """
+
+# Stored layout of an image dataset from its `dimension_order` attribute, exact spellings
+# only: `:yx` for "y,x,frame", "y,x", "y,x,z", "HWN", "HW"; `:xy` for "x,y,frame", "x,y",
+# "x,y,z". With no attribute, `default` (the legacy rule of the caller's file format)
+# applies.
+function _h5_layout(obj, default::Symbol)
+    a = HDF5.attrs(obj)
+    haskey(a, "dimension_order") || return default
+    tag = string(a["dimension_order"])
+    tag in ("y,x,frame", "y,x", "y,x,z", "HWN", "HW") && return :yx
+    tag in ("x,y,frame", "x,y", "x,y,z") && return :xy
+    throw(ArgumentError("unrecognized dimension_order \"$tag\" on $(HDF5.name(obj))"))
+end
+
+# Legacy [x, y(, frame)] -> [y, x(, frame)]; the one place an image array is permuted.
+_to_yx(a::AbstractArray) = ndims(a) == 2 ? permutedims(a) : permutedims(a, (2, 1, 3))
 
 """
     load_smart_h5_info(filepath::String)
@@ -15,7 +38,8 @@ Load metadata about a SMART microscope HDF5 file without reading the full datase
 
 Returns a NamedTuple with:
 - filepath: Full path to the file
-- width, height, nframes: Image dimensions
+- width, height, nframes: Image dimensions (`height` = rows = y, `width` = columns = x,
+  whichever layout the file stores; see [`load_smart_h5`](@ref))
 - dtype: Data type of the images
 - file_size_gb: Approximate file size in GB
 
@@ -29,11 +53,13 @@ function load_smart_h5_info(filepath::String)
     return HDF5.h5open(filepath, "r") do file
         data = file["Main/data"]
         dims = size(data)
+        layout = _h5_layout(data, :xy)
+        ny, nx = layout == :yx ? (dims[1], dims[2]) : (dims[2], dims[1])
 
         return (
             filepath = filepath,
-            width = dims[1],
-            height = dims[2],
+            width = nx,
+            height = ny,
             nframes = dims[3],
             dtype = eltype(data),
             file_size_gb = filesize(filepath) / 1.0e9,
@@ -44,7 +70,13 @@ end
 """
     load_smart_h5(filepath::String; frame_range=nothing)
 
-Load image data from a SMART microscope HDF5 file.
+Load image data from a SMART microscope HDF5 file, as `[y, x]` then frame.
+
+The stored layout is read from the dataset's `dimension_order` attribute (`"y,x,frame"`,
+`"y,x"`, `"y,x,z"`, `"HWN"`, `"HW"` load as stored; `"x,y,frame"`, `"x,y"`, `"x,y,z"` are
+converted; any other value throws `ArgumentError`). A file without the attribute is legacy
+`[x, y]` (written before 2026-01-29) and is converted once here. See lab decision 0040 and
+[SMLMDocs `pixels.md`](https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/).
 
 # Arguments
 - `filepath::String`: Path to the HDF5 file
@@ -53,8 +85,8 @@ Load image data from a SMART microscope HDF5 file.
   all frames.
 
 # Returns
-- `data::Array{UInt16, 3}`: Image data (width, height, frames) for a range or `nothing`;
-  `Matrix{UInt16}` (width, height) for a single frame index.
+- `data::Array{UInt16, 3}`: Image data `(ny, nx, frames)` for a range or `nothing`;
+  `Matrix{UInt16}` `(ny, nx)` for a single frame index.
 
 # Example
 ```julia
@@ -71,29 +103,27 @@ frame5 = load_smart_h5("data/experiment.h5", frame_range=5)
 function load_smart_h5(filepath::String; frame_range = nothing)
     return HDF5.h5open(filepath, "r") do file
         data = file["Main/data"]
+        layout = _h5_layout(data, :xy)
 
-        if frame_range === nothing
-            return read(data)
-        else
-            return data[:, :, frame_range]
-        end
+        raw = frame_range === nothing ? read(data) : data[:, :, frame_range]
+        return layout == :yx ? raw : _to_yx(raw)
     end
 end
 
 """
     smart_h5_to_array(filepath::String; max_frames=nothing)
 
-Load SMART microscope data as a properly formatted array for SMLM processing.
+Load SMART microscope data as an `[y, x]` array for SMLM processing.
 
-This function transposes the data from (width, height, frames) to (height, width, frames)
-to match standard image conventions where the first dimension is rows (y) and second is columns (x).
+Same layout rule as [`load_smart_h5`](@ref): `[y, x]` tags load unchanged, `[x, y]` tags
+and untagged legacy files are converted once. Nothing is permuted twice.
 
 # Arguments
 - `filepath::String`: Path to the HDF5 file
 - `max_frames`: Optional maximum number of frames to load
 
 # Returns
-- `data::Array{UInt16, 3}`: Image data in (rows, cols, frames) format
+- `data::Array{UInt16, 3}`: Image data `(ny, nx, frames)`
 - `info::NamedTuple`: File metadata
 
 # Example
@@ -113,11 +143,6 @@ function smart_h5_to_array(filepath::String; max_frames = nothing, verbose = fal
 
     t1 = @elapsed data = load_smart_h5(filepath, frame_range = frame_range)
     verbose && println("    HDF5 read: $(round(t1, digits = 2))s")
-
-    # Transpose from (width, height, frames) to (height, width, frames)
-    # to match standard image conventions
-    t2 = @elapsed data = permutedims(data, (2, 1, 3))
-    verbose && println("    permutedims: $(round(t2, digits = 2))s")
 
     return data, info
 end

@@ -325,6 +325,8 @@ end
         SMLMAnalysis.HDF5.h5open(path, "w") do f
             g = SMLMAnalysis.HDF5.create_group(f, "Main")
             g["data"] = data
+            # tagged [y, x]: an untagged file would be legacy [x, y] and convert
+            SMLMAnalysis.HDF5.attrs(g["data"])["dimension_order"] = "HWN"
         end
 
         frame = load_smart_h5(path; frame_range = 2)
@@ -333,5 +335,71 @@ end
 
         frames = load_smart_h5(path; frame_range = 2:3)
         @test size(frames) == (8, 6, 2)
+    end
+end
+
+# ============================================================
+# Image layout (lab decision 0040), end to end: the unit tests of the readers and of the
+# dimension_order rule are in test/io_layout.jl (Core).
+# ============================================================
+
+# Minimal MIC file writer: block is [y, x, frame]; legacy MATLAB files store [x, y].
+function _write_mic_spot(path, block, maps; legacy, writer = nothing)
+    H5 = SMLMAnalysis.HDF5
+    st(a) = legacy ? (ndims(a) == 2 ? permutedims(a) : permutedims(a, (2, 1, 3))) : a
+    return H5.h5open(path, "w") do f
+        md = H5.create_group(f, "Metadata")
+        H5.attrs(md)["Version"] = "SEQv2"
+        writer === nothing || (H5.attrs(md)["Writer"] = writer)
+        g = H5.create_group(f, "Channel01/Zposition001/Data0001")
+        g["Data0001"] = round.(UInt16, st(block))
+        cg = H5.create_group(f, "Calibration")
+        cg["CCDOffset"] = st(maps.offset)
+        cg["CCDVar"] = st(maps.variance)
+        cg["Gain"] = st(maps.gain)
+    end
+end
+
+@testset "detectfit from a legacy MIC file and a SEQv2-writer file agree" begin
+    # One bright Gaussian spot at pixel (row r, col c) of a non-square frame, written once
+    # as legacy MATLAB [x, y] and once as the Julia writer's [y, x]. Both must localize at
+    # x = (c - 0.5) Δ, y = (r - 0.5) Δ (pixel [1, 1] center at (0.5Δ, 0.5Δ), pixels.md).
+    ny, nx, nf, Δ = 24, 40, 6, 0.1
+    r, c = 8, 29
+    σpx = 0.13 / Δ
+    frame = Float32[
+        100 + 3000 * exp(-((y - r)^2 + (x - c)^2) / (2σpx^2)) for y in 1:ny, x in 1:nx
+    ]
+    block = repeat(frame; outer = (1, 1, nf))
+    maps = (
+        offset = fill(100.0f0, ny, nx),
+        variance = fill(4.0f0, ny, nx),
+        gain = fill(1.0f0, ny, nx),
+    )
+    mktempdir() do dir
+        locs = map(
+            (
+                (legacy = true, writer = nothing),
+                (legacy = false, writer = "MicroscopeSeqSR 0.1.0-DEV"),
+            )
+        ) do kw
+            path = joinpath(dir, "spot_$(kw.legacy).h5")
+            _write_mic_spot(path, block, maps; kw...)
+            cfg = DetectFitConfig(
+                boxer = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
+                fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu),
+                path = path, pixel_size = Δ,
+            )
+            smld, _ = analyze(nothing, cfg; verbose = Verbosity.SILENT)
+            @test length(smld.emitters) >= nf
+            smld.emitters
+        end
+        for es in locs
+            @test all(abs(e.x - (c - 0.5) * Δ) < 0.02 for e in es)
+            @test all(abs(e.y - (r - 0.5) * Δ) < 0.02 for e in es)
+        end
+        @test length(locs[1]) == length(locs[2])
+        @test locs[1][1].x ≈ locs[2][1].x atol = 1.0e-4
+        @test locs[1][1].y ≈ locs[2][1].y atol = 1.0e-4
     end
 end

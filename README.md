@@ -90,7 +90,11 @@ image_stacks = stack              # 1 dataset — a single 3D array is also acce
 There are three ways to get it.
 
 **1. Load an H5 file into memory.** The package ships loaders for two microscope
-formats (both return `(height, width, frames)`):
+formats. Both return images as `[y, x]` then frame, `(ny, nx, frames)`, and camera maps as
+`(ny, nx)` (lab image layout, SMLMDocs `pixels.md`,
+<https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/>). A dataset's `dimension_order`
+attribute says how the file stores it; untagged SMART files and MATLAB MIC files are
+legacy `[x, y]` and are converted once, at load:
 
 ```julia
 # SMART — one continuous acquisition → one array, wrapped as a 1-element Vector:
