@@ -19,13 +19,54 @@ catch e
     e isa InterruptException && rethrow(); false
 end
 
-# Default stored layout of a MIC file's data and maps when a dataset has no tag.
+# Default stored layout of a MIC file's data when a dataset has no tag.
 # `Version` is "SEQv2" for both writers, so only `Writer` tells them apart.
 function _mic_default_layout(f)
     _h5_exists(f, "Metadata") || return :xy
     a = HDF5.attrs(f["Metadata"])
     haskey(a, "Writer") && startswith(string(a["Writer"]), "MicroscopeSeqSR") && return :yx
     return :xy
+end
+
+# Sorted data block keys of a MIC file.
+function _mic_data_keys(f)
+    zpos = f["Channel01/Zposition001"]
+    return sort([k for k in keys(zpos) if startswith(k, "Data")])
+end
+
+# Validate the layout tag of every block (an unknown tag throws ArgumentError). Blocks
+# that cannot be resolved are skipped here; the loaders warn about them.
+function _mic_check_layouts(f, data_keys)
+    default = _mic_default_layout(f)
+    for dk in data_keys
+        dset = try
+            f[_resolve_data_path(f, dk)]
+        catch e
+            e isa InterruptException && rethrow()
+            continue
+        end
+        _h5_layout(dset, default)
+    end
+    return nothing
+end
+
+# Resolved layout and [y, x] size of the file's data (its first readable block), or
+# `(Writer rule, nothing)` when there is none.
+function _mic_data_layout_size(f)
+    default = _mic_default_layout(f)
+    _h5_exists(f, "Channel01/Zposition001") || return default, nothing
+    for dk in _mic_data_keys(f)
+        dset = try
+            f[_resolve_data_path(f, dk)]
+        catch e
+            e isa InterruptException && rethrow()
+            continue
+        end
+        layout = _h5_layout(dset, default)
+        sz = size(dset)
+        return layout, layout == :yx ? (sz[1], sz[2]) : (sz[2], sz[1])
+    end
+    return default, nothing
 end
 
 # Read an image dataset (any array) of a MIC file as [y, x(, frame)].
@@ -67,8 +108,8 @@ Returns NamedTuple with fields:
 function load_mic_h5_info(filepath::String)
     return h5open(filepath, "r") do f
         # Find data blocks
-        zpos = f["Channel01/Zposition001"]
-        data_keys = sort([k for k in keys(zpos) if startswith(k, "Data")])
+        data_keys = _mic_data_keys(f)
+        _mic_check_layouts(f, data_keys)
 
         # Count frames and get size
         n_frames = 0
@@ -119,8 +160,11 @@ end
 
 Load raw calibration data from a MIC H5 file, in SMITE's stored units (unconverted).
 
-Returns NamedTuple with (offset, variance, gain) as 2D `(ny, nx)` arrays (legacy MATLAB
-maps stored `[x, y]` are converted once, with the same rule as [`load_mic_h5`](@ref)):
+Returns NamedTuple with (offset, variance, gain) as 2D `(ny, nx)` arrays. A map's own
+`dimension_order` wins; an untagged map takes the resolved layout of the file's data
+(first block: its tag, else the `Writer` rule of [`load_mic_h5`](@ref)); a file with no
+data block uses the `Writer` rule. Legacy `[x, y]` maps are converted once. Throws
+`ArgumentError` if a map is not `(ny, nx)` of the data.
 - `offset`: per-pixel dark offset, ADU
 - `variance`: per-pixel dark variance, ADU² (`Calibration/CCDVar`)
 - `gain`: per-pixel gain as STORED, ADU/e⁻ (SMITE convention: RawData = gain*photons + offset)
@@ -129,9 +173,24 @@ Use `load_mic_h5_calibration_for_scmos()` to convert these to SCMOSCamera's unit
 """
 function load_mic_h5_calibration(filepath::String)
     return h5open(filepath, "r") do f
-        offset = _read_yx(f, f["Calibration/CCDOffset"])
-        variance = _read_yx(f, f["Calibration/CCDVar"])
-        gain = _read_yx(f, f["Calibration/Gain"])
+        layout, dsize = _mic_data_layout_size(f)
+        function rmap(name)
+            obj = f["Calibration/$name"]
+            raw = read(obj)
+            return _h5_layout(obj, layout) == :yx ? raw : _to_yx(raw)
+        end
+        offset = rmap("CCDOffset")
+        variance = rmap("CCDVar")
+        gain = rmap("Gain")
+        want = dsize === nothing ? size(offset) : dsize
+        for (name, m) in (("CCDOffset", offset), ("CCDVar", variance), ("Gain", gain))
+            size(m) == want || throw(
+                ArgumentError(
+                    "Calibration/$name is $(size(m)) as [y, x] but the data is $want " *
+                        "(ny, nx)"
+                )
+            )
+        end
         return (offset = offset, variance = variance, gain = gain)
     end
 end
@@ -191,8 +250,8 @@ rule as [`load_mic_h5`](@ref)). block_num is 1-indexed.
 """
 function load_mic_h5_block(filepath::String, block_num::Int)
     return h5open(filepath, "r") do f
-        zpos = f["Channel01/Zposition001"]
-        data_keys = sort([k for k in keys(zpos) if startswith(k, "Data")])
+        data_keys = _mic_data_keys(f)
+        _mic_check_layouts(f, data_keys)
 
         if block_num < 1 || block_num > length(data_keys)
             throw(ArgumentError("Block $block_num out of range (1:$(length(data_keys)))"))
@@ -212,10 +271,11 @@ Load MIC dSTORM H5 file. Each block becomes a "dataset".
 Images follow the lab image layout (decision 0040, SMLMDocs `pixels.md`
 <https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/>): `[y, x]` then frame. Each
 dataset's stored layout is its `dimension_order` attribute (`"y,x,frame"`, `"y,x"`,
-`"y,x,z"`, `"HWN"`, `"HW"` load as stored; a tag starting `"x,y"` is converted; any other
-value throws `ArgumentError`). Untagged datasets follow the file's writer: Metadata
-`Writer` starting `"MicroscopeSeqSR"` is `[y, x]`; otherwise the file is legacy MATLAB
-`[x, y]` and data and calibration maps are converted once, at load.
+`"y,x,z"`, `"HWN"`, `"HW"` load as stored; `"x,y,frame"`, `"x,y"`, `"x,y,z"` are
+converted; any other value throws `ArgumentError`, for any block of the file). Untagged
+datasets follow the file's writer: Metadata `Writer` starting `"MicroscopeSeqSR"` is
+`[y, x]`; otherwise (no `Writer`, or another one) the file is legacy MATLAB `[x, y]` and
+data and calibration maps are converted once, at load.
 
 Returns:
 - images: 3D array (ny × nx × n_frames), `[y, x]`
@@ -228,13 +288,14 @@ function load_mic_h5(
     )
     return h5open(filepath, "r") do f
         # Find all data blocks
-        zpos = f["Channel01/Zposition001"]
-        data_keys = sort([k for k in keys(zpos) if startswith(k, "Data")])
+        data_keys = _mic_data_keys(f)
 
         # Limit blocks if requested
         if max_blocks !== nothing
             data_keys = data_keys[1:min(max_blocks, length(data_keys))]
         end
+
+        _mic_check_layouts(f, data_keys)
 
         # Count total frames (using resolved paths)
         frames_per_block = Int[]

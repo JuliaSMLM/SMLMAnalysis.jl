@@ -15,15 +15,16 @@ attribute; files without it (SMART files written before 2026-01-29) are legacy `
 and are converted once, at load.
 """
 
-# Stored layout of an image dataset from its `dimension_order` attribute: `:yx` for
-# "y,x,frame", "y,x", "y,x,z", "HWN", "HW"; `:xy` for a tag starting "x,y". With no
-# attribute, `default` (the legacy rule of the caller's file format) applies.
+# Stored layout of an image dataset from its `dimension_order` attribute, exact spellings
+# only: `:yx` for "y,x,frame", "y,x", "y,x,z", "HWN", "HW"; `:xy` for "x,y,frame", "x,y",
+# "x,y,z". With no attribute, `default` (the legacy rule of the caller's file format)
+# applies.
 function _h5_layout(obj, default::Symbol)
     a = HDF5.attrs(obj)
     haskey(a, "dimension_order") || return default
     tag = string(a["dimension_order"])
     tag in ("y,x,frame", "y,x", "y,x,z", "HWN", "HW") && return :yx
-    startswith(tag, "x,y") && return :xy
+    tag in ("x,y,frame", "x,y", "x,y,z") && return :xy
     throw(ArgumentError("unrecognized dimension_order \"$tag\" on $(HDF5.name(obj))"))
 end
 
@@ -72,9 +73,9 @@ end
 Load image data from a SMART microscope HDF5 file, as `[y, x]` then frame.
 
 The stored layout is read from the dataset's `dimension_order` attribute (`"y,x,frame"`,
-`"y,x"`, `"y,x,z"`, `"HWN"`, `"HW"` load as stored; a tag starting `"x,y"` is converted;
-any other value throws `ArgumentError`). A file without the attribute is legacy `[x, y]`
-(written before 2026-01-29) and is converted once here. See lab decision 0040 and
+`"y,x"`, `"y,x,z"`, `"HWN"`, `"HW"` load as stored; `"x,y,frame"`, `"x,y"`, `"x,y,z"` are
+converted; any other value throws `ArgumentError`). A file without the attribute is legacy
+`[x, y]` (written before 2026-01-29) and is converted once here. See lab decision 0040 and
 [SMLMDocs `pixels.md`](https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/).
 
 # Arguments

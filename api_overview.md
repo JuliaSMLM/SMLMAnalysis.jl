@@ -515,10 +515,13 @@ HDF5 serialization of SMLD data. (`save_smld` also takes
 Every loader returns images as `[y, x]` then frame (`(ny, nx, frames)`) and camera maps as
 `(ny, nx)` (lab image layout, decision 0040; SMLMDocs `pixels.md`). The stored layout is the
 dataset's `dimension_order` attribute (`"y,x,frame"`, `"y,x"`, `"y,x,z"`, `"HWN"`, `"HW"` as
-stored; a tag starting `"x,y"` converted; any other value throws `ArgumentError`). Without
-it: untagged SMART (`Main/data`) is legacy `[x, y]`; untagged MIC is `[y, x]` when
-`Metadata`'s `Writer` attribute starts with `"MicroscopeSeqSR"`, otherwise legacy MATLAB
-`[x, y]`. Legacy data and calibration maps are converted together, once, at load.
+stored; `"x,y,frame"`, `"x,y"`, `"x,y,z"` converted; any other value throws
+`ArgumentError`). Without it: untagged SMART (`Main/data`) is legacy `[x, y]`; untagged
+MIC is `[y, x]` when `Metadata`'s `Writer` attribute starts with `"MicroscopeSeqSR"`,
+otherwise (no `Writer`, or another one) legacy MATLAB `[x, y]`. An untagged calibration
+map takes the layout resolved for the file's data (its own tag wins); a map that is not
+`(ny, nx)` of the data throws `ArgumentError`. Legacy data and calibration maps are
+converted together, once, at load.
 
 ```julia
 # SMART microscope format (/Main/data)
