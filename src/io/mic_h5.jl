@@ -55,7 +55,9 @@ end
 function _mic_data_layout_size(f)
     default = _mic_default_layout(f)
     _h5_exists(f, "Channel01/Zposition001") || return default, nothing
-    for dk in _mic_data_keys(f)
+    data_keys = _mic_data_keys(f)
+    _mic_check_layouts(f, data_keys)   # every block, not just the first readable one
+    for dk in data_keys
         dset = try
             f[_resolve_data_path(f, dk)]
         catch e

@@ -261,3 +261,18 @@ end
         @test_throws ArgumentError load_mic_h5(path)
     end
 end
+
+@testset "calibration readers check the layout tag of every block" begin
+    mktempdir() do dir
+        b, maps = _layout_yx(), _layout_maps()
+        path = joinpath(dir, "cal_later.h5")
+        _write_mic(path, [b, b]; maps = maps, tag = ["y,x,frame", "frame,y,x"])
+        @test_throws ArgumentError load_mic_h5_calibration(path)
+        @test_throws ArgumentError load_mic_h5_calibration_for_scmos(path)
+        @test_throws ArgumentError build_camera_from_mic_h5(path; pixel_size = 0.1)
+        # a calibration-only file (no data block) still loads, by the Writer rule
+        only = joinpath(dir, "cal_only.h5")
+        _write_mic(only, Matrix{Float32}[]; maps = maps, stored_xy = true)
+        @test load_mic_h5_calibration(only).offset == maps.offset
+    end
+end

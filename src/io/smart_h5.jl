@@ -2,8 +2,8 @@
 Import functions for SMART microscope HDF5 data format.
 
 The SMART microscope stores data in HDF5 files with structure:
-- /Main/data: 3D array of UInt16 camera data, `(ny, nx, frames)` when the dataset carries
-  a `dimension_order` attribute, legacy `(nx, ny, frames)` otherwise
+- /Main/data: 3D array of UInt16 camera data, stored `(ny, nx, frames)` for a `[y, x]`
+  `dimension_order` tag, `(nx, ny, frames)` for an `[x, y]` tag or no tag (legacy)
 - /Main/camera: Empty group (metadata elsewhere)
 - /Main/laser_XXX: Laser control data
 - /Main/stage_XXX: Stage position data
