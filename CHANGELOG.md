@@ -18,6 +18,9 @@ the last number (0.1.Z) is non-breaking; one that raises the middle number
     localizations from those files swap x and y relative to 0.1.1 runs.
   - Tagged SMART files (`dimension_order` present) are no longer transposed twice; this
     also differs from 0.1.1.
+  - `dimension_order` is matched on exact spellings (`"y,x,frame"`, `"y,x"`, `"y,x,z"`,
+    `"HWN"`, `"HW"`; `"x,y,frame"`, `"x,y"`, `"x,y,z"`); the tag of every MIC block is
+    checked, and a calibration map that is not `(ny, nx)` of the data throws.
   - `load_smart_h5_info` reports `width`/`height` as `nx`/`ny`; an unrecognized
     `dimension_order` throws `ArgumentError`.
 

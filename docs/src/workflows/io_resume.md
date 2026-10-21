@@ -87,14 +87,16 @@ is decided per dataset, in this order:
 
 - `dimension_order` attribute `"y,x,frame"`, `"y,x"`, `"y,x,z"`, `"HWN"` or `"HW"`:
   loaded as stored.
-- `dimension_order` starting `"x,y"`: converted once at load.
+- `dimension_order` `"x,y,frame"`, `"x,y"` or `"x,y,z"`: converted once at load.
 - any other `dimension_order`: `ArgumentError` naming the value.
 - no attribute, SMART `Main/data`: legacy `[x, y]` (SMART files written before
   2026-01-29), converted once.
 - no attribute, MIC, `Metadata` attribute `Writer` starting `"MicroscopeSeqSR"`:
   `[y, x]`, loaded as stored.
-- no attribute, MIC, no such `Writer` (MATLAB `MIC_SEQ_SRcollect`): legacy `[x, y]`,
-  converted once.
+- no attribute, MIC, no `Writer` or a `Writer` not starting so (MATLAB
+  `MIC_SEQ_SRcollect`): legacy `[x, y]`, converted once.
+- calibration maps: their own `dimension_order`, else the layout resolved for the file's
+  data; a map that is not `(ny, nx)` of the data throws `ArgumentError`.
 
 MIC calibration maps use their own `dimension_order` if present, otherwise the rule for the
 file's data. Legacy data and maps are converted together at load, so a camera built with
