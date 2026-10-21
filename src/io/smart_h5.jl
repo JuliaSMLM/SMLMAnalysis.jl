@@ -9,7 +9,7 @@ The SMART microscope stores data in HDF5 files with structure:
 - /Main/stage_XXX: Stage position data
 
 Image layout (lab decision 0040, SMLMDocs `pixels.md`
-<https://JuliaSMLM.github.io/SMLMDocs.jl/stable/pixels/>): every loader returns images
+<https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/>): every loader returns images
 as `[y, x]` then frame. A dataset's stored layout comes from its `dimension_order`
 attribute; files without it (SMART files written before 2026-01-29) are legacy `[x, y]`
 and are converted once, at load.
@@ -75,7 +75,7 @@ The stored layout is read from the dataset's `dimension_order` attribute (`"y,x,
 `"y,x"`, `"y,x,z"`, `"HWN"`, `"HW"` load as stored; a tag starting `"x,y"` is converted;
 any other value throws `ArgumentError`). A file without the attribute is legacy `[x, y]`
 (written before 2026-01-29) and is converted once here. See lab decision 0040 and
-[SMLMDocs `pixels.md`](https://JuliaSMLM.github.io/SMLMDocs.jl/stable/pixels/).
+[SMLMDocs `pixels.md`](https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/).
 
 # Arguments
 - `filepath::String`: Path to the HDF5 file

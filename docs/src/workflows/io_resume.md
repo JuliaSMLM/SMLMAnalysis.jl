@@ -82,7 +82,7 @@ figures — its SMLD is always on disk for downstream iteration.
 All loaders return images as `[y, x]` then frame, `(ny, nx, frames)`, and camera maps as
 `(ny, nx)` (lab image layout, decision 0040; see
 [Image layout](@ref "Image layout") in the data model and SMLMDocs `pixels.md`,
-<https://JuliaSMLM.github.io/SMLMDocs.jl/stable/pixels/>). How a file stores its array
+<https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/>). How a file stores its array
 is decided per dataset, in this order:
 
 - `dimension_order` attribute `"y,x,frame"`, `"y,x"`, `"y,x,z"`, `"HWN"` or `"HW"`:
