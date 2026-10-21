@@ -115,8 +115,8 @@ end
 
 Load SMART microscope data as an `[y, x]` array for SMLM processing.
 
-Same layout rule as [`load_smart_h5`](@ref): `dimension_order`-tagged files load as
-stored, untagged legacy `[x, y]` files are converted once. Nothing is permuted twice.
+Same layout rule as [`load_smart_h5`](@ref): `[y, x]` tags load unchanged, `[x, y]` tags
+and untagged legacy files are converted once. Nothing is permuted twice.
 
 # Arguments
 - `filepath::String`: Path to the HDF5 file

@@ -16,8 +16,9 @@ the last number (0.1.Z) is non-breaking; one that raises the middle number
   are legacy `[x, y]`, converted once at load together with their calibration maps.
   - Legacy MATLAB MIC data and maps now load transposed relative to 0.1.1, so
     localizations from those files swap x and y relative to 0.1.1 runs.
-  - Tagged SMART files (`dimension_order` present) are no longer transposed twice; this
-    also differs from 0.1.1.
+  - `[y, x]`-tagged SMART files now load as `[y, x]` through `smart_h5_to_array` and
+    file-based detectfit. In 0.1.1 both applied one unconditional transpose, so such
+    files came out transposed (`load_smart_h5` already returned the stored array).
   - `dimension_order` is matched on exact spellings (`"y,x,frame"`, `"y,x"`, `"y,x,z"`,
     `"HWN"`, `"HW"`; `"x,y,frame"`, `"x,y"`, `"x,y,z"`); the tag of every MIC block is
     checked, and a calibration map that is not `(ny, nx)` of the data throws.
