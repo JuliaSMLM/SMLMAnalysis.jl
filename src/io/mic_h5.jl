@@ -210,7 +210,7 @@ end
 Load MIC dSTORM H5 file. Each block becomes a "dataset".
 
 Images follow the lab image layout (decision 0040, SMLMDocs `pixels.md`
-<https://JuliaSMLM.github.io/SMLMDocs.jl/stable/pixels/>): `[y, x]` then frame. Each
+<https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/>): `[y, x]` then frame. Each
 dataset's stored layout is its `dimension_order` attribute (`"y,x,frame"`, `"y,x"`,
 `"y,x,z"`, `"HWN"`, `"HW"` load as stored; a tag starting `"x,y"` is converted; any other
 value throws `ArgumentError`). Untagged datasets follow the file's writer: Metadata

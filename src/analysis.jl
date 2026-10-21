@@ -156,7 +156,7 @@ Returns a tuple of (AnalysisResult, AnalysisInfo) following the JuliaSMLM tuple-
 
   Each array is `(ny, nx, frames)`, `[y, x]` then frame, and the camera's per-pixel
   maps are `(ny, nx)` (lab image layout, decision 0040; SMLMDocs
-  [`pixels.md`](https://JuliaSMLM.github.io/SMLMDocs.jl/stable/pixels/)).
+  [`pixels.md`](https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/)).
 - `config`: AnalysisConfig with camera, steps, and output settings
 
 # Example

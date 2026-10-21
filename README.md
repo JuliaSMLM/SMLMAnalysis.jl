@@ -92,7 +92,7 @@ There are three ways to get it.
 **1. Load an H5 file into memory.** The package ships loaders for two microscope
 formats. Both return images as `[y, x]` then frame, `(ny, nx, frames)`, and camera maps as
 `(ny, nx)` (lab image layout, SMLMDocs `pixels.md`,
-<https://JuliaSMLM.github.io/SMLMDocs.jl/stable/pixels/>). A dataset's `dimension_order`
+<https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/>). A dataset's `dimension_order`
 attribute says how the file stores it; untagged SMART files and MATLAB MIC files are
 legacy `[x, y]` and are converted once, at load:
 

@@ -59,7 +59,7 @@ An image is an array shown the way it prints: `[1, 1]` is the top-left pixel, th
 index is y (rows, increasing downward), the second is x (columns, increasing rightward),
 then frame. A stack is `(ny, nx, nframes)` and a camera map (offset, variance, gain, QE)
 is `(ny, nx)`. Pixel `[1, 1]`'s center is at `(0.5Δ, 0.5Δ)` (SMLMDocs `pixels.md`,
-<https://JuliaSMLM.github.io/SMLMDocs.jl/stable/pixels/>). The lab rule (decision 0040)
+<https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/>). The lab rule (decision 0040)
 is that files store the array as it is and readers load it as it is; legacy files (MATLAB
 MIC SEQ files and SMART files from before 2026-01-29, stored `[x, y]`) are converted once,
 by their reader. `analyze(data, config)` expects `[y, x]` stacks and `(ny, nx)` camera

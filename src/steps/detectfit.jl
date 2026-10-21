@@ -32,7 +32,7 @@ localizations via GaussMLE in a single step, with per-dataset processing.
 - `h5_format`: `:auto`, `:smart`, or `:mic`
 
 Files load as `[y, x]` then frame (lab image layout, decision 0040; SMLMDocs `pixels.md`,
-<https://JuliaSMLM.github.io/SMLMDocs.jl/stable/pixels/>). A dataset's `dimension_order`
+<https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/>). A dataset's `dimension_order`
 attribute decides the stored layout; legacy untagged SMART and MATLAB MIC files (stored
 `[x, y]`) are converted once at load, see [`load_smart_h5`](@ref) and
 [`load_mic_h5`](@ref). The camera's per-pixel maps must be `(ny, nx)`.
