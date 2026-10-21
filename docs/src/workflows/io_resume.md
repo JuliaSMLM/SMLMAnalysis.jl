@@ -103,7 +103,9 @@ file's data. Legacy data and maps are converted together at load, so a camera bu
 `build_camera_from_mic_h5` lines up pixel for pixel with the images; nothing after the
 reader transposes. `Version = "SEQv2"` cannot tell the two MIC writers apart, so `Writer` is
 used. Relative to 0.1.1, legacy MIC data now load transposed (localizations from those files
-swap x and y), and tagged SMART files are no longer transposed twice.
+swap x and y). In 0.1.1 `smart_h5_to_array` and file-based detectfit transposed every
+SMART file unconditionally, so `[y, x]`-tagged files came out transposed; they now load
+as stored.
 
 ### SMART microscope H5
 

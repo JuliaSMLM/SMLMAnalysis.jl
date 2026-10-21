@@ -251,3 +251,13 @@ end
         @test_throws ArgumentError build_camera_from_mic_h5(p4; pixel_size = 0.1)
     end
 end
+
+@testset "max_blocks does not skip the layout check of later blocks" begin
+    mktempdir() do dir
+        b = _layout_yx()
+        path = joinpath(dir, "later.h5")
+        _write_mic(path, [b, b]; tag = ["y,x,frame", "frame,y,x"])
+        @test_throws ArgumentError load_mic_h5(path; max_blocks = 1)
+        @test_throws ArgumentError load_mic_h5(path)
+    end
+end

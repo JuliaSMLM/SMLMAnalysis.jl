@@ -290,12 +290,13 @@ function load_mic_h5(
         # Find all data blocks
         data_keys = _mic_data_keys(f)
 
+        # Validate every block's layout tag before any block is dropped
+        _mic_check_layouts(f, data_keys)
+
         # Limit blocks if requested
         if max_blocks !== nothing
             data_keys = data_keys[1:min(max_blocks, length(data_keys))]
         end
-
-        _mic_check_layouts(f, data_keys)
 
         # Count total frames (using resolved paths)
         frames_per_block = Int[]
