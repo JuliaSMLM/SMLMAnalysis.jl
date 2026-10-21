@@ -512,17 +512,29 @@ HDF5 serialization of SMLD data. (`save_smld` also takes
 
 ### H5 Loading
 
+Every loader returns images as `[y, x]` then frame (`(ny, nx, frames)`) and camera maps as
+`(ny, nx)` (lab image layout, decision 0040; SMLMDocs `pixels.md`). The stored layout is the
+dataset's `dimension_order` attribute (`"y,x,frame"`, `"y,x"`, `"y,x,z"`, `"HWN"`, `"HW"` as
+stored; a tag starting `"x,y"` converted; any other value throws `ArgumentError`). Without
+it: untagged SMART (`Main/data`) is legacy `[x, y]`; untagged MIC is `[y, x]` when
+`Metadata`'s `Writer` attribute starts with `"MicroscopeSeqSR"`, otherwise legacy MATLAB
+`[x, y]`. Legacy data and calibration maps are converted together, once, at load.
+
 ```julia
 # SMART microscope format (/Main/data)
-images = load_smart_h5(path; frame_range=nothing)     # ONE array (width, height, frames) — not a tuple
+# ONE array (ny, nx, frames), not a tuple
+images = load_smart_h5(path; frame_range=nothing)
 info   = load_smart_h5_info(path)                     # width, height, nframes, dtype, file_size_gb
-data, info = smart_h5_to_array(path; max_frames)      # the pair-returning form: (height, width, frames) + info
+# the pair-returning form: (data, info)
+data, info = smart_h5_to_array(path; max_frames)
 
 # MIC (MATLAB Instrument Control) format — one or more blocks, each a dataset
-images, dataset_indices = load_mic_h5(path; max_frames, max_blocks)   # (h, w, frames) + block index per frame
+# images (ny, nx, frames) + block index per frame
+images, dataset_indices = load_mic_h5(path; max_frames, max_blocks)
 info  = load_mic_h5_info(path)                                        # n_frames, n_blocks, frames_per_block, has_calibration
 block = load_mic_h5_block(path, block_index)
-cal   = load_mic_h5_calibration(path)                                 # raw (offset, variance, gain), SMITE's stored units
+# raw (offset, variance, gain), each (ny, nx)
+cal   = load_mic_h5_calibration(path)
 cal2  = load_mic_h5_calibration_for_scmos(path)                       # (offset, readnoise, gain) in SCMOSCamera's convention
 cam   = build_camera_from_mic_h5(path; pixel_size, qe=1.0)            # SCMOSCamera from the file's calibration
 ```

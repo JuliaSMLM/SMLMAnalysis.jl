@@ -31,6 +31,12 @@ localizations via GaussMLE in a single step, with per-dataset processing.
 - `dataset_frames`: Explicit frame ranges per dataset
 - `h5_format`: `:auto`, `:smart`, or `:mic`
 
+Files load as `[y, x]` then frame (lab image layout, decision 0040; SMLMDocs `pixels.md`,
+<https://JuliaSMLM.github.io/SMLMDocs.jl/stable/pixels/>). A dataset's `dimension_order`
+attribute decides the stored layout; legacy untagged SMART and MATLAB MIC files (stored
+`[x, y]`) are converted once at load, see [`load_smart_h5`](@ref) and
+[`load_mic_h5`](@ref). The camera's per-pixel maps must be `(ny, nx)`.
+
 # Dataset Selection
 - `datasets`: Optional `AbstractVector{Int}` (e.g. `1:19` or `[1,2,3,5]`) selecting a
   subset of the resolved source slots. Applies uniformly across all source modes:
@@ -360,7 +366,8 @@ end
 """
     detectfit(camera, cfg; kwargs...) -> (smld, info)
 
-File-based detectfit. Loads image data from `cfg.path` or `cfg.paths`.
+File-based detectfit. Loads image data from `cfg.path` or `cfg.paths` as `[y, x]` then
+frame (see [`DetectFitConfig`](@ref)).
 Each data source is loaded one at a time for memory efficiency.
 """
 function detectfit(
@@ -493,6 +500,8 @@ analyze(
     analyze(cfg::DetectFitConfig; outdir, step_number, verbose, checkpoint) -> (smld, StepInfo)
 
 File-based detection and fitting. Requires `cfg.path` or `cfg.paths` and `cfg.camera`.
+Files load as `[y, x]` then frame, the camera's maps are `(ny, nx)` (see
+[`DetectFitConfig`](@ref)).
 """
 function analyze(
         cfg::DetectFitConfig;
@@ -580,11 +589,7 @@ function _load_source(source, v)
             return data
         else
             # Load specific frame range from SMART H5
-            HDF5.h5open(source.path, "r") do file
-                raw = file["Main/data"][:, :, source.frame_range]
-                # Transpose to (height, width, frames)
-                permutedims(raw, (2, 1, 3))
-            end
+            load_smart_h5(source.path; frame_range = source.frame_range)
         end
     elseif source.format == :mic
         if haskey(source, :block)

@@ -53,6 +53,19 @@ This single value is the state threaded through the pipeline: each step takes a
 not the global total — see [Multi-Dataset](@ref "Multi-Dataset Acquisitions") for
 why frame numbering is per-dataset.
 
+## Image layout
+
+An image is an array shown the way it prints: `[1, 1]` is the top-left pixel, the first
+index is y (rows, increasing downward), the second is x (columns, increasing rightward),
+then frame. A stack is `(ny, nx, nframes)` and a camera map (offset, variance, gain, QE)
+is `(ny, nx)`. Pixel `[1, 1]`'s center is at `(0.5Δ, 0.5Δ)` (SMLMDocs `pixels.md`,
+<https://JuliaSMLM.github.io/SMLMDocs.jl/stable/pixels/>). The lab rule (decision 0040)
+is that files store the array as it is and readers load it as it is; legacy files (MATLAB
+MIC SEQ files and SMART files from before 2026-01-29, stored `[x, y]`) are converted once,
+by their reader. `analyze(data, config)` expects `[y, x]` stacks and `(ny, nx)` camera
+maps. Which files convert, and how they are recognized, is on the
+[import page](@ref "Importing microscope data").
+
 ## The camera & coordinate system
 
 Every `BasicSMLD` carries a **camera** — an `AbstractCamera` that defines the
