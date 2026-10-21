@@ -77,16 +77,46 @@ figures — its SMLD is always on disk for downstream iteration.
 
 ## Importing microscope data
 
+### File layout: which files are converted
+
+All loaders return images as `[y, x]` then frame, `(ny, nx, frames)`, and camera maps as
+`(ny, nx)` (lab image layout, decision 0040; see
+[Image layout](@ref "Image layout") in the data model and SMLMDocs `pixels.md`,
+<https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/>). How a file stores its array
+is decided per dataset, in this order:
+
+- `dimension_order` attribute `"y,x,frame"`, `"y,x"`, `"y,x,z"`, `"HWN"` or `"HW"`:
+  loaded as stored.
+- `dimension_order` `"x,y,frame"`, `"x,y"` or `"x,y,z"`: converted once at load.
+- any other `dimension_order`: `ArgumentError` naming the value.
+- no attribute, SMART `Main/data`: legacy `[x, y]` (SMART files written before
+  2026-01-29), converted once.
+- no attribute, MIC, `Metadata` attribute `Writer` starting `"MicroscopeSeqSR"`:
+  `[y, x]`, loaded as stored.
+- no attribute, MIC, no `Writer` or a `Writer` not starting so (MATLAB
+  `MIC_SEQ_SRcollect`): legacy `[x, y]`, converted once.
+- calibration maps: their own `dimension_order`, else the layout resolved for the file's
+  data; a map that is not `(ny, nx)` of the data throws `ArgumentError`.
+
+MIC calibration maps use their own `dimension_order` if present, otherwise the rule for the
+file's data. Legacy data and maps are converted together at load, so a camera built with
+`build_camera_from_mic_h5` lines up pixel for pixel with the images; nothing after the
+reader transposes. `Version = "SEQv2"` cannot tell the two MIC writers apart, so `Writer` is
+used. Relative to 0.1.1, legacy MIC data now load transposed (localizations from those files
+swap x and y). In 0.1.1 `smart_h5_to_array` and file-based detectfit transposed every
+SMART file unconditionally, so `[y, x]`-tagged files came out transposed; they now load
+as stored.
+
 ### SMART microscope H5
 
 The SMART format keeps the image stack under `/Main/data`. Load the full stack
-(or a frame range), peek at metadata only, or load a properly oriented array:
+(or a frame range), peek at metadata only, or load the array together with its info:
 
 ```julia
-images = load_smart_h5("acquisition.h5")                 # (width, height, frames)
+images = load_smart_h5("acquisition.h5")                 # (ny, nx, frames), [y, x]
 images = load_smart_h5("acquisition.h5"; frame_range = 1:1000)
-info   = load_smart_h5_info("acquisition.h5")            # width, height, nframes, dtype, file_size_gb
-data, info = smart_h5_to_array("acquisition.h5"; max_frames = 1000)  # transposed to (rows, cols, frames)
+info   = load_smart_h5_info("acquisition.h5")            # width (nx), height (ny), nframes
+data, info = smart_h5_to_array("acquisition.h5"; max_frames = 1000)  # same layout + info
 ```
 
 ### MIC H5
@@ -96,7 +126,7 @@ each treated as a dataset, plus optional per-pixel sCMOS calibration. Pixel size
 and QE are not stored and must be supplied when building a camera:
 
 ```julia
-images, dataset_indices = load_mic_h5("experiment.h5")   # images (h×w×frames), block index per frame
+images, dataset_indices = load_mic_h5("experiment.h5")   # (ny×nx×frames), block per frame
 info  = load_mic_h5_info("experiment.h5")                # n_frames, n_blocks, frames_per_block, has_calibration
 block = load_mic_h5_block("experiment.h5", 1)            # one block, memory-efficient
 cam   = build_camera_from_mic_h5("experiment.h5"; pixel_size = 0.1, qe = 0.9)  # SCMOSCamera from calibration
