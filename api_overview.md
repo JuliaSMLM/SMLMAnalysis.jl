@@ -180,7 +180,7 @@ Combined detection + fitting step. Embeds native upstream configs (`BoxerConfig`
 
 ```julia
 DetectFitConfig(;
-    boxer=BoxerConfig(boxsize=11, psf_sigma=0.135),  # Detection config
+    boxer=BoxerConfig(boxsize=9, psf_sigma=0.135),  # Detection config
     fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20),  # Fitting config
     camera=nothing,           # Required for analyze() dispatch; injected by AnalysisConfig pipeline
     path=nothing,             # File-based loading

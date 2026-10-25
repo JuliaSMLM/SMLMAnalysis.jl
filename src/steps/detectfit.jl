@@ -47,7 +47,7 @@ attribute decides the stored layout; legacy untagged SMART and MATLAB MIC files 
 """
 @kwdef struct DetectFitConfig <: SMLMData.AbstractSMLMConfig
     # Embedded upstream configs
-    boxer::SMLMBoxer.BoxerConfig = SMLMBoxer.BoxerConfig(boxsize = 11, psf_sigma = 0.135)
+    boxer::SMLMBoxer.BoxerConfig = SMLMBoxer.BoxerConfig(boxsize = 9, psf_sigma = 0.135)
     fitter::GaussMLEConfig = GaussMLEConfig(psf_model = GaussianXYNBS(), iterations = 20)
 
     # Camera (optional - injected by AnalysisConfig pipeline, required for standalone analyze())
