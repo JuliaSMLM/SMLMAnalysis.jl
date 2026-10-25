@@ -34,6 +34,7 @@ using Statistics
     # DetectFitConfig camera field
     cfg = DetectFitConfig()
     @test cfg.camera === nothing
+    @test DetectFitConfig().boxer.boxsize == 9    # default box is 9 pixels
     cam = IdealCamera(64, 64, 0.1)
     cfg2 = DetectFitConfig(camera = cam, boxer = BoxerConfig(boxsize = 7))
     @test cfg2.camera === cam
