@@ -13,6 +13,14 @@ the last number (0.1.Z) is non-breaking; one that raises the middle number
   results for callers that rely on the default; pass `BoxerConfig(boxsize = 11, ...)` to
   keep the old behavior.
 
+### Fixed
+
+- Automatic density filtering preserves sparse populations with low neighbor-count peaks, rejecting only localizations without neighbors.
+- DetectFit skips datasets with no detections while retaining their dataset indices and fit info; all-empty runs report the detection settings error.
+- Quality filtering and diagnostics support emitters without p-values; requesting `pvalue` filtering warns and skips that criterion.
+- DetectFitConfig rejects conflicting data-source keywords (`path` with `paths`, or `dataset_frames` without `path`) instead of silently ignoring them.
+- `Checkpoint.END` saves the last localization checkpoint when statistics or other steps without checkpoints follow it.
+
 ## [0.2.0] - 2026-10-21
 
 ### Breaking

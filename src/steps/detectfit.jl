@@ -28,8 +28,15 @@ localizations via GaussMLE in a single step, with per-dataset processing.
 # Data Source Keywords (for file-based workflows)
 - `path`: Single H5 file path
 - `paths`: Vector of H5 file paths (one per dataset)
-- `dataset_frames`: Explicit frame ranges per dataset
+- `dataset_frames`: Explicit frame ranges per dataset; requires `path`
 - `h5_format`: `:auto`, `:smart`, or `:mic`
+
+Choose either `path` or `paths`. Conflicting source keywords raise `ArgumentError`
+at construction.
+
+Datasets with no detected ROIs are skipped with a warning, retaining their dataset
+indices and zero-fit info entries. If no dataset yields localizations, an error
+suggests detection and camera settings to check.
 
 Files load as `[y, x]` then frame (lab image layout, decision 0040; SMLMDocs `pixels.md`,
 <https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/>). A dataset's `dimension_order`
@@ -80,6 +87,16 @@ attribute decides the stored layout; legacy untagged SMART and MATLAB MIC files 
             boxer, fitter, camera, path, paths, dataset_frames,
             datasets, h5_format, pixel_size, qe, movie_fps
         )
+        path !== nothing && paths !== nothing && throw(
+            ArgumentError(
+                "DetectFitConfig: path and paths cannot both be set; use path for one file or paths for multiple files."
+            )
+        )
+        dataset_frames !== nothing && path === nothing && throw(
+            ArgumentError(
+                "DetectFitConfig.dataset_frames requires path; use path with frame ranges to split one file, or omit dataset_frames with paths."
+            )
+        )
         new(
             boxer, fitter, camera, path, paths, dataset_frames,
             datasets === nothing ? nothing : collect(Int, datasets),
@@ -87,6 +104,9 @@ attribute decides the stored layout; legacy untagged SMART and MATLAB MIC files 
         )
     end
 end
+
+# Remove this empty-batch guard once GaussMLE returns an empty result for an empty batch.
+_empty_gaussmle_fit_info() = GaussMLE.GaussMLEFitInfo(0.0, :cpu, 0, 0, 0, 0, 0, 0)
 
 # BasicSMLD stores a single scalar `n_frames` (= max over datasets), but downstream
 # absolute-frame indexing `(dataset-1)*n_frames + frame` and LegendrePoly drift
@@ -232,9 +252,16 @@ function _detectfit_core(
             total_rois += n_rois
 
             # Fit (tuple-pattern: returns (BasicSMLD, FitInfo))
-            (smld_ds, fit_info) = GaussMLE.fit(roi_batch, cfg.fitter)
+            if n_rois == 0
+                v >= Verbosity.PROGRESS && @warn "detectfit: Dataset $ds has no detected ROIs; skipping fitting"
+                smld_ds = nothing
+                fit_info = _empty_gaussmle_fit_info()
+                n_fits = 0
+            else
+                (smld_ds, fit_info) = GaussMLE.fit(roi_batch, cfg.fitter)
+                n_fits = length(smld_ds.emitters)
+            end
             push!(all_fit_info, fit_info)
-            n_fits = length(smld_ds.emitters)
             total_fits += n_fits
 
             v >= Verbosity.PROGRESS && @info "    $n_rois ROIs -> $n_fits fits (detect: $(round(boxes_info.elapsed_s, digits = 2))s/$(boxes_info.backend), fit: $(round(fit_info.elapsed_s, digits = 2))s/$(fit_info.backend))"
@@ -273,10 +300,12 @@ function _detectfit_core(
 
             # Set dataset field in place (all emitter types are mutable) and
             # accumulate this dataset's already-concretely-typed vector.
-            for e in smld_ds.emitters
-                e.dataset = ds
+            if smld_ds !== nothing
+                for e in smld_ds.emitters
+                    e.dataset = ds
+                end
+                push!(emitter_batches, smld_ds.emitters)
             end
-            push!(emitter_batches, smld_ds.emitters)
         end
 
         # Assemble sample data for overlay plots

@@ -6,6 +6,101 @@ using Test
 using Random
 using TOML
 using Statistics
+using Logging
+
+@testset "Density auto threshold preserves a sparse uniform population" begin
+    Random.seed!(42)
+    cam = IdealCamera(100, 100, 0.1)
+    # Same pair radius as DensityFilterConfig(): 2 * hypot(hypot(0.1, 0.1), ...).
+    radius = 0.4
+    n = round(Int, 3.0 * 100 / (π * radius^2))
+    emitters = [
+        SMLMAnalysis.Emitter2DFit{Float64}(
+            10 * rand(), 10 * rand(), 1000.0, 10.0, 0.1, 0.1, 30.0, 1.0
+        ) for _ in 1:n
+    ]
+    counts = [
+        count(j -> j != i && hypot(emitters[i].x - emitters[j].x, emitters[i].y - emitters[j].y) < radius, 1:n)
+            for i in 1:n
+    ]
+    mode_count = argmax([count(==(k), counts) for k in 0:maximum(counts)]) - 1
+    @test 2 <= mean(counts) <= 4
+    smld = SMLMAnalysis.BasicSMLD(emitters, cam, 1, 1, Dict{String, Any}())
+    filtered, info = analyze(smld, DensityFilterConfig(); verbose = Verbosity.SILENT)
+    @test length(filtered.emitters) / n > 0.9
+    @test info.info.threshold <= mode_count
+end
+
+@testset "Filter diagnostics without p-values" begin
+    Random.seed!(53)
+    cam = IdealCamera(16, 16, 0.1)
+    for E in (SMLMAnalysis.Emitter2DFit{Float64}, SMLMAnalysis.Emitter3DFit{Float64})
+        emitters = [
+            if E <: SMLMAnalysis.Emitter3DFit
+                E(
+                    0.8, 0.8, 0.1 * randn(), 500.0 + 1000 * rand(), 10.0 + rand(),
+                    0.005 + 0.01 * rand(), 0.005 + 0.01 * rand(), 0.02 + 0.01 * rand(),
+                    30.0, 1.0; frame = i
+                )
+            else
+                E(
+                    0.8, 0.8, 500.0 + 1000 * rand(), 10.0 + rand(),
+                    0.005 + 0.01 * rand(), 0.005 + 0.01 * rand(), 30.0, 1.0; frame = i
+                )
+            end for i in 1:12
+        ]
+        smld = SMLMAnalysis.BasicSMLD(emitters, cam, 12, 1, Dict{String, Any}())
+        for verbose in (Verbosity.STANDARD, Verbosity.DEBUG),
+                cfg in (
+                    FilterConfig(photons = (1000.0, Inf)),
+                    FilterConfig(precision = (0.0, 0.01)), FilterConfig(pvalue = (0.001, 1.0)),
+                )
+            mktempdir() do outdir
+                # A real cache exercises the overlay path, including box colors and labels.
+                batch = SMLMAnalysis.ROIBatch(fill(20.0f0, 7, 7, 1), [5], [5], [1], cam)
+                SMLMAnalysis._save_detectfit_sample_cache(
+                    outdir, smld, fill(20.0f0, 16, 16, 1), batch, [1]
+                )
+                filtered, info = if cfg.pvalue !== nothing
+                    @test_logs (:warn, r"FilterConfig.pvalue has no effect:.*no p-value") min_level = Logging.Warn analyze(
+                        smld, cfg; outdir = outdir, verbose = verbose, checkpoint = Checkpoint.NONE
+                    )
+                else
+                    analyze(smld, cfg; outdir = outdir, verbose = verbose, checkpoint = Checkpoint.NONE)
+                end
+                expected = if cfg.photons !== nothing
+                    filter(e -> e.photons >= 1000.0, emitters)
+                elseif cfg.precision !== nothing
+                    filter(e -> max(e.σ_x, e.σ_y) <= 0.01, emitters)
+                else
+                    emitters
+                end
+                @test filtered.emitters == expected
+                @test info.info.n_after == length(expected)
+                dir = joinpath(outdir, "00_filter")
+                @test isfile(joinpath(dir, "fit_quality.png"))
+                @test isfile(joinpath(dir, "fit_overlay.png"))
+                @test isfile(joinpath(dir, "stats.md"))
+                @test !occursin("- pvalue:", read(joinpath(dir, "stats.md"), String))
+                if verbose == Verbosity.DEBUG
+                    detailed = read(joinpath(dir, "detailed_stats.md"), String)
+                    @test !occursin("| P-value", detailed)
+                end
+                @test SMLMAnalysis._fit_box_color(emitters[1], FilterConfig(pvalue = (0.001, 1.0)), nothing) == :green
+            end
+        end
+        @test !occursin("pval", SMLMAnalysis._fit_overlay_title(FilterConfig(pvalue = (0.001, 1.0)), emitters))
+        # Empty vectors must also pass every writer without inspecting emitters[1].
+        empty_smld = SMLMAnalysis.BasicSMLD(E[], cam, 12, 1, Dict{String, Any}())
+        mktempdir() do outdir
+            filtered, _ = analyze(
+                empty_smld, FilterConfig(pvalue = (0.001, 1.0));
+                outdir = outdir, verbose = Verbosity.DEBUG, checkpoint = Checkpoint.NONE
+            )
+            @test isempty(filtered.emitters)
+        end
+    end
+end
 
 @testset "Bleaching fit degeneracy guard" begin
     Random.seed!(42)

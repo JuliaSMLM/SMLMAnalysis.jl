@@ -10,7 +10,8 @@ Quality-based filtering of localizations. All criteria use `(min, max)` tuples.
 # Keywords
 - `photons`: Photon count range, e.g. `(500.0, Inf)`
 - `precision`: Lateral localization precision range in microns, `max(σ_x, σ_y)`, e.g. `(0.0, 0.007)`
-- `pvalue`: Goodness-of-fit p-value range, e.g. `(1e-3, 1.0)`
+- `pvalue`: Goodness-of-fit p-value range, e.g. `(1e-3, 1.0)`. Warns and has no
+  effect on emitters without p-values (frame-connected, BaGoL, or other output).
 - `psf_sigma`: PSF width filter. `:auto` uses mode ± 10%, or explicit `(min, max)` in microns
 - `z`: Axial position range in microns (3D fits only), e.g. `(-0.4, 0.4)`. Useful to
   drop localizations railed to the z-grid edge. No-op on 2D SMLDs.
@@ -106,6 +107,10 @@ end
 # (_fit_box_color) uses the same predicate to colour exactly what the filter rejects.
 _in_range(v, (lo, hi)) = lo <= v <= hi
 
+# P-values are optional on post-fit output; empty populations have no panel or criterion.
+_has_pvalue(emitters::AbstractVector) = !isempty(emitters) && _has_pvalue(first(emitters))
+_has_pvalue(emitter::AbstractEmitter) = hasproperty(emitter, :pvalue)
+
 function _filter_smld(smld::BasicSMLD, cfg::FilterConfig)
     emitters = smld.emitters
     mask = trues(length(emitters))
@@ -119,7 +124,11 @@ function _filter_smld(smld::BasicSMLD, cfg::FilterConfig)
     end
 
     if cfg.pvalue !== nothing
-        mask .&= [_in_range(e.pvalue, cfg.pvalue) for e in emitters]
+        if _has_pvalue(emitters)
+            mask .&= [_in_range(e.pvalue, cfg.pvalue) for e in emitters]
+        elseif !isempty(emitters)
+            @warn "FilterConfig.pvalue has no effect: emitters have no p-value field (frame-connected, BaGoL and other output may lack p-values)"
+        end
     end
 
     # 3D-only axial filters; no-op on 2D SMLDs (emitters without z / σ_z). Warn once
@@ -199,7 +208,7 @@ function _save_filter_outputs!(
     _save_config!(dir, cfg)
 
     if v >= Verbosity.STANDARD
-        _write_filter_stats(dir, cfg, n_before, n_after, t)
+        _write_filter_stats(dir, cfg, n_before, n_after, t, smld_input.emitters)
         _save_filter_quality_figures(dir, smld_input, cfg)
         _save_fit_overlay_from_cache(dir, outdir, smld_input, cfg)
         _save_loc_per_frame(dir, smld_filtered; title = "Localizations per Frame (post-filter)")
@@ -210,7 +219,7 @@ function _save_filter_outputs!(
     end
 end
 
-function _write_filter_stats(dir, cfg, n_before, n_after, t)
+function _write_filter_stats(dir, cfg, n_before, n_after, t, emitters)
     acceptance = n_before == 0 ? 0.0 : n_after / n_before
 
     filepath = joinpath(dir, "stats.md")
@@ -231,7 +240,7 @@ function _write_filter_stats(dir, cfg, n_before, n_after, t)
             lo, hi = cfg.precision
             println(io, "- precision: $(round(lo * 1000, digits = 1)) - $(hi == Inf ? "∞" : round(hi * 1000, digits = 1)) nm")
         end
-        if cfg.pvalue !== nothing
+        if cfg.pvalue !== nothing && _has_pvalue(emitters)
             lo, hi = cfg.pvalue
             println(io, "- pvalue: $(lo) - $(hi)")
         end
@@ -271,7 +280,7 @@ function _save_filter_detailed(dir, smld_raw, smld_filtered, cfg)
             println(io, "| Precision ∈ [$(round(lo * 1000, digits = 1))nm, $hi_str] | $pass | $(n - pass) | $(round(100 * pass / n, digits = 1))% |")
         end
 
-        if cfg.pvalue !== nothing
+        if cfg.pvalue !== nothing && _has_pvalue(emitters)
             lo, hi = cfg.pvalue
             pass = sum(lo <= e.pvalue <= hi for e in emitters)
             println(io, "| P-value ∈ [$lo, $hi] | $pass | $(n - pass) | $(round(100 * pass / n, digits = 1))% |")
@@ -283,7 +292,7 @@ end
     _save_filter_quality_figures(dir, smld_raw, cfg)
 
 Generate fit quality distribution plots with filter thresholds highlighted.
-Shows photons, background, precision, p-value, and PSF sigma distributions
+Shows photons, background, precision, p-value (when present), and PSF sigma distributions
 from the raw (unfiltered) SMLD, with rejected regions marked per FilterConfig.
 """
 function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
@@ -294,7 +303,6 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
     bg = [e.bg for e in emitters]
     σ_x = [e.σ_x for e in emitters] .* 1000  # precision in nm
     σ_y = [e.σ_y for e in emitters] .* 1000
-    pvalue = [e.pvalue for e in emitters]
 
     # Check PSF model type
     has_psf_iso = hasproperty(emitters[1], :σ)
@@ -360,44 +368,47 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
         align = (:right, :top), space = :relative, fontsize = 10
     )
 
-    ax4 = Axis(fig[2, 2], xlabel = "log10(p-value)", ylabel = "Density", title = "P-value Distribution")
-    pval_nonzero = pvalue[pvalue .> 0]
-    pval_thresh = cfg.pvalue !== nothing ? cfg.pvalue[1] : nothing
+    if _has_pvalue(emitters)
+        pvalue = [e.pvalue for e in emitters]
+        ax4 = Axis(fig[2, 2], xlabel = "log10(p-value)", ylabel = "Density", title = "P-value Distribution")
+        pval_nonzero = pvalue[pvalue .> 0]
+        pval_thresh = cfg.pvalue !== nothing ? cfg.pvalue[1] : nothing
 
-    if !isempty(pval_nonzero)
-        log_pval = log10.(pval_nonzero)
-        pval_lo = quantile(log_pval, 0.02)
-        log_pval_filtered = log_pval[log_pval .>= pval_lo]
-        if pval_thresh !== nothing
-            vspan!(ax4, pval_lo - 1, log10(pval_thresh), color = REJECTED_COLOR)
+        if !isempty(pval_nonzero)
+            log_pval = log10.(pval_nonzero)
+            pval_lo = quantile(log_pval, 0.02)
+            log_pval_filtered = log_pval[log_pval .>= pval_lo]
+            if pval_thresh !== nothing
+                vspan!(ax4, pval_lo - 1, log10(pval_thresh), color = REJECTED_COLOR)
+            end
+            hist!(ax4, log_pval_filtered, bins = 50, normalization = :pdf, color = (:steelblue, 0.7))
+            # Compute histogram max for y limits (based on data, not theory)
+            nbins = 50
+            bin_edges = range(pval_lo, 0, length = nbins + 1)
+            bin_width = step(bin_edges)
+            counts = zeros(Int, nbins)
+            for v in log_pval_filtered
+                idx = clamp(floor(Int, (v - pval_lo) / bin_width) + 1, 1, nbins)
+                counts[idx] += 1
+            end
+            max_density = maximum(counts) / (length(log_pval_filtered) * bin_width)
+            # Theory curve (uniform p-values -> exponential in log space)
+            u_range = range(0, -pval_lo, length = 100)
+            theory_pdf = log(10) .* (10.0 .^ (-u_range))
+            lines!(ax4, -u_range, theory_pdf, color = :red, linewidth = 2, label = "Uniform theory")
+            vlines!(ax4, [mean(log_pval)], color = MEAN_COLOR, linestyle = :solid, linewidth = 1.5)
+            vlines!(ax4, [median(log_pval)], color = MEDIAN_COLOR, linestyle = :dash, linewidth = 1.5)
+            if pval_thresh !== nothing
+                vlines!(ax4, [log10(pval_thresh)], color = THRESHOLD_COLOR, linestyle = :dot, linewidth = 2)
+                pval_pass_pct = round(100 * sum(pvalue .> pval_thresh) / length(pvalue), digits = 1)
+                text!(
+                    ax4, 0.03, 0.95, text = "pass: $(pval_pass_pct)%\nthreshold: $(pval_thresh)",
+                    align = (:left, :top), space = :relative, fontsize = 10
+                )
+            end
+            xlims!(ax4, pval_lo, 0)
+            ylims!(ax4, 0, max_density * 1.1)
         end
-        hist!(ax4, log_pval_filtered, bins = 50, normalization = :pdf, color = (:steelblue, 0.7))
-        # Compute histogram max for y limits (based on data, not theory)
-        nbins = 50
-        bin_edges = range(pval_lo, 0, length = nbins + 1)
-        bin_width = step(bin_edges)
-        counts = zeros(Int, nbins)
-        for v in log_pval_filtered
-            idx = clamp(floor(Int, (v - pval_lo) / bin_width) + 1, 1, nbins)
-            counts[idx] += 1
-        end
-        max_density = maximum(counts) / (length(log_pval_filtered) * bin_width)
-        # Theory curve (uniform p-values -> exponential in log space)
-        u_range = range(0, -pval_lo, length = 100)
-        theory_pdf = log(10) .* (10.0 .^ (-u_range))
-        lines!(ax4, -u_range, theory_pdf, color = :red, linewidth = 2, label = "Uniform theory")
-        vlines!(ax4, [mean(log_pval)], color = MEAN_COLOR, linestyle = :solid, linewidth = 1.5)
-        vlines!(ax4, [median(log_pval)], color = MEDIAN_COLOR, linestyle = :dash, linewidth = 1.5)
-        if pval_thresh !== nothing
-            vlines!(ax4, [log10(pval_thresh)], color = THRESHOLD_COLOR, linestyle = :dot, linewidth = 2)
-            pval_pass_pct = round(100 * sum(pvalue .> pval_thresh) / length(pvalue), digits = 1)
-            text!(
-                ax4, 0.03, 0.95, text = "pass: $(pval_pass_pct)%\nthreshold: $(pval_thresh)",
-                align = (:left, :top), space = :relative, fontsize = 10
-            )
-        end
-        xlims!(ax4, pval_lo, 0)
-        ylims!(ax4, 0, max_density * 1.1)
     end
 
     # Row 3: PSF Sigma
@@ -633,7 +644,7 @@ function _save_fit_overlay(
         end
     end
 
-    title = _fit_overlay_title(cfg)
+    title = _fit_overlay_title(cfg, smld.emitters)
     return _save_box_overlay(
         dir, "fit_overlay.png", sample_images, sample_roi_batch, fit_colors;
         title_prefix = "Frame", frame_labels = sample_original_frames, suptitle = title
@@ -671,7 +682,7 @@ function _fit_box_color(e, cfg::FilterConfig, psf_bounds)
     if cfg.precision !== nothing
         _in_range(max(e.σ_x, e.σ_y), cfg.precision) || return :orange
     end
-    if cfg.pvalue !== nothing
+    if cfg.pvalue !== nothing && _has_pvalue(e)
         _in_range(e.pvalue, cfg.pvalue) || return :purple
     end
     if psf_bounds !== nothing
@@ -685,7 +696,7 @@ function _fit_box_color(e, cfg::FilterConfig, psf_bounds)
 end
 
 """Build title string from actual FilterConfig thresholds."""
-function _fit_overlay_title(cfg::FilterConfig)
+function _fit_overlay_title(cfg::FilterConfig, emitters)
     parts = String["green=pass"]
     if cfg.photons !== nothing
         lo = cfg.photons[1]
@@ -697,7 +708,7 @@ function _fit_overlay_title(cfg::FilterConfig)
         hi_nm = round(cfg.precision[2] * 1000, digits = 1)
         push!(parts, "orange=prec>$(hi_nm)nm")
     end
-    if cfg.pvalue !== nothing
+    if cfg.pvalue !== nothing && _has_pvalue(emitters)
         push!(parts, "purple=pval<$(cfg.pvalue[1])")
     end
     if cfg.psf_sigma !== nothing

@@ -267,15 +267,23 @@ analyze(::Nothing, config::AnalysisConfig) = analyze(config)
 """
     _find_final_smld_step(steps) -> Int
 
-Walk steps in reverse and return the 1-based index of the last step that
-produces a `BasicSMLD` (i.e., not a terminal render). Returns 0 if no
-SMLD-producing step is found.
+Walk steps in reverse and return the 1-based index of the last step declared
+to write an SMLD checkpoint. Returns 0 if none is found. Pass-through steps
+(rendering, statistics, or undeclared configs) fall back to the last writer.
 
 Used by `_run_pipeline` to translate `Checkpoint.END` into a per-step
 "this is the final, save it" decision.
 """
-_produces_smld(::SMLMData.AbstractSMLMConfig) = true
-_produces_smld(::SMLMRender.RenderConfig) = false
+_produces_smld(::SMLMData.AbstractSMLMConfig) = false
+_produces_smld(::DetectFitConfig) = true
+_produces_smld(::FilterConfig) = true
+_produces_smld(::IntensityFilterConfig) = true
+_produces_smld(::DensityFilterConfig) = true
+_produces_smld(::SMLMClustering.AbstractEdgeClassifyConfig) = true
+_produces_smld(::SMLMClustering.AbstractClusterConfig) = true
+_produces_smld(::SMLMFrameConnection.FrameConnectConfig) = true
+_produces_smld(::SMLMDriftCorrection.DriftConfig) = true
+_produces_smld(::SMLMBaGoL.BaGoLConfig) = true
 
 function _find_final_smld_step(steps::Vector{SMLMData.AbstractSMLMConfig})
     for i in length(steps):-1:1
@@ -343,9 +351,9 @@ function _run_pipeline(
         _save_pipeline_config!(outdir, steps, camera, roi, v, cp_level)
     end
 
-    # For Checkpoint.END: locate the index of the last SMLD-producing step.
-    # We approximate "produces SMLD" by walking step types in reverse and
-    # picking the first that isn't a terminal/non-SMLD step (currently RenderConfig).
+    # For Checkpoint.END: locate the last declared checkpoint writer. That step
+    # keeps its own filename and any accompanying data (e.g. the drift model),
+    # even when statistics or other steps without checkpoints follow it.
     final_smld_idx = _find_final_smld_step(steps)
 
     step_infos = StepInfo[]

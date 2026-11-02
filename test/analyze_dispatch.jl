@@ -72,6 +72,98 @@ using Statistics
     @test_throws MethodError analyze(smld_empty, FilterConfig(); bogus_kwarg = 1)
 end
 
+@testset "DetectFit blank datasets and terminal statistics checkpoint" begin
+    Random.seed!(4)
+    cam = IdealCamera(32, 32, 0.1)
+    sim = SMLMAnalysis.StaticSMLMConfig(density = 10.0, σ_psf = 0.13, nframes = 20, ndatasets = 1)
+    _, sim_info = SMLMAnalysis.simulate(
+        sim;
+        pattern = SMLMAnalysis.Nmer2D(n = 6, d = 0.2),
+        molecule = SMLMAnalysis.GenericFluor(photons = 5.0e4, k_off = 20.0, k_on = 1.0), camera = cam
+    )
+    psf = SMLMAnalysis.MicroscopePSFs.GaussianPSF(0.13)
+    imgs, _ = SMLMAnalysis.gen_images(sim_info.smld_model, psf; bg = 20.0, poisson_noise = true)
+    empty_model = SMLMAnalysis.BasicSMLD(similar(sim_info.smld_model.emitters, 0), cam, 20, 1, Dict{String, Any}())
+    blank, _ = SMLMAnalysis.gen_images(empty_model, psf; bg = 20.0, poisson_noise = true)
+    cfg = DetectFitConfig(
+        camera = cam,
+        boxer = BoxerConfig(boxsize = 7, psf_sigma = 0.13, backend = :cpu),
+        fitter = GaussMLEConfig(psf_model = GaussianXYNBS(), backend = :cpu)
+    )
+
+    @testset "Blank dataset $nonblank" for (stacks, nonblank) in (([imgs, blank], 1), ([blank, imgs], 2))
+        mktempdir() do outdir
+            # Default verbosity runs info, stats, overlay, cache and per-frame writers.
+            smld, info = analyze(stacks, cfg; outdir = outdir)
+            @test smld.n_datasets == info.info.n_datasets == 2
+            @test !isempty(smld.emitters)
+            @test all(e -> e.dataset == nonblank, smld.emitters)
+            @test length(info.info.fit_info) == 2
+            @test eltype(info.info.fit_info) === GaussMLE.GaussMLEFitInfo
+            @test info.info.fit_info[3 - nonblank].n_fits == 0
+            @test info.info.fit_info[nonblank].n_fits == length(smld.emitters)
+            dir = joinpath(outdir, "01_detectfit")
+            saved_info = TOML.parsefile(joinpath(dir, "info.toml"))
+            @test saved_info["fit_info_$(3 - nonblank)"]["n_fits"] == 0
+            @test isfile(joinpath(dir, "detection_overlay.png"))
+            @test isfile(joinpath(dir, "localizations_per_frame.png"))
+            cache = SMLMAnalysis.load_cache(outdir, "detectfit_samples.jld2")
+            @test cache !== nothing
+            @test any(f -> f <= 20, cache["sample_original_frames"])
+            @test any(f -> f > 20, cache["sample_original_frames"])
+            roi_abs_frames = cache["sample_original_frames"][cache["sample_roi_frames"]]
+            @test all(f -> (nonblank - 1) * 20 < f <= nonblank * 20, roi_abs_frames)
+        end
+    end
+    @test_throws r"detectfit: no localizations found across all 2 dataset\(s\)" analyze(
+        [blank, blank], cfg; verbose = Verbosity.SILENT
+    )
+
+    @testset "Checkpoint before terminal Hopkins" begin
+        mktempdir() do outdir
+            Random.seed!(54)
+            pipeline = AnalysisConfig(
+                camera = cam, steps = [cfg, FilterConfig(photons = (1000.0, Inf)), HopkinsConfig()],
+                outdir = outdir, checkpoint = Checkpoint.END, verbose = Verbosity.SILENT
+            )
+            result, _ = analyze(imgs, pipeline)
+            checkpoints = [
+                joinpath(dir, f) for (dir, _, files) in walkdir(outdir) for f in files
+                    if startswith(f, "smld_") && endswith(f, ".h5")
+            ]
+            @test checkpoints == [joinpath(outdir, "02_filter", "smld_filtered.h5")]
+            if length(checkpoints) == 1
+                saved = SMLMAnalysis.load_smld(only(checkpoints))
+                @test saved.n_frames == result.smld.n_frames
+                @test saved.n_datasets == result.smld.n_datasets
+                @test length(saved.emitters) == length(result.smld.emitters)
+                for field in (:x, :y, :photons, :frame, :dataset)
+                    @test getproperty.(saved.emitters, field) ≈ getproperty.(result.smld.emitters, field)
+                end
+            end
+        end
+    end
+end
+
+struct _UndeclaredCheckpointConfig <: SMLMAnalysis.AbstractSMLMConfig end
+
+@testset "SMLD checkpoint writers are declared" begin
+    # Covers every _save_step_smld call site, including each upstream config family.
+    for cfg in (
+            DetectFitConfig(), FilterConfig(), IntensityFilterConfig(), DensityFilterConfig(),
+            OuterPolygonConfig(), KdeValleyConfig(), DBSCANConfig(eps_nm = 50.0), HDBSCANConfig(),
+            VoronoiConfig(), HierarchicalConfig(n_clusters = 2), FrameConnectConfig(), DriftConfig(), BaGoLConfig(),
+        )
+        @test SMLMAnalysis._produces_smld(cfg)
+    end
+    @test !SMLMAnalysis._produces_smld(HopkinsConfig())
+    @test !SMLMAnalysis._produces_smld(VoronoiDensityConfig())
+    @test !SMLMAnalysis._produces_smld(RenderConfig())
+    @test !SMLMAnalysis._produces_smld(_UndeclaredCheckpointConfig())
+    steps = SMLMAnalysis.AbstractSMLMConfig[FilterConfig(), _UndeclaredCheckpointConfig(), HopkinsConfig()]
+    @test SMLMAnalysis._find_final_smld_step(steps) == 1
+end
+
 @testset "crop axis conventions" begin
     # crop_images(imgs, roi_x, roi_y) == imgs[roi_y, roi_x, :]: roi_x indexes
     # columns (x, dim 2), roi_y indexes rows (y, dim 1). Encode (row, col) into

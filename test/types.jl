@@ -7,6 +7,15 @@ using Random
 using TOML
 using Statistics
 
+@testset "DetectFitConfig rejects ignored keywords" begin
+    @test_throws ArgumentError DetectFitConfig(path = "one.h5", paths = ["two.h5"])
+    @test_throws ArgumentError DetectFitConfig(dataset_frames = [1:10])
+    @test_throws ArgumentError DetectFitConfig(paths = ["one.h5"], dataset_frames = [1:10])
+    cfg = DetectFitConfig(path = "one.h5", dataset_frames = [1:10, 11:20])
+    @test cfg.path == "one.h5"
+    @test cfg.dataset_frames == [1:10, 11:20]
+end
+
 @testset "Verbosity/Checkpoint validation" begin
     cam = IdealCamera(64, 64, 0.1)
 

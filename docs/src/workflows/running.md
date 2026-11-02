@@ -177,6 +177,9 @@ image/diagnostic output — its `smld` is always on disk for the next iteration.
 Checkpoints require `outdir` to be set. See [I/O & Resume](@ref) for loading them
 back.
 
+Rendering and statistics steps do not move the `END` checkpoint: the last step
+that writes an SMLD keeps its own filename and any accompanying drift model.
+
 ```julia
 config = AnalysisConfig(camera = cam, steps = [...], outdir = "output/",
                         checkpoint = Checkpoint.ALL)

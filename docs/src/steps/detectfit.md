@@ -56,6 +56,10 @@ Two operations run back to back:
 The detailed detection and fitting algorithms live in the SMLMBoxer and GaussMLE
 documentation; this step composes them and handles datasets, files, and cameras.
 
+A dataset with no detected ROIs is skipped with a warning; its dataset index and
+zero-fit info entry are retained. If every dataset has no localizations, the step
+raises an error with suggestions for checking detection and camera settings.
+
 ## Configuration
 
 `DetectFitConfig` embeds the two upstream configs and adds the data-source and
@@ -71,6 +75,9 @@ camera options:
 | `datasets` | `nothing` | subset of source slots to include |
 | `h5_format` | `:auto` | `:auto`, `:smart`, or `:mic` (see [I/O & Resume](@ref)) |
 | `pixel_size`, `qe` | `nothing`, `1.0` | build an SCMOS camera from MIC H5 calibration when `camera` is unset |
+
+Choose either `path` or `paths`. `dataset_frames` requires `path` to split one
+file. These conflicting combinations raise `ArgumentError` at construction.
 
 PSF models (from GaussMLE) include `GaussianXYNB`, `GaussianXYNBS` (free width),
 `GaussianXYNBSXSY` (elliptical), and `AstigmaticXYZNB` (3D).
