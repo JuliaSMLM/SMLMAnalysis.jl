@@ -106,7 +106,7 @@ attribute decides the stored layout; legacy untagged SMART and MATLAB MIC files 
 end
 
 # Remove this empty-batch guard once GaussMLE returns an empty result for an empty batch.
-_empty_gaussmle_fit_info() = GaussMLE.GaussMLEFitInfo(0.0, :cpu, 0, 0, 0, 0, 0, 0)
+_empty_gaussmle_fit_info() = GaussMLE.GaussMLEFitInfo(0.0, :cpu, -1, 0, 0, 0, 0, 0)  # -1: GaussMLE's CPU device id
 
 # BasicSMLD stores a single scalar `n_frames` (= max over datasets), but downstream
 # absolute-frame indexing `(dataset-1)*n_frames + frame` and LegendrePoly drift

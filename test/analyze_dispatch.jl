@@ -101,6 +101,7 @@ end
             @test length(info.info.fit_info) == 2
             @test eltype(info.info.fit_info) === GaussMLE.GaussMLEFitInfo
             @test info.info.fit_info[3 - nonblank].n_fits == 0
+            @test info.info.fit_info[3 - nonblank].device_id == info.info.fit_info[nonblank].device_id
             @test info.info.fit_info[nonblank].n_fits == length(smld.emitters)
             dir = joinpath(outdir, "01_detectfit")
             saved_info = TOML.parsefile(joinpath(dir, "info.toml"))
