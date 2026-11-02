@@ -27,12 +27,16 @@ SMLMSim = "5a0a87e4-02d4-41f5-bf26-b8c94c784a04"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
+[weakdeps]
+FFTA = "b86e33f2-c0db-4aa1-a6e0-ab43e668529e"
+
 [compat]
 Aqua = "0.8"
 CairoMakie = "0.15.6"
 Dates = "1"
 Distributions = "0.25.123"
 ExplicitImports = "1"
+FFTA = "<0.3.2"
 GaussMLE = "0.4"
 HDF5 = "0.17.2"
 JLD2 = "0.5.12, 0.6"

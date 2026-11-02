@@ -20,6 +20,7 @@ the last number (0.1.Z) is non-breaking; one that raises the middle number
 - Quality filtering and diagnostics support emitters without p-values; requesting `pvalue` filtering warns and skips that criterion.
 - DetectFitConfig rejects conflicting data-source keywords (`path` with `paths`, or `dataset_frames` without `path`) instead of silently ignoring them.
 - `Checkpoint.END` saves the last localization checkpoint when statistics or other steps without checkpoints follow it.
+- FFTA is held below 0.3.2. That release, loaded through Makie, conflicts with FFTW and breaks drift's cross-correlation: `method = :fft` alignment crashes, and drift silently loses its cross-correlation start. Remove the bound when FFTA ships a fix (JuliaMath/FFTA.jl#146).
 
 ## [0.2.0] - 2026-10-21
 
