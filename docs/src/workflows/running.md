@@ -51,7 +51,7 @@ takes the `smld`:
 
 ```julia
 (smld, info) = analyze(image_stacks,
-    DetectFitConfig(camera = cam, boxer = BoxerConfig(boxsize = 9)))
+    DetectFitConfig(camera = cam, boxer = BoxerConfig(boxsize = 9, psf_sigma = 0.135)))
 @show length(smld.emitters)             # decide the photon cut from this
 
 (smld, info) = analyze(smld, FilterConfig(photons = (500.0, Inf)))
@@ -75,7 +75,7 @@ The varargs form is handy for short, throwaway runs:
 
 ```julia
 (result, info) = analyze(image_stacks,
-    DetectFitConfig(boxer = BoxerConfig(boxsize = 9)),
+    DetectFitConfig(boxer = BoxerConfig(boxsize = 9, psf_sigma = 0.135)),
     FilterConfig(photons = (500.0, Inf)),
     DriftConfig(degree = 2);
     camera = cam, outdir = "output/")
@@ -88,7 +88,7 @@ omitted entirely:
 config = AnalysisConfig(
     camera = cam,
     steps = [DetectFitConfig(path = "data.h5", h5_format = :mic,
-                             boxer = BoxerConfig(boxsize = 9)),
+                             boxer = BoxerConfig(boxsize = 9, psf_sigma = 0.135)),
              FilterConfig(photons = (500.0, Inf)),
              RenderConfig(zoom = 20)],
     outdir = "output/",

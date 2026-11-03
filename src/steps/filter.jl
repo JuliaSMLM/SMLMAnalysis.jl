@@ -30,6 +30,12 @@ All filters default to `nothing` (disabled).
     # 3D-only (Emitter3DFit/…PV); no-op when emitters lack z / σ_z.
     z::Union{Tuple{Float64, Float64}, Nothing} = nothing            # (min, max) axial position, microns
     sigma_z::Union{Tuple{Float64, Float64}, Nothing} = nothing      # (min, max) axial precision, microns
+
+    function FilterConfig(photons, precision, pvalue, psf_sigma, z, sigma_z)
+        # A Union with two non-Nothing alternatives does not convert tuple elements.
+        bounds = psf_sigma isa Tuple{Real, Real} ? convert(Tuple{Float64, Float64}, psf_sigma) : psf_sigma
+        return new(photons, precision, pvalue, bounds, z, sigma_z)
+    end
 end
 
 """
@@ -685,6 +691,12 @@ function _fit_box_color(e, cfg::FilterConfig, psf_bounds)
     if cfg.pvalue !== nothing && _has_pvalue(e)
         _in_range(e.pvalue, cfg.pvalue) || return :purple
     end
+    if cfg.z !== nothing && hasproperty(e, :z)
+        _in_range(e.z, cfg.z) || return :blue
+    end
+    if cfg.sigma_z !== nothing && hasproperty(e, :σ_z)
+        _in_range(e.σ_z, cfg.sigma_z) || return :magenta
+    end
     if psf_bounds !== nothing
         if psf_bounds.kind === :iso
             (psf_bounds.lo <= e.σ <= psf_bounds.hi) || return :cyan
@@ -710,6 +722,12 @@ function _fit_overlay_title(cfg::FilterConfig, emitters)
     end
     if cfg.pvalue !== nothing && _has_pvalue(emitters)
         push!(parts, "purple=pval<$(cfg.pvalue[1])")
+    end
+    if cfg.z !== nothing && !isempty(emitters) && hasproperty(first(emitters), :z)
+        push!(parts, "blue=z outside $(cfg.z)μm")
+    end
+    if cfg.sigma_z !== nothing && !isempty(emitters) && hasproperty(first(emitters), :σ_z)
+        push!(parts, "magenta=σ_z outside $(cfg.sigma_z)μm")
     end
     if cfg.psf_sigma !== nothing
         push!(parts, "cyan=psf_σ fail")

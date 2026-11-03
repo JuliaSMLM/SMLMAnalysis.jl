@@ -16,6 +16,11 @@ Density-based filtering that removes isolated localizations lacking nearby neigh
 @kwdef struct DensityFilterConfig <: SMLMData.AbstractSMLMConfig
     n_sigma::Float64 = 2.0
     min_neighbors::Union{Int, Symbol} = :auto  # :auto uses valley detection (see _valley_threshold)
+
+    function DensityFilterConfig(n_sigma, min_neighbors)
+        threshold = min_neighbors isa Real ? Int(min_neighbors) : min_neighbors
+        return new(n_sigma, threshold)
+    end
 end
 
 """

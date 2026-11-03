@@ -14,6 +14,26 @@ using Statistics
     cfg = DetectFitConfig(path = "one.h5", dataset_frames = [1:10, 11:20])
     @test cfg.path == "one.h5"
     @test cfg.dataset_frames == [1:10, 11:20]
+    cam = IdealCamera(8, 8, 0.1)
+    @test_throws ArgumentError DetectFitConfig(camera = cam, pixel_size = 0.1)
+    @test_throws ArgumentError DetectFitConfig(camera = cam, qe = 0.9)
+    @test DetectFitConfig(camera = cam).camera === cam
+    @test DetectFitConfig(path = "one.h5", pixel_size = 0.1).pixel_size === 0.1
+end
+
+@testset "Step config Union fields convert numeric inputs" begin
+    @test FilterConfig(psf_sigma = (0, 1)).psf_sigma === (0.0, 1.0)
+    @test FilterConfig(psf_sigma = (0.0f0, 1 // 2)).psf_sigma === (0.0, 0.5)
+    @test FilterConfig(psf_sigma = :auto).psf_sigma === :auto
+    @test FilterConfig(psf_sigma = nothing).psf_sigma === nothing
+    @test CompositeRenderConfig(clip_percentile = 1).clip_percentile === 1.0
+    @test CompositeRenderConfig(clip_percentile = 0.9f0).clip_percentile === Float64(0.9f0)
+    @test CompositeRenderConfig(clip_percentile = :auto).clip_percentile === :auto
+    @test CompositeRenderConfig(clip_percentile = nothing).clip_percentile === nothing
+    @test DensityFilterConfig(min_neighbors = 3.0).min_neighbors === 3
+    @test DensityFilterConfig(min_neighbors = Int32(3)).min_neighbors === 3
+    @test DensityFilterConfig(min_neighbors = :auto).min_neighbors === :auto
+    @test_throws InexactError DensityFilterConfig(min_neighbors = 3.5)
 end
 
 @testset "Verbosity/Checkpoint validation" begin

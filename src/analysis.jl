@@ -26,9 +26,11 @@ function Logging.shouldlog(tl::TeeLogger, level, _module, group, id)
     return any(Logging.shouldlog(l, level, _module, group, id) for l in tl.loggers)
 end
 
-function Logging.handle_message(tl::TeeLogger, args...; kwargs...)
+function Logging.handle_message(tl::TeeLogger, level, message, _module, group, id, file, line; kwargs...)
     for l in tl.loggers
-        Logging.handle_message(l, args...; kwargs...)
+        if level >= Logging.min_enabled_level(l) && Logging.shouldlog(l, level, _module, group, id)
+            Logging.handle_message(l, level, message, _module, group, id, file, line; kwargs...)
+        end
     end
     return
 end
@@ -164,7 +166,7 @@ Returns a tuple of (AnalysisResult, AnalysisInfo) following the JuliaSMLM tuple-
 config = AnalysisConfig(
     camera = cam,
     steps = [
-        DetectFitConfig(boxer=BoxerConfig(boxsize=9)),
+        DetectFitConfig(boxer=BoxerConfig(boxsize = 9, psf_sigma = 0.135)),
         FilterConfig(photons=(500.0, Inf)),
         DriftConfig(degree=2),
         RenderConfig(zoom=20, colormap=:inferno),
@@ -201,7 +203,7 @@ Convenience varargs form. Builds AnalysisConfig from positional step configs and
 # Example
 ```julia
 (result, info) = analyze(image_stacks,
-    DetectFitConfig(boxer=BoxerConfig(boxsize=9)),
+    DetectFitConfig(boxer=BoxerConfig(boxsize = 9, psf_sigma = 0.135)),
     FilterConfig(photons=(500.0, Inf)),
     DriftConfig(degree=2);
     camera=cam, outdir="output/")

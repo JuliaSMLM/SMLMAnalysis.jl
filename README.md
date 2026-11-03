@@ -174,7 +174,7 @@ After `DetectFitConfig` (which produces localizations from images), steps can be
 
 ```julia
 # Minimal: detect and render
-steps = [DetectFitConfig(boxer=BoxerConfig(boxsize=9)), RenderConfig(zoom=20)]
+steps = [DetectFitConfig(boxer=BoxerConfig(boxsize = 9, psf_sigma = 0.135)), RenderConfig(zoom=20)]
 
 # Multiple renders at different scales
 steps = [DetectFitConfig(...), DriftConfig(degree=2),

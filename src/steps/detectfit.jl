@@ -97,6 +97,12 @@ attribute decides the stored layout; legacy untagged SMART and MATLAB MIC files 
                 "DetectFitConfig.dataset_frames requires path; use path with frame ranges to split one file, or omit dataset_frames with paths."
             )
         )
+        camera !== nothing && (pixel_size !== nothing || qe != 1.0) && throw(
+            ArgumentError(
+                "DetectFitConfig: the camera carries its own pixel size and QE; " *
+                    "build it with build_camera_from_mic_h5(path; pixel_size, qe) instead."
+            )
+        )
         new(
             boxer, fitter, camera, path, paths, dataset_frames,
             datasets === nothing ? nothing : collect(Int, datasets),
@@ -629,9 +635,8 @@ function _load_source(source, v)
             images, _ = load_mic_h5(source.path)
             return images
         else
-            # Load specific frame range (less efficient, but needed for custom ranges)
-            images, _ = load_mic_h5(source.path; max_frames = last(source.frame_range))
-            return images[:, :, source.frame_range]
+            images, _ = load_mic_h5(source.path; frame_range = source.frame_range)
+            return images
         end
     else
         throw(ArgumentError("Unknown H5 format: $(source.format)"))

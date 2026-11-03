@@ -152,6 +152,50 @@ end
     end
 end
 
+@testset "MIC acquisition frame ranges read across blocks in [y, x] layout" begin
+    mktempdir() do dir
+        blocks = [_layout_yx(4), _layout_yx(3) .+ 5000.0f0, _layout_yx(2) .+ 10_000.0f0]
+        for kw in (
+                (stored_xy = true,),
+                (writer = "MicroscopeSeqSR 0.1.0-DEV",),
+                (tag = "y,x,frame",),
+                (stored_xy = true, tag = "x,y,frame"),
+            )
+            path = joinpath(dir, "ranges.h5")
+            _write_mic(path, blocks; kw...)
+            full, full_indices = load_mic_h5(path)
+            # Within a block, crossing a boundary, exact block end, acquisition end,
+            # one frame, all blocks, and an empty selection.
+            for frames in (2:3, 3:6, 2:4, 8:9, 9:9, 1:9, 4:3)
+                actual, indices = load_mic_h5(path; frame_range = frames)
+                @test actual == full[:, :, frames]
+                @test size(actual) == (_LAYOUT_NY, _LAYOUT_NX, length(frames))
+                @test eltype(actual) === Float32
+                @test indices == full_indices[frames]
+                source = (path = path, frame_range = frames, format = :mic)
+                @test SMLMAnalysis._load_source(source, Verbosity.SILENT) == full[:, :, frames]
+            end
+            @test_throws BoundsError load_mic_h5(path; frame_range = 0:2)
+            @test_throws BoundsError load_mic_h5(path; frame_range = 8:10)
+        end
+
+        # Each block's tag wins even when adjacent blocks have different stored layouts.
+        path = joinpath(dir, "mixed.h5")
+        _write_mic(path, blocks; tag = "y,x,frame")
+        SMLMAnalysis.HDF5.h5open(path, "r+") do f
+            g = f["Channel01/Zposition001/Data0002"]
+            SMLMAnalysis.HDF5.delete_object(g, "Data0002")
+            g["Data0002"] = round.(UInt16, _layout_xy(blocks[2]))
+            SMLMAnalysis.HDF5.attrs(g["Data0002"])["dimension_order"] = "x,y,frame"
+        end
+        full, full_indices = load_mic_h5(path)
+        @test full == cat(blocks...; dims = 3)
+        actual, indices = load_mic_h5(path; frame_range = 3:8)
+        @test actual == full[:, :, 3:8]
+        @test indices == full_indices[3:8]
+    end
+end
+
 @testset "unknown dimension_order throws ArgumentError" begin
     mktempdir() do dir
         smart = joinpath(dir, "s.h5")

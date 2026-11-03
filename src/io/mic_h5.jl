@@ -72,8 +72,8 @@ function _mic_data_layout_size(f)
 end
 
 # Read an image dataset (any array) of a MIC file as [y, x(, frame)].
-function _read_yx(f, obj)
-    raw = read(obj)
+function _read_yx(f, obj; frame_range = nothing)
+    raw = frame_range === nothing ? read(obj) : obj[:, :, frame_range]
     return _h5_layout(obj, _mic_default_layout(f)) == :yx ? raw : _to_yx(raw)
 end
 
@@ -266,9 +266,11 @@ function load_mic_h5_block(filepath::String, block_num::Int)
 end
 
 """
-    load_mic_h5(filepath; max_frames=nothing, max_blocks=nothing) -> images, dataset_indices
+    load_mic_h5(filepath; max_frames=nothing, max_blocks=nothing, frame_range=nothing) -> images, dataset_indices
 
 Load MIC dSTORM H5 file. Each block becomes a "dataset".
+`frame_range` selects acquisition frames within the `max_frames`/`max_blocks` limits;
+only the overlapping portions of data blocks are read.
 
 Images follow the lab image layout (decision 0040, SMLMDocs `pixels.md`
 <https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/>): `[y, x]` then frame. Each
@@ -286,7 +288,8 @@ Returns:
 function load_mic_h5(
         filepath::String;
         max_frames::Union{Int, Nothing} = nothing,
-        max_blocks::Union{Int, Nothing} = nothing
+        max_blocks::Union{Int, Nothing} = nothing,
+        frame_range::Union{UnitRange{Int}, Nothing} = nothing
     )
     return h5open(filepath, "r") do f
         # Find all data blocks
@@ -318,10 +321,10 @@ function load_mic_h5(
         end
         data_keys = valid_keys
         n_frames_total = sum(frames_per_block)
-        n_blocks = length(frames_per_block)
-
         # Limit frames if requested
         n_to_load = max_frames === nothing ? n_frames_total : min(max_frames, n_frames_total)
+        frames = frame_range === nothing ? (1:n_to_load) : frame_range
+        checkbounds(Base.OneTo(n_to_load), frames)
 
         # Get image size from first block
         first_data_path = _resolve_data_path(f, data_keys[1])
@@ -330,31 +333,24 @@ function load_mic_h5(
         h, w = yx ? size(first_data)[1:2] : size(first_data)[[2, 1]]
 
         # Pre-allocate output
-        images = Array{Float32}(undef, h, w, n_to_load)
-        dataset_indices = Vector{Int}(undef, n_to_load)
+        images = Array{Float32}(undef, h, w, length(frames))
+        dataset_indices = Vector{Int}(undef, length(frames))
 
         # Load data blocks
-        frame_idx = 1
+        block_start = 1
         for (block_num, dk) in enumerate(data_keys)
-            data_path = _resolve_data_path(f, dk)
-            block_data = _read_yx(f, f[data_path])
-            n_block = size(block_data, 3)
-
-            # How many frames to copy from this block
-            frames_remaining = n_to_load - frame_idx + 1
-            n_copy = min(n_block, frames_remaining)
-
-            if n_copy <= 0
-                break
+            (isempty(frames) || block_start > last(frames)) && break
+            block_end = block_start + frames_per_block[block_num] - 1
+            lo, hi = max(first(frames), block_start), min(last(frames), block_end)
+            if lo <= hi
+                data_path = _resolve_data_path(f, dk)
+                local_frames = (lo - block_start + 1):(hi - block_start + 1)
+                block_data = _read_yx(f, f[data_path]; frame_range = local_frames)
+                dest = (lo - first(frames) + 1):(hi - first(frames) + 1)
+                images[:, :, dest] = Float32.(block_data)
+                dataset_indices[dest] .= block_num
             end
-
-            images[:, :, frame_idx:(frame_idx + n_copy - 1)] = Float32.(block_data[:, :, 1:n_copy])
-            dataset_indices[frame_idx:(frame_idx + n_copy - 1)] .= block_num
-            frame_idx += n_copy
-
-            if frame_idx > n_to_load
-                break
-            end
+            block_start = block_end + 1
         end
 
         return images, dataset_indices

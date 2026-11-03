@@ -6,6 +6,31 @@ using Test
 using Random
 using TOML
 using Statistics
+using Logging
+
+struct _SelectiveLogger <: Logging.AbstractLogger
+    io::IOBuffer
+end
+Logging.min_enabled_level(::_SelectiveLogger) = Logging.Info
+Logging.shouldlog(::_SelectiveLogger, level, _module, group, id) = id !== :hidden
+Logging.catch_exceptions(::_SelectiveLogger) = false
+Logging.handle_message(logger::_SelectiveLogger, level, message, args...; kwargs...) = println(logger.io, message)
+
+@testset "TeeLogger honors each sink's shouldlog" begin
+    buffer = IOBuffer()
+    mktempdir() do outdir
+        with_logger(_SelectiveLogger(buffer)) do
+            SMLMAnalysis._with_log_file(outdir) do
+                @info "visible message" _id = :visible
+                @info "hidden message" _id = :hidden
+            end
+        end
+        @test String(take!(buffer)) == "visible message\n"
+        log = read(joinpath(outdir, "log.txt"), String)
+        @test occursin("visible message", log)
+        @test occursin("hidden message", log)
+    end
+end
 
 @testset "analyze dispatch" begin
     # Verify analyze() dispatch methods exist for each step config type
@@ -47,7 +72,8 @@ using Statistics
     @test SMLMAnalysis._inject_camera(cfg, cam).camera === cam    # no pixel_size/qe: fine
     @test_throws ArgumentError SMLMAnalysis._inject_camera(DetectFitConfig(pixel_size = 0.1), cam)
     @test_throws ArgumentError SMLMAnalysis._inject_camera(DetectFitConfig(qe = 0.9), cam)
-    @test SMLMAnalysis._inject_camera(DetectFitConfig(camera = cam, pixel_size = 0.1), cam).camera === cam  # camera already set: unchanged
+    @test_throws ArgumentError DetectFitConfig(camera = cam, pixel_size = 0.1)
+    @test SMLMAnalysis._inject_camera(cfg2, cam) === cfg2  # camera already set: unchanged
 
     # DetectFitConfig.datasets selection field
     @test cfg.datasets === nothing                          # default is no selection
@@ -119,6 +145,28 @@ end
     @test_throws r"detectfit: no localizations found across all 2 dataset\(s\)" analyze(
         [blank, blank], cfg; verbose = Verbosity.SILENT
     )
+
+    @testset "Pipeline file logging respects the caller's logger" begin
+        buffer = IOBuffer()
+        for logger in (NullLogger(), ConsoleLogger(buffer, Logging.Error))
+            mktempdir() do outdir
+                pipeline = AnalysisConfig(
+                    camera = cam, steps = [cfg, FilterConfig(photons = (1000.0, Inf))],
+                    outdir = outdir, verbose = Verbosity.STANDARD, checkpoint = Checkpoint.NONE
+                )
+                result, info = with_logger(logger) do
+                    analyze(imgs, pipeline)
+                end
+                @test !isempty(result.smld.emitters)
+                @test length(info.step_infos) == 2
+                log = read(joinpath(outdir, "log.txt"), String)
+                @test occursin("Info", log)
+                @test occursin("detectfit", log)
+                @test occursin("filter", log)
+            end
+        end
+        @test isempty(String(take!(buffer)))
+    end
 
     @testset "Checkpoint before terminal Hopkins" begin
         mktempdir() do outdir

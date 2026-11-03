@@ -8,6 +8,36 @@ using TOML
 using Statistics
 using Logging
 
+@testset "Fit overlay follows axial filters and criterion order" begin
+    e3 = SMLMAnalysis.Emitter3DFit{Float64}(
+        0.8, 0.8, 0.5, 1000.0, 10.0, 0.01, 0.01, 0.04, 30.0, 1.0
+    )
+    cfg = FilterConfig(z = (-0.2, 0.2), sigma_z = (0.0, 0.03))
+    @test SMLMAnalysis._fit_box_color(e3, cfg, nothing) === :blue
+    title = SMLMAnalysis._fit_overlay_title(cfg, [e3])
+    @test occursin("blue=z outside", title)
+    @test occursin("magenta=σ_z outside", title)
+    cam = IdealCamera(16, 16, 0.1)
+    smld = SMLMAnalysis.BasicSMLD([e3], cam, 1, 1, Dict{String, Any}())
+    @test isempty(SMLMAnalysis._filter_smld(smld, cfg).emitters)
+    e3.z = 0.1
+    @test SMLMAnalysis._fit_box_color(e3, cfg, nothing) === :magenta
+    @test isempty(SMLMAnalysis._filter_smld(smld, cfg).emitters)
+    e3.σ_z = 0.02
+    @test SMLMAnalysis._fit_box_color(e3, cfg, nothing) === :green
+    @test length(SMLMAnalysis._filter_smld(smld, cfg).emitters) == 1
+    # The earlier photons criterion takes precedence over z, which precedes PSF width.
+    e3.z = 0.5
+    @test SMLMAnalysis._fit_box_color(e3, FilterConfig(photons = (0, 500), z = cfg.z), nothing) === :red
+    @test SMLMAnalysis._fit_box_color(e3, cfg, (kind = :iso, lo = 0.1, hi = 0.2)) === :blue
+
+    e2 = SMLMAnalysis.Emitter2DFit{Float64}(0.8, 0.8, 1000.0, 10.0, 0.01, 0.01, 30.0, 1.0)
+    @test SMLMAnalysis._fit_box_color(e2, cfg, nothing) === :green
+    @test !occursin("blue=", SMLMAnalysis._fit_overlay_title(cfg, [e2]))
+    @test !occursin("magenta=", SMLMAnalysis._fit_overlay_title(cfg, [e2]))
+    @test !occursin("blue=", SMLMAnalysis._fit_overlay_title(cfg, typeof(e3)[]))
+end
+
 @testset "Density auto threshold preserves a sparse uniform population" begin
     Random.seed!(42)
     cam = IdealCamera(100, 100, 0.1)

@@ -7,6 +7,42 @@ using Random
 using TOML
 using Statistics
 
+@testset "SMLD round-trip preserves emitter precision independently of camera" begin
+    ideal = IdealCamera(8, 8, 0.1)
+    scmos = SMLMAnalysis.SCMOSCamera(8, 8, 0.1f0, fill(1.0f0, 8, 8))
+    for (T, cam) in ((Float32, ideal), (Float64, scmos))
+        es = [
+            SMLMAnalysis.Emitter2DFit{T}(
+                T(0.123456789012345 + i / 10), T(0.234567890123456 + i / 10),
+                T(1000), T(5), T(0.01), T(0.012), T(20), T(0.5); frame = i
+            ) for i in 1:3
+        ]
+        camera_type = eltype(cam.pixel_edges_x)
+        # Concrete, erased and empty emitter vectors exercise all metadata fallbacks.
+        for emitters in (es, SMLMAnalysis.AbstractEmitter[es...], typeof(es)(), SMLMAnalysis.AbstractEmitter[])
+            mktempdir() do dir
+                path = joinpath(dir, "precision.h5")
+                smld = SMLMAnalysis.BasicSMLD(emitters, cam, 3, 1, Dict{String, Any}())
+                save_smld(path, smld)
+                loaded = load_smld(path)
+                expected = isempty(emitters) && eltype(emitters) === SMLMAnalysis.AbstractEmitter ? camera_type : T
+                @test eltype(loaded.emitters) === SMLMAnalysis.Emitter2DFit{expected}
+                @test eltype(loaded.camera.pixel_edges_x) === camera_type
+                @test [e.x for e in loaded.emitters] == [e.x for e in emitters]
+                @test [e.y for e in loaded.emitters] == [e.y for e in emitters]
+
+                # Older files recorded the camera precision: keep their existing read behavior.
+                SMLMAnalysis.HDF5.h5open(path, "r+") do f
+                    write(f["metadata/element_type"], string(camera_type))
+                end
+                legacy = load_smld(path)
+                @test eltype(legacy.emitters) === SMLMAnalysis.Emitter2DFit{camera_type}
+                @test [e.x for e in legacy.emitters] == camera_type[e.x for e in emitters]
+            end
+        end
+    end
+end
+
 @testset "GaussMLE emitter types + abstract-eltype round-trip" begin
     # Regression coverage for the AbstractEmitter type-erasure + serialization fix:
     #  - detectfit sets each emitter's dataset field by mutating it in place
