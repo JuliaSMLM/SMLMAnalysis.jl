@@ -11,14 +11,18 @@ pure dispatch on config type — no isa checks in the loop.
 # ============================================================
 
 """
-    TeeLogger(loggers)
+    TeeLogger(loggers; file_logger=nothing)
 
 Logger that forwards messages to multiple loggers.
 Used internally to tee @info output to both console and log file.
+The file sink records every admitted message; other sinks apply their own filters.
 """
 struct TeeLogger <: Logging.AbstractLogger
     loggers::Vector{Logging.AbstractLogger}
+    file_logger::Union{Logging.AbstractLogger, Nothing}
 end
+
+TeeLogger(loggers; file_logger = nothing) = TeeLogger(loggers, file_logger)
 
 Logging.min_enabled_level(tl::TeeLogger) = minimum(Logging.min_enabled_level(l) for l in tl.loggers)
 
@@ -28,7 +32,7 @@ end
 
 function Logging.handle_message(tl::TeeLogger, level, message, _module, group, id, file, line; kwargs...)
     for l in tl.loggers
-        if level >= Logging.min_enabled_level(l) && Logging.shouldlog(l, level, _module, group, id)
+        if l === tl.file_logger || (level >= Logging.min_enabled_level(l) && Logging.shouldlog(l, level, _module, group, id))
             Logging.handle_message(l, level, message, _module, group, id, file, line; kwargs...)
         end
     end
@@ -87,7 +91,7 @@ function _with_log_file(f, outdir)
         println(io, "=== SMLMAnalysis $(Dates.now()) ===")
         flush(io)
         file_logger = FlushingLogger(Logging.SimpleLogger(io, Logging.Info), io)
-        tee = TeeLogger(Logging.AbstractLogger[Logging.current_logger(), file_logger])
+        tee = TeeLogger(Logging.AbstractLogger[Logging.current_logger(), file_logger]; file_logger = file_logger)
         Logging.with_logger(tee) do
             f()
         end

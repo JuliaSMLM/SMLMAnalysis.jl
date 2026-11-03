@@ -7,6 +7,49 @@ using Random
 using TOML
 using Statistics
 
+struct PlainEmitter <: SMLMAnalysis.AbstractEmitter
+    x::Float64
+    y::Float64
+    photons::Float64
+    bg::Float64
+    σ_x::Float64
+    σ_y::Float64
+    σ_xy::Float64
+    σ_photons::Float64
+    σ_bg::Float64
+    frame::Int
+    dataset::Int
+    track_id::Int
+    id::Int
+end
+
+@testset "SMLD saving supports non-parametric custom emitters" begin
+    cam = SMLMAnalysis.SCMOSCamera(8, 8, 0.1f0, fill(1.0f0, 8, 8))
+    template = SMLMAnalysis.Emitter2DFit{Float64}(
+        0.123456789012345, 0.234567890123456, 1000.0, 5.0, 0.01, 0.012, 20.0, 0.5;
+        σ_xy = 0.003, frame = 1, id = 7
+    )
+    emitter = PlainEmitter((getfield(template, f) for f in fieldnames(PlainEmitter))...)
+    for emitters in ([emitter], SMLMAnalysis.AbstractEmitter[emitter], PlainEmitter[], SMLMAnalysis.AbstractEmitter[])
+        mktempdir() do dir
+            path = joinpath(dir, "plain.h5")
+            smld = SMLMAnalysis.BasicSMLD(emitters, cam, 1, 1, Dict{String, Any}())
+            save_smld(path, smld)
+            expected_type = eltype(emitters) === SMLMAnalysis.AbstractEmitter && isempty(emitters) ? Float32 : Float64
+            SMLMAnalysis.HDF5.h5open(path, "r") do f
+                @test read(f["metadata/element_type"]) == string(expected_type)
+            end
+            loaded = load_smld(path)
+            @test eltype(loaded.emitters) === SMLMAnalysis.Emitter2DFit{expected_type}
+            @test eltype(loaded.camera.pixel_edges_x) === Float32
+            @test length(loaded.emitters) == length(emitters)
+            for (original, restored) in zip(emitters, loaded.emitters), field in fieldnames(PlainEmitter)
+                @test getfield(restored, field) === getfield(original, field)
+            end
+        end
+    end
+end
+
 @testset "SMLD round-trip preserves emitter precision independently of camera" begin
     ideal = IdealCamera(8, 8, 0.1)
     scmos = SMLMAnalysis.SCMOSCamera(8, 8, 0.1f0, fill(1.0f0, 8, 8))

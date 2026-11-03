@@ -152,6 +152,32 @@ end
     end
 end
 
+@testset "MIC two-dimensional blocks load as a single frame" begin
+    mktempdir() do dir
+        frame = _layout_yx(1)[:, :, 1]
+        for kw in ((tag = "y,x",), (stored_xy = true,), (stored_xy = true, tag = "x,y"))
+            path = joinpath(dir, "single_frame.h5")
+            _write_mic(path, [frame]; kw...)
+            expected = reshape(frame, _LAYOUT_NY, _LAYOUT_NX, 1)
+            for selection in ((;), (frame_range = 1:1,), (max_frames = 1,))
+                images, indices = load_mic_h5(path; selection...)
+                @test images == expected
+                @test size(images) == (_LAYOUT_NY, _LAYOUT_NX, 1)
+                @test indices == [1]
+            end
+            source = (path = path, frame_range = 1:1, format = :mic)
+            @test SMLMAnalysis._load_source(source, Verbosity.SILENT) == expected
+
+            # A range may start in the matrix block and continue into a 3-D block.
+            following = _layout_yx(2) .+ 5000.0f0
+            _write_mic(path, [frame, following]; kw...)
+            images, indices = load_mic_h5(path; frame_range = 1:2)
+            @test images == cat(expected, following[:, :, 1:1]; dims = 3)
+            @test indices == [1, 2]
+        end
+    end
+end
+
 @testset "MIC acquisition frame ranges read across blocks in [y, x] layout" begin
     mktempdir() do dir
         blocks = [_layout_yx(4), _layout_yx(3) .+ 5000.0f0, _layout_yx(2) .+ 10_000.0f0]

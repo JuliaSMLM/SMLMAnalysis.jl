@@ -73,7 +73,15 @@ end
 
 # Read an image dataset (any array) of a MIC file as [y, x(, frame)].
 function _read_yx(f, obj; frame_range = nothing)
-    raw = frame_range === nothing ? read(obj) : obj[:, :, frame_range]
+    raw = if frame_range === nothing
+        read(obj)
+    elseif ndims(obj) == 2
+        # HDF5 cannot index a matrix with three indices. It is a one-frame block.
+        block = reshape(read(obj), size(obj, 1), size(obj, 2), 1)
+        block[:, :, frame_range]
+    else
+        obj[:, :, frame_range]
+    end
     return _h5_layout(obj, _mic_default_layout(f)) == :yx ? raw : _to_yx(raw)
 end
 

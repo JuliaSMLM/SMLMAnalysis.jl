@@ -32,6 +32,26 @@ Logging.handle_message(logger::_SelectiveLogger, level, message, args...; kwargs
     end
 end
 
+@testset "TeeLogger file sink records all admitted messages" begin
+    for level in (Logging.Debug, Logging.Error)
+        buffer = IOBuffer()
+        mktempdir() do outdir
+            with_logger(ConsoleLogger(buffer, level)) do
+                SMLMAnalysis._with_log_file(outdir) do
+                    @debug "admitted debug message"
+                    @info "admitted info message"
+                end
+            end
+            log = read(joinpath(outdir, "log.txt"), String)
+            caller_log = String(take!(buffer))
+            @test occursin("admitted info message", log)
+            @test occursin("admitted debug message", log) == (level == Logging.Debug)
+            @test occursin("admitted info message", caller_log) == (level == Logging.Debug)
+            @test occursin("admitted debug message", caller_log) == (level == Logging.Debug)
+        end
+    end
+end
+
 @testset "analyze dispatch" begin
     # Verify analyze() dispatch methods exist for each step config type
     @test hasmethod(analyze, Tuple{Vector{<:AbstractArray{<:Real, 3}}, DetectFitConfig})
