@@ -152,6 +152,67 @@ end
     end
 end
 
+@testset "MIC missing camera calibration gives actionable errors" begin
+    mktempdir() do dir
+        for stored_xy in (false, true)
+            path = joinpath(dir, "uncalibrated.h5")
+            tag = stored_xy ? nothing : "y,x,frame"
+            _write_mic(path, [_layout_yx()]; stored_xy = stored_xy, tag = tag)
+            @test !load_mic_h5_info(path).has_calibration
+            cfg = DetectFitConfig(path = path, pixel_size = 0.1)
+            for build in (
+                    () -> build_camera_from_mic_h5(path; pixel_size = 0.1),
+                    () -> analyze(cfg; verbose = Verbosity.SILENT),
+                )
+                err = try
+                    build()
+                catch e
+                    e
+                end
+                @test err isa ArgumentError
+                msg = sprint(showerror, err)
+                @test occursin(path, msg)
+                @test occursin("no camera calibration", msg)
+                for entry in ("Calibration/CCDOffset", "Calibration/CCDVar", "Calibration/Gain")
+                    @test occursin(entry, msg)
+                end
+                @test occursin("IdealCamera(1:7, 1:5, pixel_size)", msg)
+                @test occursin("pass it as camera", msg)
+            end
+            camera = IdealCamera(1:7, 1:5, 0.1)
+            @test SMLMAnalysis._auto_camera(DetectFitConfig(path = path, camera = camera)) === camera
+        end
+
+        # An existing group can still lack any one of the required maps.
+        for entry in ("Calibration/CCDOffset", "Calibration/CCDVar", "Calibration/Gain")
+            path = joinpath(dir, "incomplete.h5")
+            _write_mic(path, [_layout_yx()]; maps = _layout_maps(), tag = "y,x,frame")
+            SMLMAnalysis.HDF5.h5open(path, "r+") do f
+                SMLMAnalysis.HDF5.delete_object(f, entry)
+            end
+            err = try
+                build_camera_from_mic_h5(path; pixel_size = 0.1)
+            catch e
+                e
+            end
+            @test err isa ArgumentError
+            @test occursin("missing entries: $entry.", sprint(showerror, err))
+        end
+
+        path = joinpath(dir, "calibrated.h5")
+        maps = _layout_maps()
+        _write_mic(path, [_layout_yx()]; maps = maps, tag = "y,x,frame")
+        cam = build_camera_from_mic_h5(path; pixel_size = 0.1, qe = 0.8)
+        @test cam isa SCMOSCamera
+        @test cam.offset == maps.offset
+        @test cam.readnoise == sqrt.(maps.variance) ./ maps.gain
+        @test cam.gain == 1.0f0 ./ maps.gain
+        @test cam.qe == 0.8f0
+        @test cam.pixel_edges_x ≈ (0:7) .* 0.1f0
+        @test cam.pixel_edges_y ≈ (0:5) .* 0.1f0
+    end
+end
+
 @testset "MIC two-dimensional blocks load as a single frame" begin
     mktempdir() do dir
         frame = _layout_yx(1)[:, :, 1]

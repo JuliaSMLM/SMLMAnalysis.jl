@@ -174,7 +174,8 @@ Returns NamedTuple with (offset, variance, gain) as 2D `(ny, nx)` arrays. A map'
 `dimension_order` wins; an untagged map takes the resolved layout of the file's data
 (first block: its tag, else the `Writer` rule of [`load_mic_h5`](@ref)); a file with no
 data block uses the `Writer` rule. Legacy `[x, y]` maps are converted once. Throws
-`ArgumentError` if a map is not `(ny, nx)` of the data.
+`ArgumentError` if required calibration entries are missing or a map is not `(ny, nx)`
+of the data.
 - `offset`: per-pixel dark offset, ADU
 - `variance`: per-pixel dark variance, ADU² (`Calibration/CCDVar`)
 - `gain`: per-pixel gain as STORED, ADU/e⁻ (SMITE convention: RawData = gain*photons + offset)
@@ -184,6 +185,19 @@ Use `load_mic_h5_calibration_for_scmos()` to convert these to SCMOSCamera's unit
 function load_mic_h5_calibration(filepath::String)
     return h5open(filepath, "r") do f
         layout, dsize = _mic_data_layout_size(f)
+        required = ("Calibration/CCDOffset", "Calibration/CCDVar", "Calibration/Gain")
+        missing = filter(path -> !_h5_exists(f, path), required)
+        if !isempty(missing)
+            example = dsize === nothing ? "IdealCamera(1:width, 1:height, pixel_size)" :
+                "IdealCamera(1:$(dsize[2]), 1:$(dsize[1]), pixel_size)"
+            throw(
+                ArgumentError(
+                    "MIC file \"$filepath\" has no camera calibration; missing entries: " *
+                        "$(join(missing, ", ")). Build the camera yourself, for example " *
+                        "$example (using the file's width and height), and pass it as camera."
+                )
+            )
+        end
         function rmap(name)
             obj = f["Calibration/$name"]
             raw = read(obj)
