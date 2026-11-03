@@ -65,14 +65,15 @@ function save_smld(
     # detection also covers Emitter3DFitGaussMLE, which is not <: Emitter3DFit.
     ET = n > 0 ? typeof(smld.emitters[1]) : E
     # BasicSMLD's T comes from the camera, which can differ from the fits' precision.
+    # A custom emitter's first type parameter may be an unrelated numeric tag.
     element_type = T
     if isconcretetype(ET)
         parameter = isempty(ET.parameters) ? nothing : ET.parameters[1]
         coordinate_type = hasfield(ET, :x) ? fieldtype(ET, :x) : nothing
-        if parameter isa Type && parameter <: Number && isconcretetype(parameter)
-            element_type = parameter
-        elseif coordinate_type isa Type && coordinate_type <: Number && isconcretetype(coordinate_type)
+        if coordinate_type isa Type && coordinate_type <: Number && isconcretetype(coordinate_type)
             element_type = coordinate_type
+        elseif parameter isa Type && parameter <: Number && isconcretetype(parameter)
+            element_type = parameter
         end
     end
     is_3d = n > 0 ? hasproperty(smld.emitters[1], :z) : (E <: Emitter3DFit)

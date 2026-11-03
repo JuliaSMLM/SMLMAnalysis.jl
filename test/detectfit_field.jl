@@ -123,6 +123,49 @@ _field_values(emitters) = [Tuple(getfield(e, f) for f in fieldnames(typeof(e))) 
     end
 end
 
+@testset "DetectFit warns when cleanup removes every fit" begin
+    camera = IdealCamera(40, 32, 0.1)
+    boxer = BoxerConfig(boxsize = 9, psf_sigma = 0.13, backend = :cpu)
+    cases = (
+        (images = _field_stack(35), model = GaussianXYNBS(), n_nonfinite = 0, n_outside = 2),
+        # Zero PSF width leaves finite, in-field positions but NaN uncertainties.
+        (images = _field_stack(12), model = GaussianXYNB(0.0f0), n_nonfinite = 2, n_outside = 0),
+    )
+    for case in cases
+        cfg = DetectFitConfig(
+            camera = camera, boxer = boxer,
+            fitter = GaussMLEConfig(psf_model = case.model, iterations = 50, backend = :cpu)
+        )
+        warning = "detectfit: every fit was removed during cleanup ($(case.n_nonfinite) non-finite, " *
+            "$(case.n_outside) outside the camera); returning an empty result."
+        for write_outputs in (false, true)
+            mktempdir() do tmp
+                outdir = write_outputs ? tmp : nothing
+                logger = Test.TestLogger(min_level = Logging.Warn)
+                smld, info = with_logger(logger) do
+                    analyze(case.images, cfg; outdir = outdir)
+                end
+                cleanup_warnings = filter(log -> occursin("every fit was removed", log.message), logger.logs)
+                @test length(cleanup_warnings) == 1
+                @test only(cleanup_warnings).level == Logging.Warn
+                @test only(cleanup_warnings).message == warning
+                @test isempty(smld.emitters)
+                @test info.info.n_fits == 2
+                @test info.info.n_nonfinite == case.n_nonfinite
+                @test info.info.n_out_of_field == case.n_outside
+                if write_outputs
+                    dir = joinpath(outdir, "01_detectfit")
+                    saved = TOML.parsefile(joinpath(dir, "info.toml"))
+                    @test saved["n_nonfinite"] == case.n_nonfinite
+                    @test saved["n_out_of_field"] == case.n_outside
+                    @test occursin("No localizations remain after fit cleanup.", read(joinpath(dir, "stats.md"), String))
+                    @test isempty(load_smld(joinpath(dir, "smld_raw.h5")).emitters)
+                end
+            end
+        end
+    end
+end
+
 @testset "DetectFitInfo constructor defaults" begin
     kwargs = (
         boxes_info = SMLMAnalysis.SMLMBoxer.BoxesInfo[], fit_info = GaussMLE.GaussMLEFitInfo[],

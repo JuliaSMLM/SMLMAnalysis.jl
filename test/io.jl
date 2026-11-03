@@ -23,6 +23,49 @@ struct PlainEmitter <: SMLMAnalysis.AbstractEmitter
     id::Int
 end
 
+struct TaggedEmitter{Tag, T} <: SMLMAnalysis.AbstractEmitter
+    x::T
+    y::T
+    photons::T
+    bg::T
+    σ_x::T
+    σ_y::T
+    σ_xy::T
+    σ_photons::T
+    σ_bg::T
+    frame::Int
+    dataset::Int
+    track_id::Int
+    id::Int
+end
+
+@testset "SMLD saving prefers coordinates over a numeric emitter tag" begin
+    cam = SMLMAnalysis.SCMOSCamera(8, 8, 0.1f0, fill(1.0f0, 8, 8))
+    template = SMLMAnalysis.Emitter2DFit{Float64}(
+        0.123456789012345, 0.234567890123456, 1000.0, 5.0, 0.01, 0.012, 20.0, 0.5;
+        σ_xy = 0.003, frame = 1, id = 7
+    )
+    ET = TaggedEmitter{Float32, Float64}
+    emitter = ET((getfield(template, f) for f in fieldnames(ET))...)
+    for emitters in ([emitter], SMLMAnalysis.AbstractEmitter[emitter], ET[])
+        mktempdir() do dir
+            path = joinpath(dir, "tagged.h5")
+            smld = SMLMAnalysis.BasicSMLD(emitters, cam, 1, 1, Dict{String, Any}())
+            save_smld(path, smld)
+            SMLMAnalysis.HDF5.h5open(path, "r") do f
+                @test read(f["metadata/element_type"]) == "Float64"
+            end
+            loaded = load_smld(path)
+            @test eltype(loaded.emitters) === SMLMAnalysis.Emitter2DFit{Float64}
+            @test eltype(loaded.camera.pixel_edges_x) === Float32
+            @test length(loaded.emitters) == length(emitters)
+            for (original, restored) in zip(emitters, loaded.emitters), field in fieldnames(ET)
+                @test getfield(restored, field) === getfield(original, field)
+            end
+        end
+    end
+end
+
 @testset "SMLD saving supports non-parametric custom emitters" begin
     cam = SMLMAnalysis.SCMOSCamera(8, 8, 0.1f0, fill(1.0f0, 8, 8))
     template = SMLMAnalysis.Emitter2DFit{Float64}(

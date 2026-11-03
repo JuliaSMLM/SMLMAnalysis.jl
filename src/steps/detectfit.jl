@@ -373,6 +373,10 @@ function _detectfit_core(
     n_nonfinite > 0 && @warn "detectfit: dropped $n_nonfinite emitter(s) with a non-finite " *
         "fit result (NaN/Inf in x, y, photons, bg, or σ); check BoxerConfig/GaussMLEConfig " *
         "or an ill-conditioned ROI."
+    if isempty(emitters)
+        @warn "detectfit: every fit was removed during cleanup ($n_nonfinite non-finite, " *
+            "$total_out_of_field outside the camera); returning an empty result."
+    end
 
     smld = BasicSMLD(emitters, camera, n_frames_per_dataset, n_datasets_val, Dict{String, Any}())
 
