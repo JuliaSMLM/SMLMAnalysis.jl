@@ -148,7 +148,8 @@ end
             @test eltype(info.info.fit_info) === GaussMLE.GaussMLEFitInfo
             @test info.info.fit_info[3 - nonblank].n_fits == 0
             @test info.info.fit_info[3 - nonblank].device_id == info.info.fit_info[nonblank].device_id
-            @test info.info.fit_info[nonblank].n_fits == length(smld.emitters)
+            @test info.info.fit_info[nonblank].n_fits ==
+                length(smld.emitters) + info.info.n_out_of_field + info.info.n_nonfinite
             dir = joinpath(outdir, "01_detectfit")
             saved_info = TOML.parsefile(joinpath(dir, "info.toml"))
             @test saved_info["fit_info_$(3 - nonblank)"]["n_fits"] == 0

@@ -56,8 +56,12 @@ Two operations run back to back:
 The detailed detection and fitting algorithms live in the SMLMBoxer and GaussMLE
 documentation; this step composes them and handles datasets, files, and cameras.
 
+After fitting, localizations with x or y outside the camera's first and last pixel
+edges are removed, because edge ROIs can fit positions beyond the imaged field;
+`DetectFitInfo.n_out_of_field` reports the total removed (including for ROI crops).
+
 A dataset with no detected ROIs is skipped with a warning; its dataset index and
-zero-fit info entry are retained. If every dataset has no localizations, the step
+zero-fit info entry are retained. If no fits are produced across any dataset, the step
 raises an error with suggestions for checking detection and camera settings.
 
 ## Configuration
