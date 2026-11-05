@@ -37,6 +37,7 @@ the last number (0.1.Z) is non-breaking; one that raises the middle number
 - `build_camera_from_mic_h5` on a MIC file without a Calibration group throws `ArgumentError` naming the missing entries and the camera to pass instead, not a `KeyError` from HDF5.
 - The docstring, README and documentation examples set `psf_sigma` with `boxsize`; without it, detection had no threshold and boxed every local maximum.
 - DetectFit warns when cleanup removes every fit, with the counts removed as non-finite and as outside the camera.
+- Diagnostic plots no longer throw when their data has a single value (a flat sample frame in the detection or fit overlay, or constant photon counts in the intensity-filter figures) with Makie older than 0.24.14.
 
 ## [0.2.0] - 2026-10-21
 

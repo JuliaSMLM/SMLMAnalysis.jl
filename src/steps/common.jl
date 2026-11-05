@@ -81,6 +81,24 @@ function _grid_figure_size(data; n_cols = 4, n_rows = 3, panel_height = 200)
 end
 
 """
+    _plot_colorrange(lo, hi) -> (lo, hi)
+
+Color range for a data-derived `colorrange`. Returns `(lo, hi)` unchanged when both ends are
+finite and distinct as Float32 (Makie stores a colorrange as `Vec2f`). Otherwise (equal ends, or
+NaN/Inf from degenerate data) it returns a range centered on the finite end `c` with half-width
+`1e-3 * max(|c|, 1)`, or `(0.0, 1.0)` when neither end is finite. Makie before 0.24.14 throws on a
+user-set `cmin == cmax`, which would abort a diagnostic save over a flat frame or constant photons.
+"""
+function _plot_colorrange(lo, hi)
+    l, h = Float32(lo), Float32(hi)
+    isfinite(l) && isfinite(h) && h > l && return (lo, hi)
+    c = isfinite(lo) ? lo : (isfinite(hi) ? hi : NaN)
+    isfinite(c) || return (0.0, 1.0)
+    w = max(abs(Float64(c)), 1.0) * 1.0e-3
+    return (Float64(c) - w, Float64(c) + w)
+end
+
+"""
     _save_box_overlay(dir, filename, images, x_corners, y_corners, frame_indices, box_size, box_colors; ...)
 
 Core box-overlay renderer: a grid of sample frames (contrast-stretched grayscale) with a
@@ -115,7 +133,7 @@ function _save_box_overlay(
         col = mod(idx - 1, 4) + 1
 
         ax = Axis(fig[row, col], title = "$title_prefix $(display_labels[idx])", aspect = DataAspect(), yreversed = true)
-        heatmap!(ax, images[:, :, frame_num]', colormap = :grays, colorrange = (pmin, pmax))
+        heatmap!(ax, images[:, :, frame_num]', colormap = :grays, colorrange = _plot_colorrange(pmin, pmax))
 
         frame_mask = frame_indices .== frame_num
         if any(frame_mask)
