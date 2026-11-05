@@ -218,8 +218,11 @@ output datasets correspond 1:1 to the resolved source slots.
 
 `n_nonfinite` counts fitted emitters dropped because a fit produced a non-finite
 value (NaN/Inf) in one of its `AbstractFloat` fields (x, y, photons, bg, σ, ...).
+
+`n_out_of_field` counts fitted emitters dropped because x or y lies beyond the
+camera's first or last pixel edge. `n_fits` counts fits before these removals.
 """
-struct DetectFitInfo <: SMLMData.AbstractSMLMInfo
+@kwdef struct DetectFitInfo <: SMLMData.AbstractSMLMInfo
     boxes_info::Vector{SMLMBoxer.BoxesInfo}
     fit_info::Vector{GaussMLE.GaussMLEFitInfo}
     n_datasets::Int
@@ -227,15 +230,18 @@ struct DetectFitInfo <: SMLMData.AbstractSMLMInfo
     n_fits::Int
     n_frames_per_dataset::Int
     elapsed_s::Float64
-    selected_source_indices::Union{Vector{Int}, Nothing}
-    n_nonfinite::Int
+    selected_source_indices::Union{Vector{Int}, Nothing} = nothing
+    n_nonfinite::Int = 0
+    n_out_of_field::Int = 0
 end
 
 # Back-compat constructors (older positional forms default newer fields)
 DetectFitInfo(boxes_info, fit_info, n_datasets, n_rois, n_fits, n_frames_per_dataset, elapsed_s) =
-    DetectFitInfo(boxes_info, fit_info, n_datasets, n_rois, n_fits, n_frames_per_dataset, elapsed_s, nothing, 0)
+    DetectFitInfo(boxes_info, fit_info, n_datasets, n_rois, n_fits, n_frames_per_dataset, elapsed_s, nothing, 0, 0)
 DetectFitInfo(boxes_info, fit_info, n_datasets, n_rois, n_fits, n_frames_per_dataset, elapsed_s, selected_source_indices) =
-    DetectFitInfo(boxes_info, fit_info, n_datasets, n_rois, n_fits, n_frames_per_dataset, elapsed_s, selected_source_indices, 0)
+    DetectFitInfo(boxes_info, fit_info, n_datasets, n_rois, n_fits, n_frames_per_dataset, elapsed_s, selected_source_indices, 0, 0)
+DetectFitInfo(boxes_info, fit_info, n_datasets, n_rois, n_fits, n_frames_per_dataset, elapsed_s, selected_source_indices, n_nonfinite) =
+    DetectFitInfo(boxes_info, fit_info, n_datasets, n_rois, n_fits, n_frames_per_dataset, elapsed_s, selected_source_indices, n_nonfinite, 0)
 
 """
     FilterInfo <: AbstractSMLMInfo

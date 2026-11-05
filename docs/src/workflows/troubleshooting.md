@@ -108,7 +108,7 @@ passing all images in memory:
 ```julia
 # MIC blocks auto-detected as datasets, loaded block by block
 DetectFitConfig(path = "data.h5", h5_format = :mic,
-                boxer = BoxerConfig(boxsize = 9))
+                boxer = BoxerConfig(boxsize = 9, psf_sigma = 0.135))
 ```
 
 See [Multi-Dataset](@ref "Multi-Dataset Acquisitions").

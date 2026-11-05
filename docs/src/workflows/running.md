@@ -51,7 +51,7 @@ takes the `smld`:
 
 ```julia
 (smld, info) = analyze(image_stacks,
-    DetectFitConfig(camera = cam, boxer = BoxerConfig(boxsize = 9)))
+    DetectFitConfig(camera = cam, boxer = BoxerConfig(boxsize = 9, psf_sigma = 0.135)))
 @show length(smld.emitters)             # decide the photon cut from this
 
 (smld, info) = analyze(smld, FilterConfig(photons = (500.0, Inf)))
@@ -75,7 +75,7 @@ The varargs form is handy for short, throwaway runs:
 
 ```julia
 (result, info) = analyze(image_stacks,
-    DetectFitConfig(boxer = BoxerConfig(boxsize = 9)),
+    DetectFitConfig(boxer = BoxerConfig(boxsize = 9, psf_sigma = 0.135)),
     FilterConfig(photons = (500.0, Inf)),
     DriftConfig(degree = 2);
     camera = cam, outdir = "output/")
@@ -88,7 +88,7 @@ omitted entirely:
 config = AnalysisConfig(
     camera = cam,
     steps = [DetectFitConfig(path = "data.h5", h5_format = :mic,
-                             boxer = BoxerConfig(boxsize = 9)),
+                             boxer = BoxerConfig(boxsize = 9, psf_sigma = 0.135)),
              FilterConfig(photons = (500.0, Inf)),
              RenderConfig(zoom = 20)],
     outdir = "output/",
@@ -176,6 +176,9 @@ The `EXPENSIVE` default guarantees that no costly step ever runs leaving only
 image/diagnostic output — its `smld` is always on disk for the next iteration.
 Checkpoints require `outdir` to be set. See [I/O & Resume](@ref) for loading them
 back.
+
+Rendering and statistics steps do not move the `END` checkpoint: the last step
+that writes an SMLD keeps its own filename and any accompanying drift model.
 
 ```julia
 config = AnalysisConfig(camera = cam, steps = [...], outdir = "output/",

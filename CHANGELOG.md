@@ -7,6 +7,38 @@ the last number (0.1.Z) is non-breaking; one that raises the middle number
 
 ## [Unreleased]
 
+### Changed
+
+- The `DetectFitConfig` default detection box is now 9 pixels (was 11). This changes
+  results for callers that rely on the default; pass `BoxerConfig(boxsize = 11, ...)` to
+  keep the old behavior.
+- DetectFit drops fits whose position lies outside the camera. GaussMLE lets a fit move
+  1.5 pixels past its box, so a box on the camera edge could return a position outside the
+  image, with an uncertainty of hundreds of nanometers. The count is `n_out_of_field` in
+  the DetectFit info, its log line and `stats.md`. On real data this removed 0.9% to 5.1%
+  of all fits, and at most 0.08% of those that pass a 20 nm precision filter.
+- `DetectFitConfig` now throws `ArgumentError` when `camera` is given together with
+  `pixel_size` or `qe != 1.0`. Those values were ignored before; build the camera with
+  `build_camera_from_mic_h5(path; pixel_size, qe)` instead.
+
+### Fixed
+
+- Automatic density filtering preserves sparse populations with low neighbor-count peaks, rejecting only localizations without neighbors.
+- DetectFit skips datasets with no detections while retaining their dataset indices and fit info; all-empty runs report the detection settings error.
+- Quality filtering and diagnostics support emitters without p-values; requesting `pvalue` filtering warns and skips that criterion.
+- DetectFitConfig rejects conflicting data-source keywords (`path` with `paths`, or `dataset_frames` without `path`) instead of silently ignoring them.
+- `Checkpoint.END` saves the last localization checkpoint when statistics or other steps without checkpoints follow it.
+- FFTA is held below 0.3.2. That release, loaded through Makie, conflicts with FFTW and breaks drift's cross-correlation: `method = :fft` alignment crashes, and drift silently loses its cross-correlation start. Remove the bound when FFTA ships a fix (JuliaMath/FFTA.jl#146).
+- `save_smld` records the emitters' own number type, taken from the coordinate field, instead of the camera's, so a result reloads as it was saved.
+- `FilterConfig.psf_sigma`, `CompositeRenderConfig.clip_percentile` and `DensityFilterConfig.min_neighbors` accept whole-number input, as the other ranges already did.
+- A MIC frame range reads only the blocks it overlaps; a range late in a file read every earlier frame (200 frames at frame 10,001 took 9.9 GB, now 0.16 GB). One-frame blocks stored as 2-D datasets still load.
+- The fit overlay colors fits rejected by the `z` (blue) and `sigma_z` (magenta) filters; they were drawn as passing.
+- With `outdir`, the log-file tee forwards to the caller's logger only what that logger accepts: a run under `NullLogger()` no longer throws, an Error-level logger no longer receives Info lines, and `log.txt` keeps every message it recorded before.
+- `build_camera_from_mic_h5` on a MIC file without a Calibration group throws `ArgumentError` naming the missing entries and the camera to pass instead, not a `KeyError` from HDF5.
+- The docstring, README and documentation examples set `psf_sigma` with `boxsize`; without it, detection had no threshold and boxed every local maximum.
+- DetectFit warns when cleanup removes every fit, with the counts removed as non-finite and as outside the camera.
+- Diagnostic plots no longer throw when their data has a single value (a flat sample frame in the detection or fit overlay, or constant photon counts in the intensity-filter figures) with Makie older than 0.24.14.
+
 ## [0.2.0] - 2026-10-21
 
 ### Breaking
