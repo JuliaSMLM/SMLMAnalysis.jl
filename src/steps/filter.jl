@@ -135,12 +135,37 @@ function _rejected_spans(lo, hi, view_lo, view_hi)
     return (; spans, thresholds)
 end
 
-function _draw_rejected!(ax, r, region_color, line_color)
-    for (a, b) in r.spans
-        vspan!(ax, a, b, color = region_color)
+function _draw_rejected!(ax, r, region_color, line_color; spans = true, lines = true)
+    if spans
+        for (a, b) in r.spans
+            vspan!(ax, a, b, color = region_color)
+        end
     end
-    isempty(r.thresholds) || vlines!(ax, r.thresholds, color = line_color, linestyle = :dot, linewidth = 2)
+    lines && !isempty(r.thresholds) && vlines!(ax, r.thresholds, color = line_color, linestyle = :dot, linewidth = 2)
     return nothing
+end
+
+"""
+    _pvalue_window(pval_lo, bounds) -> (; x_lo, lo_log, hi_log)
+
+The p-value panel's log10 x window `[x_lo, 0]` and the filter bounds in log10 space.
+`x_lo` starts at the data's `pval_lo` and widens to show every active bound inside (0, 1).
+Bounds of 0 and 1 reject nothing (`-Inf`, `Inf`). An upper bound at or below 0 passes no
+positive p-value, so `hi_log = x_lo` and the whole window is rejected; a lower bound at or
+above 1 likewise puts `lo_log` at or past the window's right end. No logarithm is taken of a
+non-positive bound.
+"""
+function _pvalue_window(pval_lo, bounds)
+    x_lo = Float64(pval_lo)
+    bounds === nothing && return (; x_lo, lo_log = -Inf, hi_log = Inf)
+    p_lo, p_hi = bounds
+    lo_log = p_lo > 0 ? log10(p_lo) : -Inf
+    hi_log = 0 < p_hi < 1 ? log10(p_hi) : Inf
+    for t in (lo_log, hi_log)
+        isfinite(t) && t < 0 && (x_lo = min(x_lo, 1.05 * t))
+    end
+    p_hi <= 0 && (hi_log = x_lo)
+    return (; x_lo, lo_log, hi_log)
 end
 
 # Percentage of `values` the filter keeps for `range`, by the same test the filter uses.
@@ -418,8 +443,16 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
         # Finite bounds widen the view so their rejected regions show; open bounds draw nothing.
         isfinite(prec_hi) && (prec_xlim = max(prec98, prec_hi * 1.2))
         isfinite(prec_lo) && prec_lo > 0 && (prec_xlim = max(prec_xlim, prec_lo * 1.2))
-        _draw_rejected!(ax3, _rejected_spans(prec_lo, prec_hi, 0, prec_xlim), REJECTED_COLOR, THRESHOLD_COLOR)
+        # The filter tests max(σx, σy). Any component above the upper bound is rejected, so
+        # that region is shaded; a component below the lower bound may still pass (the other
+        # axis decides), so the lower bound gets a dashed line and a note, not a region.
+        _draw_rejected!(ax3, _rejected_spans(-Inf, prec_hi, 0, prec_xlim), REJECTED_COLOR, THRESHOLD_COLOR)
+        if isfinite(prec_lo) && prec_lo > 0
+            vlines!(ax3, [prec_lo], color = THRESHOLD_COLOR, linestyle = :dash, linewidth = 2)
+        end
     end
+    prec_note = (cfg.precision !== nothing && isfinite(cfg.precision[1]) && cfg.precision[1] > 0) ?
+        "\nlower bound on max(σ_x, σ_y)" : ""
     σx_view = σ_x[σ_x .<= prec_xlim]
     σy_view = σ_y[σ_y .<= prec_xlim]
     !isempty(σx_view) && hist!(ax3, σx_view, bins = 50, color = (:blue, 0.5), label = "σ_x")
@@ -427,7 +460,7 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
     xlims!(ax3, _plot_limits(0, prec_xlim)...)
     (isempty(σx_view) && isempty(σy_view)) || axislegend(ax3, position = :rt, framevisible = false, labelsize = 9)
     text!(
-        ax3, 0.97, 0.7, text = "σ_x: $(round(median(σ_x), digits = 1)) nm\nσ_y: $(round(median(σ_y), digits = 1)) nm",
+        ax3, 0.97, 0.7, text = "σ_x: $(round(median(σ_x), digits = 1)) nm\nσ_y: $(round(median(σ_y), digits = 1)) nm$(prec_note)",
         align = (:right, :top), space = :relative, fontsize = 10
     )
 
@@ -450,13 +483,11 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
             nbins = 50
             bin_edges = range(pval_lo, 0, length = nbins + 1)
             bin_width = step(bin_edges)
-            if cfg.pvalue !== nothing
-                # In log10 space: p = 0 and p = 1 bounds reject nothing.
-                p_lo, p_hi = cfg.pvalue
-                lo_log = p_lo > 0 ? log10(p_lo) : -Inf
-                hi_log = p_hi < 1 ? log10(p_hi) : Inf
-                _draw_rejected!(ax4, _rejected_spans(lo_log, hi_log, pval_lo - 1, 0.0), REJECTED_COLOR, THRESHOLD_COLOR)
-            end
+            # The x window covers the data and every active p-value bound; shading goes under
+            # the bars, threshold lines on top, as before.
+            pw = _pvalue_window(pval_lo, cfg.pvalue)
+            p_rej = _rejected_spans(pw.lo_log, pw.hi_log, pw.x_lo, 0.0)
+            _draw_rejected!(ax4, p_rej, REJECTED_COLOR, THRESHOLD_COLOR; lines = false)
             # Count once and draw the bars from these counts, so the bars and the y limit
             # come from the same numbers (a separate hist! can bin a value on an edge
             # differently and clip its peak). p = 1 (log 0, the top edge) goes in the last bin.
@@ -472,6 +503,7 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
             lines!(ax4, -u_range, theory_pdf, color = :red, linewidth = 2, label = "Uniform theory")
             vlines!(ax4, [mean(log_pval)], color = MEAN_COLOR, linestyle = :solid, linewidth = 1.5)
             vlines!(ax4, [median(log_pval)], color = MEDIAN_COLOR, linestyle = :dash, linewidth = 1.5)
+            _draw_rejected!(ax4, p_rej, REJECTED_COLOR, THRESHOLD_COLOR; spans = false)
             if pval_thresh !== nothing
                 pval_pass_pct = _pass_percent(pvalue, cfg.pvalue)
                 bound_txt = cfg.pvalue[2] < 1 ? "range: $(cfg.pvalue)" : "threshold: $(pval_thresh)"
@@ -480,7 +512,7 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
                     align = (:left, :top), space = :relative, fontsize = 10
                 )
             end
-            xlims!(ax4, _plot_limits(pval_lo, 0)...)
+            xlims!(ax4, _plot_limits(pw.x_lo, 0)...)
             ylims!(ax4, _plot_limits(0, max_density * 1.1)...)
         end
     end

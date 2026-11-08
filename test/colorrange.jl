@@ -267,4 +267,36 @@ end
         ),
     ]
     @test _quality_figure_saves(smld_of(e3), FilterConfig(sigma_z = (0.02, Inf)))
+
+    # Unequal axes: the filter tests max(σx, σy) = 30 nm, so a 20 nm lower bound keeps this fit.
+    unequal = GaussMLE.Emitter2DFitSigma{Float64}(0.8, 0.8, 1000.0, 5.0, 0.13, 0.01, 0.03, 0.0, 30.0, 0.5, 0.002, 0.4, 1, 1, 0, 1)
+    @test _quality_figure_saves(smld_of([unequal]), FilterConfig(precision = (0.02, Inf)))
+end
+
+@testset "P-value panel window and bounds" begin
+    pw = SMLMAnalysis._pvalue_window
+    rs = SMLMAnalysis._rejected_spans
+    # Both thresholds of (0.2, 0.8) lie inside the window even when the data sit near p = 1.
+    w = pw(-0.0457575, (0.2, 0.8))
+    @test w.lo_log ≈ log10(0.2) && w.hi_log ≈ log10(0.8)
+    @test w.x_lo <= w.lo_log < w.hi_log < 0
+    @test all(t -> w.x_lo <= t <= 0, rs(w.lo_log, w.hi_log, w.x_lo, 0.0).thresholds)
+    # An ordinary lower bound inside the data window leaves the window as it was.
+    w = pw(-5.0, (0.001, 1.0))
+    @test w.x_lo == -5.0 && w.lo_log ≈ -3.0 && w.hi_log == Inf
+    # Upper bounds at or below 0 pass no positive p-value: the whole window is rejected and
+    # no logarithm of a non-positive number is taken.
+    for b in ((-Inf, -0.1), (0.0, 0.0))
+        w = pw(-2.0, b)
+        @test w.hi_log == w.x_lo == -2.0
+        @test rs(w.lo_log, w.hi_log, w.x_lo, 0.0).spans == [(-2.0, 0.0)]
+    end
+    @test pw(-2.0, nothing) == (x_lo = -2.0, lo_log = -Inf, hi_log = Inf)
+
+    cam = IdealCamera(16, 16, 0.1)
+    es = [_sigma_emitter(pvalue = p, frame = i) for (i, p) in enumerate((0.1, 0.5, 0.9))]
+    smld = SMLMAnalysis.BasicSMLD(es, cam, 3, 1, Dict{String, Any}())
+    for cfg in (FilterConfig(pvalue = (-Inf, -0.1)), FilterConfig(pvalue = (0, 0)), FilterConfig(pvalue = (0.2, 0.8)))
+        @test _quality_figure_saves(smld, cfg)
+    end
 end
