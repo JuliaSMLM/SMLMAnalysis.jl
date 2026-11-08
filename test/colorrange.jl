@@ -252,8 +252,15 @@ end
     # The overlay legend names an active upper p-value bound.
     t = SMLMAnalysis._fit_overlay_title
     es = [_sigma_emitter()]
-    @test occursin("purple=pval<0.2/>0.8", t(FilterConfig(pvalue = (0.2, 0.8)), es))
-    @test occursin("purple=pval<0.001  ", t(FilterConfig(pvalue = (0.001, 1.0)), es))
+    @test occursin("purple=pval not in [0.2, 0.8]", t(FilterConfig(pvalue = (0.2, 0.8)), es))
+    @test occursin("purple=pval not in [0.001, 1.0]", t(FilterConfig(pvalue = (0.001, 1.0)), es))
+    # A NaN p-value fails the range test, so the filter rejects it (drawn purple); the label
+    # names the range rather than an inequality NaN does not satisfy.
+    nan_p = _sigma_emitter(pvalue = NaN)
+    cfg = FilterConfig(pvalue = (0.001, 1.0))
+    @test !SMLMAnalysis._in_range(nan_p.pvalue, cfg.pvalue)
+    @test occursin("purple=pval not in [0.001, 1.0]", t(cfg, [nan_p]))
+    @test !occursin("pval<", t(cfg, [nan_p]))
 
     # Each input the filter rejects on the side that was not drawn before saves its figure.
     cam = IdealCamera(16, 16, 0.1)

@@ -845,12 +845,9 @@ function _fit_overlay_title(cfg::FilterConfig, emitters)
         isempty(conds) || push!(parts, "orange=prec" * join(conds, "/"))
     end
     if cfg.pvalue !== nothing && _has_pvalue(emitters)
-        lo, hi = cfg.pvalue
-        conds = String[]
-        # p-values lie in [0, 1], so bounds of 0 and 1 reject nothing.
-        lo > 0 && push!(conds, "<$(lo)")
-        hi < 1 && push!(conds, ">$(hi)")
-        isempty(conds) || push!(parts, "purple=pval" * join(conds, "/"))
+        # The filter rejects any p-value that fails its range test, NaN included (DetectFit
+        # keeps fits whose p-value alone is NaN), so the label names the range, not an inequality.
+        push!(parts, "purple=pval not in [$(cfg.pvalue[1]), $(cfg.pvalue[2])]")
     end
     if cfg.z !== nothing && !isempty(emitters) && hasproperty(first(emitters), :z)
         push!(parts, "blue=z outside $(cfg.z)μm")
