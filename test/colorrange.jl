@@ -236,3 +236,35 @@ end
     @test pp([0.4, 0.4, 0.4], (0.4, 1.0)) == 100.0
     @test pp([0.1, 0.5, 0.9], (0.2, 0.8)) == round(100 / 3, digits = 1)
 end
+
+@testset "Filter figures show both sides of a filter range" begin
+    rs = SMLMAnalysis._rejected_spans
+    # Lower bound only, upper only, both, open, and a bound at the window edge.
+    @test rs(500, Inf, 0, 1000) == (spans = [(0.0, 500.0)], thresholds = [500.0])
+    @test rs(-Inf, 800, 0, 840) == (spans = [(800.0, 840.0)], thresholds = [800.0])
+    @test rs(5, 20, 0, 24) == (spans = [(0.0, 5.0), (20.0, 24.0)], thresholds = [5.0, 20.0])
+    @test rs(-Inf, Inf, 0, 10) == (spans = Tuple{Float64, Float64}[], thresholds = Float64[])
+    @test rs(0, Inf, 0, 10).spans == Tuple{Float64, Float64}[]
+    # log10 p window: p from 0.2 to 0.8 rejects on both sides.
+    r = rs(log10(0.2), log10(0.8), -4.0, 0.0)
+    @test r.thresholds ≈ [log10(0.2), log10(0.8)]
+
+    # The overlay legend names an active upper p-value bound.
+    t = SMLMAnalysis._fit_overlay_title
+    es = [_sigma_emitter()]
+    @test occursin("purple=pval<0.2/>0.8", t(FilterConfig(pvalue = (0.2, 0.8)), es))
+    @test occursin("purple=pval<0.001  ", t(FilterConfig(pvalue = (0.001, 1.0)), es))
+
+    # Each input the filter rejects on the side that was not drawn before saves its figure.
+    cam = IdealCamera(16, 16, 0.1)
+    smld_of(es) = SMLMAnalysis.BasicSMLD(es, cam, 20, 1, Dict{String, Any}())
+    @test _quality_figure_saves(smld_of([_sigma_emitter(photons = 1000.0)]), FilterConfig(photons = (-Inf, 800)))
+    @test _quality_figure_saves(smld_of([_sigma_emitter(prec = 0.01)]), FilterConfig(precision = (0.02, Inf)))
+    @test _quality_figure_saves(smld_of([_sigma_emitter(pvalue = 0.9)]), FilterConfig(pvalue = (0.2, 0.8)))
+    e3 = [
+        SMLMAnalysis.Emitter3DFit{Float64}(
+            0.8, 0.8, 0.1, 1000.0, 10.0, 0.01, 0.01, 0.01, 30.0, 1.0; frame = 1
+        ),
+    ]
+    @test _quality_figure_saves(smld_of(e3), FilterConfig(sigma_z = (0.02, Inf)))
+end

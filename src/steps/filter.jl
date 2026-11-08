@@ -113,6 +113,36 @@ end
 # (_fit_box_color) uses the same predicate to colour exactly what the filter rejects.
 _in_range(v, (lo, hi)) = lo <= v <= hi
 
+"""
+    _rejected_spans(lo, hi, view_lo, view_hi) -> (; spans, thresholds)
+
+What a filter range `(lo, hi)` rejects inside a figure's x window `[view_lo, view_hi]`:
+`[view_lo, lo]` when `lo` is finite and above `view_lo`, and `[hi, view_hi]` when `hi` is
+finite and below `view_hi`, with a threshold line at each such bound. An open (infinite)
+bound, or one at the window's edge, rejects nothing shown and gets neither.
+"""
+function _rejected_spans(lo, hi, view_lo, view_hi)
+    spans = Tuple{Float64, Float64}[]
+    thresholds = Float64[]
+    if isfinite(lo) && lo > view_lo
+        push!(spans, (Float64(view_lo), Float64(lo)))
+        push!(thresholds, Float64(lo))
+    end
+    if isfinite(hi) && hi < view_hi
+        push!(spans, (Float64(hi), Float64(view_hi)))
+        push!(thresholds, Float64(hi))
+    end
+    return (; spans, thresholds)
+end
+
+function _draw_rejected!(ax, r, region_color, line_color)
+    for (a, b) in r.spans
+        vspan!(ax, a, b, color = region_color)
+    end
+    isempty(r.thresholds) || vlines!(ax, r.thresholds, color = line_color, linestyle = :dot, linewidth = 2)
+    return nothing
+end
+
 # Percentage of `values` the filter keeps for `range`, by the same test the filter uses.
 _pass_percent(values, range) = round(100 * count(v -> _in_range(v, range), values) / length(values), digits = 1)
 
@@ -346,19 +376,19 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
 
     # Row 1: Photons and Background
     p98 = quantile(photons, 0.98)
+    photons_xlim = p98
     ax1 = Axis(fig[1, 1], xlabel = "Photons", ylabel = "Count", title = "Photon Distribution")
     if cfg.photons !== nothing
-        photons_lo = cfg.photons[1]
-        # An open lower bound (-Inf) rejects nothing: no region or line to draw.
-        if isfinite(photons_lo)
-            vspan!(ax1, 0, photons_lo, color = REJECTED_COLOR)
-            vlines!(ax1, [photons_lo], color = THRESHOLD_COLOR, linestyle = :dot, linewidth = 2)
-        end
+        photons_lo, photons_hi = cfg.photons
+        # A finite upper bound widens the view so its rejected region shows; open
+        # (infinite) bounds reject nothing and draw nothing.
+        isfinite(photons_hi) && (photons_xlim = max(p98, photons_hi * 1.05))
+        _draw_rejected!(ax1, _rejected_spans(photons_lo, photons_hi, 0, photons_xlim), REJECTED_COLOR, THRESHOLD_COLOR)
     end
     hist!(ax1, photons[photons .<= p98], bins = 50)
     vlines!(ax1, [mean(photons)], color = MEAN_COLOR, linestyle = :solid, linewidth = 2)
     vlines!(ax1, [median(photons)], color = MEDIAN_COLOR, linestyle = :dash, linewidth = 2)
-    xlims!(ax1, _plot_limits(0, p98)...)
+    xlims!(ax1, _plot_limits(0, photons_xlim)...)
     text!(
         ax1, 0.97, 0.95, text = "mean: $(round(Int, mean(photons)))\nmedian: $(round(Int, median(photons)))",
         align = (:right, :top), space = :relative, fontsize = 10
@@ -384,13 +414,11 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
 
     ax3 = Axis(fig[2, 1], xlabel = "Localization Precision (nm)", ylabel = "Count", title = "Precision Distribution")
     if cfg.precision !== nothing
-        prec_hi = cfg.precision[2] * 1000  # convert um to nm
-        # An open upper bound (Inf) rejects nothing above it: keep the data window.
-        if isfinite(prec_hi)
-            prec_xlim = max(prec98, prec_hi * 1.2)
-            vspan!(ax3, prec_hi, prec_xlim, color = REJECTED_COLOR)
-            vlines!(ax3, [prec_hi], color = THRESHOLD_COLOR, linestyle = :dot, linewidth = 2)
-        end
+        prec_lo, prec_hi = cfg.precision .* 1000  # convert um to nm
+        # Finite bounds widen the view so their rejected regions show; open bounds draw nothing.
+        isfinite(prec_hi) && (prec_xlim = max(prec98, prec_hi * 1.2))
+        isfinite(prec_lo) && prec_lo > 0 && (prec_xlim = max(prec_xlim, prec_lo * 1.2))
+        _draw_rejected!(ax3, _rejected_spans(prec_lo, prec_hi, 0, prec_xlim), REJECTED_COLOR, THRESHOLD_COLOR)
     end
     σx_view = σ_x[σ_x .<= prec_xlim]
     σy_view = σ_y[σ_y .<= prec_xlim]
@@ -422,8 +450,12 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
             nbins = 50
             bin_edges = range(pval_lo, 0, length = nbins + 1)
             bin_width = step(bin_edges)
-            if pval_thresh !== nothing && pval_thresh > 0
-                vspan!(ax4, pval_lo - 1, log10(pval_thresh), color = REJECTED_COLOR)
+            if cfg.pvalue !== nothing
+                # In log10 space: p = 0 and p = 1 bounds reject nothing.
+                p_lo, p_hi = cfg.pvalue
+                lo_log = p_lo > 0 ? log10(p_lo) : -Inf
+                hi_log = p_hi < 1 ? log10(p_hi) : Inf
+                _draw_rejected!(ax4, _rejected_spans(lo_log, hi_log, pval_lo - 1, 0.0), REJECTED_COLOR, THRESHOLD_COLOR)
             end
             # Count once and draw the bars from these counts, so the bars and the y limit
             # come from the same numbers (a separate hist! can bin a value on an edge
@@ -441,10 +473,10 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
             vlines!(ax4, [mean(log_pval)], color = MEAN_COLOR, linestyle = :solid, linewidth = 1.5)
             vlines!(ax4, [median(log_pval)], color = MEDIAN_COLOR, linestyle = :dash, linewidth = 1.5)
             if pval_thresh !== nothing
-                pval_thresh > 0 && vlines!(ax4, [log10(pval_thresh)], color = THRESHOLD_COLOR, linestyle = :dot, linewidth = 2)
                 pval_pass_pct = _pass_percent(pvalue, cfg.pvalue)
+                bound_txt = cfg.pvalue[2] < 1 ? "range: $(cfg.pvalue)" : "threshold: $(pval_thresh)"
                 text!(
-                    ax4, 0.03, 0.95, text = "pass: $(pval_pass_pct)%\nthreshold: $(pval_thresh)",
+                    ax4, 0.03, 0.95, text = "pass: $(pval_pass_pct)%\n$(bound_txt)",
                     align = (:left, :top), space = :relative, fontsize = 10
                 )
             end
@@ -596,13 +628,11 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
         σz_xlim = σz98
         ax8 = Axis(fig[4, 2], xlabel = "Axial precision σ_z (nm)", ylabel = "Count", title = "Axial Precision Distribution")
         if cfg.sigma_z !== nothing
-            σz_hi = cfg.sigma_z[2] * 1000  # convert μm to nm
-            # An open upper bound (Inf) rejects nothing above it: keep the data window.
-            if isfinite(σz_hi)
-                σz_xlim = max(σz98, σz_hi * 1.2)
-                vspan!(ax8, σz_hi, σz_xlim, color = REJECTED_COLOR)
-                vlines!(ax8, [σz_hi], color = THRESHOLD_COLOR, linestyle = :dot, linewidth = 2)
-            end
+            σz_lo, σz_hi = cfg.sigma_z .* 1000  # convert μm to nm
+            # Finite bounds widen the view so their rejected regions show; open bounds draw nothing.
+            isfinite(σz_hi) && (σz_xlim = max(σz98, σz_hi * 1.2))
+            isfinite(σz_lo) && σz_lo > 0 && (σz_xlim = max(σz_xlim, σz_lo * 1.2))
+            _draw_rejected!(ax8, _rejected_spans(σz_lo, σz_hi, 0, σz_xlim), REJECTED_COLOR, THRESHOLD_COLOR)
         end
         σz_view = σz_nm[σz_nm .<= σz_xlim]
         !isempty(σz_view) && hist!(ax8, σz_view, bins = 50, color = (:green, 0.5))
@@ -783,7 +813,12 @@ function _fit_overlay_title(cfg::FilterConfig, emitters)
         isempty(conds) || push!(parts, "orange=prec" * join(conds, "/"))
     end
     if cfg.pvalue !== nothing && _has_pvalue(emitters)
-        push!(parts, "purple=pval<$(cfg.pvalue[1])")
+        lo, hi = cfg.pvalue
+        conds = String[]
+        # p-values lie in [0, 1], so bounds of 0 and 1 reject nothing.
+        lo > 0 && push!(conds, "<$(lo)")
+        hi < 1 && push!(conds, ">$(hi)")
+        isempty(conds) || push!(parts, "purple=pval" * join(conds, "/"))
     end
     if cfg.z !== nothing && !isempty(emitters) && hasproperty(first(emitters), :z)
         push!(parts, "blue=z outside $(cfg.z)μm")
