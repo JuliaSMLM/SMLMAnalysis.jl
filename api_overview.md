@@ -150,7 +150,7 @@ SMLMAnalysis.StepInfo(number, cfg, elapsed_s, summary_dict; info=typed_info)
 Configuration for multi-channel analysis.
 
 **Fields:**
-- `labels::Vector{Symbol}` - Channel labels (e.g., `[:IgG, :C1q]`)
+- `labels::Vector{Symbol}` - Channel labels (e.g., `[:actin, :tubulin]`)
 - `colors::Vector{Symbol}` - Colors per channel (default: cyan/magenta for 2, CMY for 3)
 - `steps::Vector{SMLMAnalysis.AbstractMultiTargetStep}` - Multi-target steps run after the
   per-channel pipelines (`CompositeRenderConfig`, `CrossAlignConfig`, `CrossCorrConfig`)
@@ -180,7 +180,7 @@ Combined detection + fitting step. Embeds native upstream configs (`BoxerConfig`
 
 ```julia
 DetectFitConfig(;
-    boxer=BoxerConfig(boxsize=11, psf_sigma=0.135),  # Detection config
+    boxer=BoxerConfig(boxsize=9, psf_sigma=0.135),  # Detection config
     fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20),  # Fitting config
     camera=nothing,           # Required for analyze() dispatch; injected by AnalysisConfig pipeline
     path=nothing,             # File-based loading

@@ -152,6 +152,137 @@ end
     end
 end
 
+@testset "MIC missing camera calibration gives actionable errors" begin
+    mktempdir() do dir
+        for stored_xy in (false, true)
+            path = joinpath(dir, "uncalibrated.h5")
+            tag = stored_xy ? nothing : "y,x,frame"
+            _write_mic(path, [_layout_yx()]; stored_xy = stored_xy, tag = tag)
+            @test !load_mic_h5_info(path).has_calibration
+            cfg = DetectFitConfig(path = path, pixel_size = 0.1)
+            for build in (
+                    () -> build_camera_from_mic_h5(path; pixel_size = 0.1),
+                    () -> analyze(cfg; verbose = Verbosity.SILENT),
+                )
+                err = try
+                    build()
+                catch e
+                    e
+                end
+                @test err isa ArgumentError
+                msg = sprint(showerror, err)
+                @test occursin(path, msg)
+                @test occursin("no camera calibration", msg)
+                for entry in ("Calibration/CCDOffset", "Calibration/CCDVar", "Calibration/Gain")
+                    @test occursin(entry, msg)
+                end
+                @test occursin("IdealCamera(1:7, 1:5, pixel_size)", msg)
+                @test occursin("pass it as camera", msg)
+            end
+            camera = IdealCamera(1:7, 1:5, 0.1)
+            @test SMLMAnalysis._auto_camera(DetectFitConfig(path = path, camera = camera)) === camera
+        end
+
+        # An existing group can still lack any one of the required maps.
+        for entry in ("Calibration/CCDOffset", "Calibration/CCDVar", "Calibration/Gain")
+            path = joinpath(dir, "incomplete.h5")
+            _write_mic(path, [_layout_yx()]; maps = _layout_maps(), tag = "y,x,frame")
+            SMLMAnalysis.HDF5.h5open(path, "r+") do f
+                SMLMAnalysis.HDF5.delete_object(f, entry)
+            end
+            err = try
+                build_camera_from_mic_h5(path; pixel_size = 0.1)
+            catch e
+                e
+            end
+            @test err isa ArgumentError
+            @test occursin("missing entries: $entry.", sprint(showerror, err))
+        end
+
+        path = joinpath(dir, "calibrated.h5")
+        maps = _layout_maps()
+        _write_mic(path, [_layout_yx()]; maps = maps, tag = "y,x,frame")
+        cam = build_camera_from_mic_h5(path; pixel_size = 0.1, qe = 0.8)
+        @test cam isa SCMOSCamera
+        @test cam.offset == maps.offset
+        @test cam.readnoise == sqrt.(maps.variance) ./ maps.gain
+        @test cam.gain == 1.0f0 ./ maps.gain
+        @test cam.qe == 0.8f0
+        @test cam.pixel_edges_x ≈ (0:7) .* 0.1f0
+        @test cam.pixel_edges_y ≈ (0:5) .* 0.1f0
+    end
+end
+
+@testset "MIC two-dimensional blocks load as a single frame" begin
+    mktempdir() do dir
+        frame = _layout_yx(1)[:, :, 1]
+        for kw in ((tag = "y,x",), (stored_xy = true,), (stored_xy = true, tag = "x,y"))
+            path = joinpath(dir, "single_frame.h5")
+            _write_mic(path, [frame]; kw...)
+            expected = reshape(frame, _LAYOUT_NY, _LAYOUT_NX, 1)
+            for selection in ((;), (frame_range = 1:1,), (max_frames = 1,))
+                images, indices = load_mic_h5(path; selection...)
+                @test images == expected
+                @test size(images) == (_LAYOUT_NY, _LAYOUT_NX, 1)
+                @test indices == [1]
+            end
+            source = (path = path, frame_range = 1:1, format = :mic)
+            @test SMLMAnalysis._load_source(source, Verbosity.SILENT) == expected
+
+            # A range may start in the matrix block and continue into a 3-D block.
+            following = _layout_yx(2) .+ 5000.0f0
+            _write_mic(path, [frame, following]; kw...)
+            images, indices = load_mic_h5(path; frame_range = 1:2)
+            @test images == cat(expected, following[:, :, 1:1]; dims = 3)
+            @test indices == [1, 2]
+        end
+    end
+end
+
+@testset "MIC acquisition frame ranges read across blocks in [y, x] layout" begin
+    mktempdir() do dir
+        blocks = [_layout_yx(4), _layout_yx(3) .+ 5000.0f0, _layout_yx(2) .+ 10_000.0f0]
+        for kw in (
+                (stored_xy = true,),
+                (writer = "MicroscopeSeqSR 0.1.0-DEV",),
+                (tag = "y,x,frame",),
+                (stored_xy = true, tag = "x,y,frame"),
+            )
+            path = joinpath(dir, "ranges.h5")
+            _write_mic(path, blocks; kw...)
+            full, full_indices = load_mic_h5(path)
+            # Within a block, crossing a boundary, exact block end, acquisition end,
+            # one frame, all blocks, and an empty selection.
+            for frames in (2:3, 3:6, 2:4, 8:9, 9:9, 1:9, 4:3)
+                actual, indices = load_mic_h5(path; frame_range = frames)
+                @test actual == full[:, :, frames]
+                @test size(actual) == (_LAYOUT_NY, _LAYOUT_NX, length(frames))
+                @test eltype(actual) === Float32
+                @test indices == full_indices[frames]
+                source = (path = path, frame_range = frames, format = :mic)
+                @test SMLMAnalysis._load_source(source, Verbosity.SILENT) == full[:, :, frames]
+            end
+            @test_throws BoundsError load_mic_h5(path; frame_range = 0:2)
+            @test_throws BoundsError load_mic_h5(path; frame_range = 8:10)
+        end
+
+        # Each block's tag wins even when adjacent blocks have different stored layouts.
+        path = joinpath(dir, "mixed.h5")
+        _write_mic(path, blocks; tag = "y,x,frame")
+        SMLMAnalysis.HDF5.h5open(path, "r+") do f
+            g = f["Channel01/Zposition001/Data0002"]
+            SMLMAnalysis.HDF5.delete_object(g, "Data0002")
+            g["Data0002"] = round.(UInt16, _layout_xy(blocks[2]))
+            SMLMAnalysis.HDF5.attrs(g["Data0002"])["dimension_order"] = "x,y,frame"
+        end
+        full, full_indices = load_mic_h5(path)
+        @test full == cat(blocks...; dims = 3)
+        actual, indices = load_mic_h5(path; frame_range = 3:8)
+        @test actual == full[:, :, 3:8]
+        @test indices == full_indices[3:8]
+    end
+end
+
 @testset "unknown dimension_order throws ArgumentError" begin
     mktempdir() do dir
         smart = joinpath(dir, "s.h5")

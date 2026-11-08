@@ -11,14 +11,18 @@ pure dispatch on config type — no isa checks in the loop.
 # ============================================================
 
 """
-    TeeLogger(loggers)
+    TeeLogger(loggers; file_logger=nothing)
 
 Logger that forwards messages to multiple loggers.
 Used internally to tee @info output to both console and log file.
+The file sink records every admitted message; other sinks apply their own filters.
 """
 struct TeeLogger <: Logging.AbstractLogger
     loggers::Vector{Logging.AbstractLogger}
+    file_logger::Union{Logging.AbstractLogger, Nothing}
 end
+
+TeeLogger(loggers; file_logger = nothing) = TeeLogger(loggers, file_logger)
 
 Logging.min_enabled_level(tl::TeeLogger) = minimum(Logging.min_enabled_level(l) for l in tl.loggers)
 
@@ -26,9 +30,11 @@ function Logging.shouldlog(tl::TeeLogger, level, _module, group, id)
     return any(Logging.shouldlog(l, level, _module, group, id) for l in tl.loggers)
 end
 
-function Logging.handle_message(tl::TeeLogger, args...; kwargs...)
+function Logging.handle_message(tl::TeeLogger, level, message, _module, group, id, file, line; kwargs...)
     for l in tl.loggers
-        Logging.handle_message(l, args...; kwargs...)
+        if l === tl.file_logger || (level >= Logging.min_enabled_level(l) && Logging.shouldlog(l, level, _module, group, id))
+            Logging.handle_message(l, level, message, _module, group, id, file, line; kwargs...)
+        end
     end
     return
 end
@@ -85,7 +91,7 @@ function _with_log_file(f, outdir)
         println(io, "=== SMLMAnalysis $(Dates.now()) ===")
         flush(io)
         file_logger = FlushingLogger(Logging.SimpleLogger(io, Logging.Info), io)
-        tee = TeeLogger(Logging.AbstractLogger[Logging.current_logger(), file_logger])
+        tee = TeeLogger(Logging.AbstractLogger[Logging.current_logger(), file_logger]; file_logger = file_logger)
         Logging.with_logger(tee) do
             f()
         end
@@ -164,7 +170,7 @@ Returns a tuple of (AnalysisResult, AnalysisInfo) following the JuliaSMLM tuple-
 config = AnalysisConfig(
     camera = cam,
     steps = [
-        DetectFitConfig(boxer=BoxerConfig(boxsize=9)),
+        DetectFitConfig(boxer=BoxerConfig(boxsize = 9, psf_sigma = 0.135)),
         FilterConfig(photons=(500.0, Inf)),
         DriftConfig(degree=2),
         RenderConfig(zoom=20, colormap=:inferno),
@@ -201,7 +207,7 @@ Convenience varargs form. Builds AnalysisConfig from positional step configs and
 # Example
 ```julia
 (result, info) = analyze(image_stacks,
-    DetectFitConfig(boxer=BoxerConfig(boxsize=9)),
+    DetectFitConfig(boxer=BoxerConfig(boxsize = 9, psf_sigma = 0.135)),
     FilterConfig(photons=(500.0, Inf)),
     DriftConfig(degree=2);
     camera=cam, outdir="output/")
@@ -267,15 +273,20 @@ analyze(::Nothing, config::AnalysisConfig) = analyze(config)
 """
     _find_final_smld_step(steps) -> Int
 
-Walk steps in reverse and return the 1-based index of the last step that
-produces a `BasicSMLD` (i.e., not a terminal render). Returns 0 if no
-SMLD-producing step is found.
+Walk steps in reverse and return the 1-based index of the last step that may
+write an SMLD checkpoint. Returns 0 if none is found. The built-in pass-through
+steps (rendering, cluster statistics, multi-target steps) write none, so the
+last writer before them keeps the checkpoint. Any other config counts as a
+writer, including a user-defined step: under `Checkpoint.END` it receives
+`Checkpoint.ALL` when it is the last such step (see Extending the Pipeline).
 
 Used by `_run_pipeline` to translate `Checkpoint.END` into a per-step
 "this is the final, save it" decision.
 """
 _produces_smld(::SMLMData.AbstractSMLMConfig) = true
 _produces_smld(::SMLMRender.RenderConfig) = false
+_produces_smld(::SMLMClustering.AbstractStatisticsConfig) = false
+_produces_smld(::AbstractMultiTargetStep) = false
 
 function _find_final_smld_step(steps::Vector{SMLMData.AbstractSMLMConfig})
     for i in length(steps):-1:1
@@ -343,9 +354,9 @@ function _run_pipeline(
         _save_pipeline_config!(outdir, steps, camera, roi, v, cp_level)
     end
 
-    # For Checkpoint.END: locate the index of the last SMLD-producing step.
-    # We approximate "produces SMLD" by walking step types in reverse and
-    # picking the first that isn't a terminal/non-SMLD step (currently RenderConfig).
+    # For Checkpoint.END: locate the last step that may write a checkpoint. That
+    # step keeps its own filename and any accompanying data (e.g. the drift model),
+    # even when rendering or statistics steps follow it.
     final_smld_idx = _find_final_smld_step(steps)
 
     step_infos = StepInfo[]

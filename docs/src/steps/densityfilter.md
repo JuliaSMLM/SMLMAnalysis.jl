@@ -62,7 +62,9 @@ the step picks it by **valley detection** on the neighbor-count histogram: it
 smooths the histogram, finds the rightmost significant peak (the clustered
 population), and places the threshold at the local minimum (valley) between the
 origin and that peak. If the distribution is not clearly bimodal it falls back to
-a conservative heuristic (and warns) rather than guess a valley.
+a conservative heuristic rather than guess a valley. When the rightmost peak
+is at four neighbors or fewer, it warns that no separate clustered population
+was found and keeps localizations with at least one neighbor.
 
 ## Configuration
 
@@ -101,10 +103,11 @@ Sanity checks: open `neighbor_histogram.png` and confirm the red threshold line
 sits in the valley between the low-count (isolated) and high-count (clustered)
 populations. A reasonable filter rejects a modest tail of isolated points, not
 the bulk of the data. Heed the warnings: `:auto` emits one when the distribution
-peaks at very low neighbor counts ("most emitters appear isolated") or is
-unimodal — in those cases it returns a conservative default (`3`) or keeps almost
-everything (`1`), which usually means density filtering is the wrong tool for
-that dataset or that an explicit `min_neighbors` should be set.
+peaks at very low neighbor counts ("no separate clustered population"). In this
+case the threshold is `1`: only localizations with no neighbors are rejected.
+For distributions with a higher peak, a clear valley determines the threshold;
+without one, the fallback is `1`, or `3` when the zero-neighbor bin dominates.
+An explicit `min_neighbors` may be more useful for such data.
 
 ## Notes & caveats
 
