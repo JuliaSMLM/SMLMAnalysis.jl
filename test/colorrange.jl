@@ -253,7 +253,7 @@ end
 end
 
 
-@testset "Filter figures draw what the filter rejects" begin
+@testset "Filter panels hold what the filter rejects" begin
     cam = IdealCamera(16, 16, 0.1)
     smld_of(es) = SMLMAnalysis.BasicSMLD(es, cam, length(es), 1, Dict{String, Any}())
     rng = Random.Xoshiro(7)
@@ -269,14 +269,12 @@ end
     p = _check_quality_panels(es, cfg)[:photons]
     @test shaded(p.series[1], p.edges) == removed(cfg) == 60
     @test sum(p.series[1].counts) == n
-    _check_quality_figure(es, cfg)
     # Review case: a lower p-value bound far below the data's 2% quantile. p = 0 is drawn in
     # the band; NaN p-values are counted and named in the panel title.
     cfg = FilterConfig(pvalue = (1.0e-9, 1))
     p = _check_quality_panels(es, cfg)[:pvalue]
     @test shaded(p.series[1], p.edges) + p.series[1].invalid == removed(cfg) == 50 + 6 + 4
     @test occursin("4 with NaN rejected", SMLMAnalysis._panel_note(p))
-    _check_quality_figure(es, cfg)
     # The precision lower bound (on max(σx, σy)) is a dashed line, the upper bound shaded.
     p = _check_quality_panels(es, FilterConfig(precision = (0.01, 0.02)))[:precision]
     @test all(s -> s.dashed == [10.0] && s.lines == [20.0], p.series)
@@ -289,7 +287,6 @@ end
     # A fit on the upper bound passes: no bar crosses the threshold, and it is not shaded.
     p = _check_quality_panels([_fit2d(photons = 1000.01)], FilterConfig(photons = (-Inf, 1000.01)))[:photons]
     @test shaded(p.series[1], p.edges) == 0
-    _check_quality_figure([_fit2d(photons = 1000.01)], FilterConfig(photons = (-Inf, 1000.01)))
     # log10 rounding: p just above 0.01 is rejected by (0, 0.01) and drawn shaded.
     p = _check_quality_panels([_fit2d(pvalue = nextfloat(0.01)), _fit2d(pvalue = 0.005, i = 2)], FilterConfig(pvalue = (0, 0.01)))[:pvalue]
     @test shaded(p.series[1], p.edges) == 1
@@ -300,7 +297,6 @@ end
         p = _check_quality_panels(es2, FilterConfig(pvalue = b))[:pvalue]
         @test p.series[1].unplaced == 0 && p.series[1].lost >= 1
         @test occursin("rejected with no place on the axis", SMLMAnalysis._panel_note(p))
-        _check_quality_figure(es2, FilterConfig(pvalue = b))
     end
     # Reversed bounds that log10 collapses: both sides reject the fit.
     lb = 1.0e-12
@@ -322,7 +318,6 @@ end
     note = SMLMAnalysis._panel_note(p)
     @test occursin("1 σ_x and 1 σ_y values rejected beyond the axis", note) && !occursin("2 rejected", note)
     @test 100 - length(SMLMAnalysis._filter_smld(smld_of(pr), FilterConfig(precision = (0, 0.02))).emitters) == 1
-    _check_quality_figure(pr, FilterConfig(precision = (0, 0.02)))
     # A photon count too large for an Int does not stop the figure.
     @test _quality_figure_saves(smld_of([_fit2d(photons = 1.0e20)]), FilterConfig())
 
@@ -380,68 +375,20 @@ end
     @test occursin("cyan=psf_σx not in [0.1, 0.2]μm or σy not in [0.1, 0.2]μm", t(FilterConfig(psf_sigma = (0.1, 0.2)), [xy]))
 end
 
-@testset "Fit overlay legend fits the figure" begin
-    # The tutorial's FilterConfig, and anisotropic :auto with a photon range, give legends far
-    # wider than one line; wrapped to the figure, no line is wider than it and nothing is lost.
-    iso = [_sigma_emitter(σ = 0.12 + 0.0005i, frame = i) for i in 1:60]
+@testset "Fit overlay legend wrap" begin
+    # The wrap keeps every word, puts no line over its limit unless one word is longer, and
+    # keeps a criterion whole where it fits. (The rendered fit is checked in Long.)
     xy = [
         GaussMLE.Emitter2DFitSigmaXY{Float64}(
             0.8, 0.8, 1000.0, 5.0, 0.12 + 0.0007i, 0.15 + 0.0003i, 0.01, 0.01, 0.0, 30.0, 0.5, 0.002, 0.002, 0.4, i, 1, 0, i
         ) for i in 1:60
     ]
-    tutorial = FilterConfig(photons = (500.0, Inf), precision = (0.0, 0.007), pvalue = (1.0e-3, 1.0), psf_sigma = :auto)
-    aniso = FilterConfig(photons = (200.0, 5000.0), precision = (0.0, 0.007), pvalue = (1.0e-3, 1.0), psf_sigma = :auto)
-    # Very narrow frames (a 124 px figure) widen the figure; so does a word wider than it.
-    cases = (
-        (SMLMAnalysis._fit_overlay_title(tutorial, iso), (128, 128)),
-        (SMLMAnalysis._fit_overlay_title(aniso, xy), (128, 128)),
-        (SMLMAnalysis._fit_overlay_title(aniso, xy), (256, 64)),
-        (SMLMAnalysis._fit_overlay_title(aniso, xy), (512, 16)),
-        ("Fit: " * repeat("W", 100), (128, 128)),
-    )
-    for (title, (h, w)) in cases
-        r = SMLMAnalysis._box_overlay_figure(
-            zeros(Float32, h, w, 12), Float64[], Float64[], Int[], 7, Symbol[]; suptitle = title
-        )
-        width = r.fig.scene.viewport[].widths[1]
-        @test width >= SMLMAnalysis._grid_figure_size(zeros(h, w, 1))[1]
-        @test r.label.layoutobservables.autosize[][1] <= width - 20
-        @test split(r.label.text[]) == split(title)
+    title = SMLMAnalysis._fit_overlay_title(FilterConfig(photons = (200.0, 5000.0), psf_sigma = :auto), xy)
+    for n in (20, 39, 130)
+        w = SMLMAnalysis._wrap_title(title, n)
+        @test split(w) == split(title)
+        @test all(l -> length(l) <= n || !occursin(' ', l), split(w, "\n"))
     end
-    @test all(t -> length(t[1]) > 100, cases)
-    # A theme that turns on Makie's Label word wrap does not break the overlay or its fit.
-    Mk = SMLMAnalysis.CairoMakie
-    Mk.with_theme(Mk.Theme(Label = (word_wrap = true,))) do
-        for (title, (h, w)) in cases[[1, 4]]
-            r = SMLMAnalysis._box_overlay_figure(
-                zeros(Float32, h, w, 12), Float64[], Float64[], Int[], 7, Symbol[]; suptitle = title
-            )
-            @test r.label.layoutobservables.autosize[][1] <= r.fig.scene.viewport[].widths[1] - 20
-        end
-        mktempdir() do dir
-            SMLMAnalysis._save_box_overlay(dir, "o.png", zeros(Float32, 128, 128, 12), Float64[], Float64[], Int[], 7, Symbol[]; suptitle = cases[2][1])
-            @test isfile(joinpath(dir, "o.png"))
-        end
-    end
-end
-
-@testset "Filter figures save for each side of a range" begin
-    cam = IdealCamera(16, 16, 0.1)
-    smld_of(es) = SMLMAnalysis.BasicSMLD(es, cam, 20, 1, Dict{String, Any}())
-    @test _quality_figure_saves(smld_of([_sigma_emitter(photons = 1000.0)]), FilterConfig(photons = (-Inf, 800)))
-    @test _quality_figure_saves(smld_of([_sigma_emitter(prec = 0.01)]), FilterConfig(precision = (0.02, Inf)))
-    @test _quality_figure_saves(smld_of([_sigma_emitter(pvalue = 0.9)]), FilterConfig(pvalue = (0.2, 0.8)))
-    e3 = [
-        SMLMAnalysis.Emitter3DFit{Float64}(
-            0.8, 0.8, 0.1, 1000.0, 10.0, 0.01, 0.01, 0.01, 30.0, 1.0; frame = 1
-        ),
-    ]
-    @test _quality_figure_saves(smld_of(e3), FilterConfig(sigma_z = (0.02, Inf)))
-    # Unequal axes: the filter tests max(σx, σy) = 30 nm, so a 20 nm lower bound keeps this fit.
-    unequal = GaussMLE.Emitter2DFitSigma{Float64}(0.8, 0.8, 1000.0, 5.0, 0.13, 0.01, 0.03, 0.0, 30.0, 0.5, 0.002, 0.4, 1, 1, 0, 1)
-    @test _quality_figure_saves(smld_of([unequal]), FilterConfig(precision = (0.02, Inf)))
-    es = [_sigma_emitter(pvalue = p, frame = i) for (i, p) in enumerate((0.1, 0.5, 0.9))]
-    for cfg in (FilterConfig(pvalue = (-Inf, -0.1)), FilterConfig(pvalue = (0, 0)), FilterConfig(pvalue = (0.2, 0.8)))
-        @test _quality_figure_saves(smld_of(es), cfg)
-    end
+    @test occursin("red=photons not in [200, 5000]", SMLMAnalysis._wrap_title(title, 130))
+    @test SMLMAnalysis._wrap_title("Fit: " * repeat("W", 100), 20) == "Fit:\n" * repeat("W", 100)
 end
