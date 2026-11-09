@@ -116,9 +116,10 @@ _in_range(v, (lo, hi)) = lo <= v <= hi
 # Percentage of `values` the filter keeps for `range`, by the same test the filter uses.
 _pass_percent(values, range) = round(100 * count(v -> _in_range(v, range), values) / length(values), digits = 1)
 
-# Bounds beyond this cannot be drawn with a margin on a Float32 axis; one that rejects fits
-# still shades the whole view, and the panel title says the limit is off the axis scale.
-const _PANEL_MAX_BOUND = Float64(floatmax(Float32)) / 1.1
+# A bound can be drawn when it rounds to a Float32 below floatmax(Float32): the view's margin
+# is clipped at floatmax, so the bound still lies strictly inside. One that cannot (|x| at or
+# beyond floatmax(Float32)) and rejects fits is named in the panel title instead.
+_panel_drawable(x) = isfinite(x) && abs(Float32(x)) < floatmax(Float32)
 
 """
     _panel_geometry(window, bounds; nbins = 50, floor = -Inf) -> (; view, edges, lines)
@@ -141,7 +142,7 @@ every shaded span starts and ends on an edge.
 function _panel_geometry(window, bounds; nbins::Int = 50, floor = -Inf)
     dlo, dhi = _plot_limits(Float64(window[1]), Float64(window[2]))
     reach = dhi - dlo
-    drawable(x) = isfinite(x) && abs(x) <= _PANEL_MAX_BOUND
+    drawable = _panel_drawable
     widen = Float64[]
     for b in bounds, (x, rejects) in ((b.lo, b.rejects_lo), (b.hi, b.rejects_hi))
         drawable(x) || continue
@@ -180,7 +181,7 @@ function _panel_spans(view, bounds, sides)
 end
 
 """
-    _panel_counts(t, raw, bounds, sides, edges, spans) -> (; counts, beyond, invalid, unplaced)
+    _panel_counts(t, raw, bounds, sides, edges, spans) -> (; counts, beyond, invalid, unplaced, lost, lost_lo, lost_hi)
 
 Bar counts for one series. Each fit is classified by the filter's own test on its original
 value `raw[k]` and range `bounds`: rejected below (`raw < lo`, on a shaded lower side),
@@ -192,14 +193,17 @@ upper bound, or one that a transform (log10, um to nm) rounds onto a bound, land
 the filter puts it. A rejected fit beyond the view lands in the end bar (`beyond` counts these);
 a passing one beyond the view is not drawn, as the window clips it. `invalid` counts rejected
 fits with no position (a NaN value, which fails every range); `unplaced` counts passing fits
-with no bar outside both spans (the bounds coincide).
+with no bar outside both spans (the bounds coincide); `lost_lo` and `lost_hi` count rejected
+fits with no bar that agrees with their class (a value a transform maps onto a bound that
+shades the whole view, such as p = 0 under an upper p-value bound of 0), `lost` in all, and
+`lost_lo` and `lost_hi` by rejecting side.
 """
 function _panel_counts(t, raw, bounds, sides, edges, spans)
     nb = length(edges) - 1
     counts = zeros(Int, nb)
     vlo, vhi = first(edges), last(edges)
     inside(s, i) = s !== nothing && edges[i] >= s[1] && edges[i + 1] <= s[2]
-    beyond = invalid = unplaced = 0
+    beyond = invalid = unplaced = lost = lost_lo = lost_hi = 0
     for (x, v) in zip(t, raw)
         low = bounds !== nothing && :lo in sides && !(bounds[1] <= v)
         high = bounds !== nothing && :hi in sides && !(v <= bounds[2])
@@ -219,13 +223,15 @@ function _panel_counts(t, raw, bounds, sides, edges, spans)
             end
         end
         if i == 0
-            unplaced += 1
+            low && (lost_lo += 1)
+            high && (lost_hi += 1)
+            (low || high) ? (lost += 1) : (unplaced += 1)
         else
             counts[i] += 1
             out && (beyond += 1)
         end
     end
-    return (; counts, beyond, invalid, unplaced)
+    return (; counts, beyond, invalid, unplaced, lost, lost_lo, lost_hi)
 end
 
 """
@@ -237,8 +243,8 @@ values and the filter range applied to them (or `nothing`), the sides of it that
 their own (`(:lo, :hi)`; the precision panel shades only `(:hi,)`, since the filter tests
 max(σx, σy)), and the maps from original units to the panel's. Returns `(; view, edges, density,
 series)`, each series with its panel `values` and `pbounds`, `spans` (`lo`, `hi`), `lines`
-(bounds on shaded sides), `dashed` (bounds on unshaded sides), `offscale` (rejecting bounds
-too large to draw), `counts`, `beyond`, `invalid` and `unplaced`.
+(bounds on shaded sides), `dashed` (bounds on unshaded sides), `notes` (rejecting bounds with
+no line), `counts`, `beyond`, `invalid`, `unplaced`, `lost`, `lost_lo` and `lost_hi`.
 """
 function _histogram_panel(window, series; density::Bool = false, floor = -Inf)
     prep = map(series) do s
@@ -246,8 +252,8 @@ function _histogram_panel(window, series; density::Bool = false, floor = -Inf)
         pb = s.bounds === nothing ? nothing : s.bounds_to_panel(s.bounds)
         rejects_lo = s.bounds !== nothing && :lo in s.sides && any(v -> !isnan(v) && !(s.bounds[1] <= v), s.raw)
         rejects_hi = s.bounds !== nothing && :hi in s.sides && any(v -> !isnan(v) && !(v <= s.bounds[2]), s.raw)
-        # A bound on an unshaded side (the precision lower bound) still counts as rejecting.
-        rejects_lo |= s.bounds !== nothing && !(:lo in s.sides) && any(v -> !isnan(v) && v < s.bounds[1], s.raw)
+        # A bound on an unshaded side (the precision lower bound) is drawn when it is active.
+        rejects_lo |= s.bounds !== nothing && !(:lo in s.sides) && any(v -> !isnan(v) && !(s.bounds[1] <= v), s.raw)
         (; s, t, pb, rejects_lo, rejects_hi)
     end
     gb = [(; lo = p.pb[1], hi = p.pb[2], p.rejects_lo, p.rejects_hi) for p in prep if p.pb !== nothing]
@@ -259,7 +265,8 @@ function _histogram_panel(window, series; density::Bool = false, floor = -Inf)
             c = _panel_counts(p.t, s.raw, nothing, s.sides, g.edges, spans)
             return (;
                 s.name, values = p.t, pbounds = nothing, s.sides, spans, lines = Float64[],
-                dashed = Float64[], offscale = Float64[], c.counts, c.beyond, c.invalid, c.unplaced,
+                dashed = Float64[], notes = String[], c.counts, c.beyond, c.invalid, c.unplaced,
+                c.lost, c.lost_lo, c.lost_hi,
             )
         end
         spans = _panel_spans(g.view, p.pb, s.sides)
@@ -267,14 +274,22 @@ function _histogram_panel(window, series; density::Bool = false, floor = -Inf)
         on_line(b) = any(==(b), g.lines)
         lines = Float64[b for (b, side) in ((lo, :lo), (hi, :hi)) if side in s.sides && on_line(b)]
         dashed = Float64[b for (b, side) in ((lo, :lo), (hi, :hi)) if !(side in s.sides) && on_line(b)]
-        offscale = Float64[
-            b for (b, x, r) in ((s.bounds[1], lo, p.rejects_lo), (s.bounds[2], hi, p.rejects_hi))
-                if r && isfinite(b) && !on_line(x)
-        ]
+        # A rejecting bound with no line: say so. On a shaded side its span covers the whole
+        # view; on the unshaded precision side nothing else shows it.
+        notes = String[]
+        whole(span) = span == g.view
+        for (b, x, r, side, span) in ((s.bounds[1], lo, p.rejects_lo, :lo, spans.lo), (s.bounds[2], hi, p.rejects_hi, :hi, spans.hi))
+            (r && !on_line(x)) || continue
+            if side in s.sides
+                isfinite(b) && push!(notes, "limit $(_num_label(b)) off the axis scale" * (whole(span) ? ", all shaded" : ""))
+            else
+                push!(notes, "lower limit $(_num_label(b)) on max(σ_x, σ_y) not drawn, rejects every fit below it")
+            end
+        end
         c = _panel_counts(p.t, s.raw, s.bounds, s.sides, g.edges, spans)
         return (;
-            s.name, values = p.t, pbounds = p.pb, s.sides, spans, lines, dashed, offscale,
-            c.counts, c.beyond, c.invalid, c.unplaced,
+            s.name, values = p.t, pbounds = p.pb, s.sides, spans, lines, dashed, notes,
+            c.counts, c.beyond, c.invalid, c.unplaced, c.lost, c.lost_lo, c.lost_hi,
         )
     end
     return (; g.view, g.edges, density, series = out)
@@ -451,23 +466,19 @@ function _panel_note(p)
     beyond = sum(s.beyond for s in p.series)
     invalid = sum(s.invalid for s in p.series)
     unplaced = sum(s.unplaced for s in p.series)
-    offscale = unique(reduce(vcat, [s.offscale for s in p.series]; init = Float64[]))
+    lost = sum(s.lost for s in p.series)
     parts = String[]
     beyond > 0 && push!(parts, "$beyond rejected beyond the axis, in the end bar")
     invalid > 0 && push!(parts, "$invalid with NaN rejected, not drawn")
+    lost > 0 && push!(parts, "$lost rejected with no place on the axis, not drawn")
     unplaced > 0 && push!(parts, "$unplaced passing at the bound, not drawn")
-    isempty(offscale) || push!(parts, "limit $(join(_num_label.(offscale), ", ")) off the axis scale, all shaded")
+    append!(parts, unique(reduce(vcat, [s.notes for s in p.series]; init = String[])))
     return isempty(parts) ? "" : " (" * join(parts, "; ") * ")"
 end
 
-# A number as a label: whole numbers as integers, others to 12 significant digits (enough for
-# any bound a user types, without the rounding noise of a unit conversion). Never throws.
-function _num_label(x)
-    isfinite(x) || return string(x)
-    y = round(x, sigdigits = 12)
-    isinteger(y) && abs(y) < 1.0e15 && return string(Int(y))
-    return string(y)
-end
+# A number as a label, exactly: whole numbers below 1e15 as integers, others as the shortest
+# decimal that reads back as the same Float64. Never throws.
+_num_label(x) = isinteger(x) && abs(x) < 1.0e15 ? string(Int(x)) : string(Float64(x))
 
 # P-values are optional on post-fit output; empty populations have no panel or criterion.
 _has_pvalue(emitters::AbstractVector) = !isempty(emitters) && _has_pvalue(first(emitters))
@@ -978,17 +989,17 @@ end
 """Build title string from actual FilterConfig thresholds."""
 function _fit_overlay_title(cfg::FilterConfig, emitters)
     parts = String["green=pass"]
-    # Each label names the range as the filter tests it (lo <= v <= hi; NaN fails), printed
-    # exactly, so no rounding can make it disagree with a box's color. A range that rejects no
+    # Each label names the range as the filter tests it (lo <= v <= hi; NaN fails), in the
+    # filter's own units and printed exactly, so no rounding can disagree with a box's color. A range that rejects no
     # possible value gets no label: photons (-Inf, Inf); precision (<= 0, Inf), never negative.
-    rng(lo, hi; scale = 1) = "[$(_num_label(lo * scale)), $(_num_label(hi * scale))]"
+    rng(lo, hi) = "[$(_num_label(lo)), $(_num_label(hi))]"
     if cfg.photons !== nothing
         lo, hi = cfg.photons
         (lo == -Inf && hi == Inf) || push!(parts, "red=photons not in $(rng(lo, hi))")
     end
     if cfg.precision !== nothing
         lo, hi = cfg.precision
-        (lo <= 0 && hi == Inf) || push!(parts, "orange=prec not in $(rng(lo, hi; scale = 1000))nm")
+        (lo <= 0 && hi == Inf) || push!(parts, "orange=prec not in $(rng(lo, hi))μm")
     end
     if cfg.pvalue !== nothing && _has_pvalue(emitters)
         # The filter rejects any p-value that fails its range test, NaN included (DetectFit
@@ -1004,9 +1015,9 @@ function _fit_overlay_title(cfg::FilterConfig, emitters)
     # The PSF bounds the filter applies (none when :auto finds no mode and the filter skips it).
     psf = _resolve_psf_bounds(emitters, cfg)
     if psf !== nothing && psf.kind === :iso
-        push!(parts, "cyan=psf_σ not in $(rng(psf.lo, psf.hi; scale = 1000))nm")
+        push!(parts, "cyan=psf_σ not in $(rng(psf.lo, psf.hi))μm")
     elseif psf !== nothing
-        push!(parts, "cyan=psf_σx not in $(rng(psf.lo_x, psf.hi_x; scale = 1000))nm or σy not in $(rng(psf.lo_y, psf.hi_y; scale = 1000))nm")
+        push!(parts, "cyan=psf_σx not in $(rng(psf.lo_x, psf.hi_x))μm or σy not in $(rng(psf.lo_y, psf.hi_y))μm")
     end
     push!(parts, "gray=no match")
     return "Fit: " * join(parts, "  ")

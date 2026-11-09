@@ -314,13 +314,29 @@ function _check_quality_panels(emitters, cfg)
             lo, hi = b
             lowc(k) = :lo in sides && !(lo <= raw[k])
             highc(k) = :hi in sides && !(raw[k] <= hi)
-            @test _drawn_in(s, p.edges, s.spans.lo) == count(lowc, ok)
-            @test _drawn_in(s, p.edges, s.spans.hi) == count(highc, ok)
+            # Rejected fits with no agreeing bar are counted by side, never as passing.
+            @test _drawn_in(s, p.edges, s.spans.lo) + s.lost_lo == count(lowc, ok)
+            @test _drawn_in(s, p.edges, s.spans.hi) + s.lost_hi == count(highc, ok)
             @test s.invalid == count(k -> isnan(raw[k]) || isnan(s.values[k]), eachindex(raw))
             passing_in_view = count(k -> !lowc(k) && !highc(k) && vlo <= s.values[k] <= vhi, ok)
-            @test sum(s.counts) + s.unplaced == passing_in_view + count(k -> lowc(k) || highc(k), ok)
-            for (x, rejects) in ((s.pbounds[1], any(k -> raw[k] < lo, ok)), (s.pbounds[2], any(k -> raw[k] > hi, ok)))
-                if isfinite(x) && rejects && abs(x) <= SMLMAnalysis._PANEL_MAX_BOUND
+            @test sum(s.counts) + s.unplaced + s.lost == passing_in_view + count(k -> lowc(k) || highc(k), ok)
+            @test s.unplaced <= passing_in_view
+            # Placement, checked independently: when every fit's own bin (or end bar, for a
+            # rejected fit beyond the view) agrees with its class, the bars are that histogram.
+            nb = length(p.edges) - 1
+            natural = zeros(Int, nb)
+            agree = true
+            for k in ok
+                t = s.values[k]
+                rej = lowc(k) || highc(k)
+                i = vlo <= t <= vhi ? min(searchsortedlast(p.edges, t), nb) : (rej ? (t < vlo ? 1 : nb) : 0)
+                i == 0 && continue
+                agree &= _in_span(p.edges, i, s.spans.lo) == lowc(k) && _in_span(p.edges, i, s.spans.hi) == highc(k)
+                natural[i] += 1
+            end
+            agree && @test s.counts == natural
+            for (x, rejects) in ((s.pbounds[1], any(k -> !(lo <= raw[k]), ok)), (s.pbounds[2], any(k -> !(raw[k] <= hi), ok)))
+                if rejects && SMLMAnalysis._panel_drawable(x)
                     @test vlo < x < vhi
                     @test x in p.edges
                     @test x in s.lines || x in s.dashed
@@ -340,6 +356,15 @@ function _check_quality_figure(emitters, cfg)
     Mk = SMLMAnalysis.CairoMakie.Makie
     for (key, p) in panels
         ax = r.axes[key]
+        # The title carries the panel's note, and the note names every fit not drawn where it sits.
+        note = SMLMAnalysis._panel_note(p)
+        @test endswith(ax.title[], note)
+        tot(f) = sum(f(s) for s in p.series)
+        tot(s -> s.beyond) > 0 && @test occursin("$(tot(s -> s.beyond)) rejected beyond the axis", note)
+        tot(s -> s.invalid) > 0 && @test occursin("$(tot(s -> s.invalid)) with NaN rejected", note)
+        tot(s -> s.lost) > 0 && @test occursin("$(tot(s -> s.lost)) rejected with no place", note)
+        tot(s -> s.unplaced) > 0 && @test occursin("$(tot(s -> s.unplaced)) passing at the bound", note)
+        @test all(n -> occursin(n, note), reduce(vcat, [s.notes for s in p.series]; init = String[]))
         plots = ax.scene.plots
         kind(pl) = nameof(Mk.plotfunc(pl))
         spans = sort([(Float64(pl[1][]), Float64(pl[2][])) for pl in plots if kind(pl) === :vspan])
@@ -352,15 +377,12 @@ function _check_quality_figure(emitters, cfg)
         widths = diff(p.edges)
         for (polys, s) in zip(bars, drawn)
             y = p.density ? s.counts ./ (sum(s.counts) .* widths) : Float64.(s.counts)
-            got = zeros(length(y))
-            for poly in polys
-                xs = unique(first.(poly))
-                @test length(xs) == 2 && all(x -> x in p.edges, xs)
-                i = findfirst(==(minimum(xs)), p.edges)
-                @test p.edges[i + 1] == maximum(xs)
-                got[i] = maximum(last.(poly))
-            end
-            @test got == y
+            # Each bar is exactly the rectangle on its two stored edges, at its count's height.
+            want_polys = [
+                [(p.edges[i], 0.0), (p.edges[i + 1], 0.0), (p.edges[i + 1], y[i]), (p.edges[i], y[i])]
+                    for i in eachindex(y) if y[i] > 0
+            ]
+            @test [[(Float64(q[1]), Float64(q[2])) for q in poly] for poly in polys] == want_polys
         end
         vl = reduce(vcat, [collect(pl[1][]) for pl in plots if kind(pl) === :vlines]; init = Float64[])
         @test all(x -> x in vl, reduce(vcat, [vcat(s.lines, s.dashed) for s in p.series]; init = Float64[]))
@@ -449,6 +471,28 @@ _fit2d(; photons = 1000.0, bg = 5.0, σ = 0.13, px = 0.01, py = 0.01, pvalue = 0
     # log10 rounding: p just above 0.01 is rejected by (0, 0.01) and drawn shaded.
     p = _check_quality_panels([_fit2d(pvalue = nextfloat(0.01)), _fit2d(pvalue = 0.005, i = 2)], FilterConfig(pvalue = (0, 0.01)))[:pvalue]
     @test shaded(p.series[1], p.edges) == 1
+    # Rejected fits with no agreeing bar are counted as rejected, never as passing: p = 0 is
+    # rejected by the lower bound of (0.1, 0) but sits at the upper bound's -Inf in log10.
+    for (ps, b) in (([0.0, 0.5], (0.1, 0.0)), ([0.0], (NaN, 0.0)))
+        es2 = [_fit2d(pvalue = q, i = i) for (i, q) in enumerate(ps)]
+        p = _check_quality_panels(es2, FilterConfig(pvalue = b))[:pvalue]
+        @test p.series[1].unplaced == 0 && p.series[1].lost >= 1
+        @test occursin("rejected with no place on the axis", SMLMAnalysis._panel_note(p))
+        _check_quality_figure(es2, FilterConfig(pvalue = b))
+    end
+    # Reversed bounds that log10 collapses: both sides reject the fit.
+    lb = 1.0e-12
+    _check_quality_panels([_fit2d(pvalue = nextfloat(lb))], FilterConfig(pvalue = (nextfloat(nextfloat(lb)), lb)))
+    # A rejecting bound as large as Float32 allows is drawn inside the view.
+    p = _check_quality_panels([_fit2d(photons = 1000.0)], FilterConfig(photons = (3.2e38, Inf)))[:photons]
+    @test p.view[1] < 3.2e38 < p.view[2] && 3.2e38 in p.series[1].lines
+    # Precision lower bounds that cannot be drawn are named, and nothing claims to be shaded.
+    for lo in (1.0e40, Inf, NaN)
+        p = _check_quality_panels([_fit2d(px = 0.01, py = 0.01)], FilterConfig(precision = (lo, Inf)))[:precision]
+        note = SMLMAnalysis._panel_note(p)
+        @test occursin("lower limit $(lo) on max(σ_x, σ_y) not drawn", note) && !occursin("all shaded", note)
+        @test all(s -> s.spans == (; lo = nothing, hi = nothing), p.series)
+    end
     # A photon count too large for an Int does not stop the figure.
     @test _quality_figure_saves(smld_of([_fit2d(photons = 1.0e20)]), FilterConfig())
 
@@ -499,9 +543,11 @@ end
     @test occursin("red=photons not in [NaN, Inf]", t(FilterConfig(photons = (NaN, Inf)), es))
     @test !occursin("photons", t(FilterConfig(photons = (-Inf, Inf)), es))
     @test !occursin("prec", t(FilterConfig(precision = (0, Inf)), es))
-    @test occursin("orange=prec not in [0, 20]nm", t(FilterConfig(precision = (0, 0.02)), es))
-    @test occursin("orange=prec not in [20, Inf]nm", t(FilterConfig(precision = (0.02, Inf)), es))
-    @test occursin("orange=prec not in [5, 20]nm", t(FilterConfig(precision = (0.005, 0.02)), es))
+    @test occursin("orange=prec not in [0, 0.02]μm", t(FilterConfig(precision = (0, 0.02)), es))
+    @test occursin("orange=prec not in [0.02, Inf]μm", t(FilterConfig(precision = (0.02, Inf)), es))
+    @test occursin("orange=prec not in [0.005, 0.02]μm", t(FilterConfig(precision = (0.005, 0.02)), es))
+    # A bound just above a fit's value prints so that the fit reads as rejected.
+    @test occursin("red=photons not in [1000.000000001, Inf]", t(FilterConfig(photons = (1000.000000001, Inf)), es))
     # The p-value label names the range, which a NaN p-value also fails.
     @test occursin("purple=pval not in [0.2, 0.8]", t(FilterConfig(pvalue = (0.2, 0.8)), es))
     nan_p = _sigma_emitter(pvalue = NaN)
@@ -510,12 +556,17 @@ end
     @test occursin("purple=pval not in [0.001, 1.0]", t(cfg, [nan_p]))
     # PSF bounds as the filter applies them, without rounding two distinct bounds together;
     # a degenerate :auto that the filter skips has no label.
-    @test occursin("cyan=psf_σ not in [100, 200]nm", t(FilterConfig(psf_sigma = (0.1, 0.2)), es))
-    @test occursin("cyan=psf_σ not in [130.01, 130.02]nm", t(FilterConfig(psf_sigma = (0.13001, 0.13002)), es))
-    @test occursin("cyan=psf_σ not in [117, 143]nm", t(FilterConfig(psf_sigma = :auto), es))
+    @test occursin("cyan=psf_σ not in [0.1, 0.2]μm", t(FilterConfig(psf_sigma = (0.1, 0.2)), es))
+    @test occursin("cyan=psf_σ not in [0.13001, 0.13002]μm", t(FilterConfig(psf_sigma = (0.13001, 0.13002)), es))
+    # :auto bounds print as computed: a fit of 0.126 μm below a bound of 0.12600000000000003
+    # reads as outside it, as its cyan box says.
+    auto_es = [_sigma_emitter(σ = σ, frame = i) for (i, σ) in enumerate((0.14, 0.14, 0.126))]
+    b = SMLMAnalysis._resolve_psf_bounds(auto_es, FilterConfig(psf_sigma = :auto))
+    @test occursin("cyan=psf_σ not in [$(b.lo), $(b.hi)]μm", t(FilterConfig(psf_sigma = :auto), auto_es))
+    @test SMLMAnalysis._fit_box_color(auto_es[3], FilterConfig(psf_sigma = :auto), b) === (0.126 < b.lo ? :cyan : :green)
     @test !occursin("cyan", t(FilterConfig(psf_sigma = :auto), [_sigma_emitter(σ = 0.0)]))
     xy = GaussMLE.Emitter2DFitSigmaXY{Float64}(0.8, 0.8, 1000.0, 5.0, 0.13, 0.14, 0.01, 0.01, 0.0, 30.0, 0.5, 0.002, 0.002, 0.4, 1, 1, 0, 1)
-    @test occursin("cyan=psf_σx not in [100, 200]nm or σy not in [100, 200]nm", t(FilterConfig(psf_sigma = (0.1, 0.2)), [xy]))
+    @test occursin("cyan=psf_σx not in [0.1, 0.2]μm or σy not in [0.1, 0.2]μm", t(FilterConfig(psf_sigma = (0.1, 0.2)), [xy]))
 end
 
 @testset "Filter figures save for each side of a range" begin
