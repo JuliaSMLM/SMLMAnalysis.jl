@@ -409,6 +409,20 @@ end
         @test split(r.label.text[]) == split(title)
     end
     @test all(t -> length(t[1]) > 100, cases)
+    # A theme that turns on Makie's Label word wrap does not break the overlay or its fit.
+    Mk = SMLMAnalysis.CairoMakie
+    Mk.with_theme(Mk.Theme(Label = (word_wrap = true,))) do
+        for (title, (h, w)) in cases[[1, 4]]
+            r = SMLMAnalysis._box_overlay_figure(
+                zeros(Float32, h, w, 12), Float64[], Float64[], Int[], 7, Symbol[]; suptitle = title
+            )
+            @test r.label.layoutobservables.autosize[][1] <= r.fig.scene.viewport[].widths[1] - 20
+        end
+        mktempdir() do dir
+            SMLMAnalysis._save_box_overlay(dir, "o.png", zeros(Float32, 128, 128, 12), Float64[], Float64[], Int[], 7, Symbol[]; suptitle = cases[2][1])
+            @test isfile(joinpath(dir, "o.png"))
+        end
+    end
 end
 
 @testset "Filter figures save for each side of a range" begin

@@ -189,10 +189,13 @@ function _box_overlay_figure(
     if suptitle !== nothing
         # At 11 pt a character is about 5 px wide; 6.6 px per character leaves a margin.
         max_chars = max(20, floor(Int, (fig_size[1] - 40) / (0.6 * 11)))
-        label = Label(fig[0, 1:4], _wrap_title(suptitle, max_chars), fontsize = 11)
+        # _wrap_title does the wrapping, so Makie's own word wrap (which a theme can turn on)
+        # stays off and the Label keeps a measurable width.
+        label = Label(fig[0, 1:4], _wrap_title(suptitle, max_chars), fontsize = 11, word_wrap = false)
         # A frame so narrow that a wrapped line (or one long word) is still wider than the
         # figure widens the figure to the measured legend.
-        need = ceil(Int, label.layoutobservables.autosize[][1]) + 40
+        w = label.layoutobservables.autosize[][1]
+        need = w === nothing ? 0 : ceil(Int, w) + 40
         need > fig_size[1] && resize!(fig.scene, need, fig_size[2])
     end
 
