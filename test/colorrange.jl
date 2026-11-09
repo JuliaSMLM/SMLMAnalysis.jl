@@ -70,18 +70,15 @@ end
             for i in 1:20
     ]
 
+    # One figure per kind of degenerate data runs here, at the lowest-compat Makie on CI; the
+    # other bound settings of the same data run in long/filter_figures.jl.
+
     # One localization: PSF width limits (130, 130), and every other panel from one value.
-    one = smld_of([_sigma_emitter()])
-    for cfg in (FilterConfig(), FilterConfig(psf_sigma = :auto), FilterConfig(psf_sigma = (0.1, 0.2)))
-        @test _quality_figure_saves(one, cfg)
-    end
+    @test _quality_figure_saves(smld_of([_sigma_emitter()]), FilterConfig(psf_sigma = :auto))
     xy = GaussMLE.Emitter2DFitSigmaXY{Float64}(
         0.8, 0.8, 1000.0, 5.0, 0.13, 0.14, 0.01, 0.01, 0.0, 30.0, 0.5, 0.002, 0.002, 0.4, 1, 1, 0, 1
     )
-    for cfg in (FilterConfig(), FilterConfig(psf_sigma = :auto), FilterConfig(psf_sigma = (-Inf, Inf)))
-        @test _quality_figure_saves(smld_of([xy]), cfg)
-    end
-    @test _quality_figure_saves(one, FilterConfig(psf_sigma = (-Inf, Inf)))
+    @test _quality_figure_saves(smld_of([xy]), FilterConfig(psf_sigma = :auto))
     # Two distinct PSF widths both lie outside their 2-98% display window (empty histogram).
     @test _quality_figure_saves(smld_of([_sigma_emitter(σ = 0.12), _sigma_emitter(σ = 0.14, frame = 2)]), FilterConfig())
 
@@ -89,17 +86,13 @@ end
     @test _quality_figure_saves(smld_of([_sigma_emitter(bg = 0.0, frame = i) for i in 1:5]), FilterConfig())
 
     # Open filter bounds (an ordinary user setting) give infinite limits.
-    for cfg in (
-            FilterConfig(precision = (0, Inf)), FilterConfig(photons = (-Inf, Inf)),
-            FilterConfig(psf_sigma = (0, Inf)), FilterConfig(pvalue = (0, 1)),
-        )
-        @test _quality_figure_saves(smld_of(varied), cfg)
-        plain, _ = analyze(smld_of(varied), cfg; verbose = Verbosity.SILENT)
-        mktempdir() do outdir
-            drawn, _ = analyze(smld_of(varied), cfg; outdir = outdir, checkpoint = Checkpoint.NONE)
-            @test drawn.emitters == plain.emitters
-            @test isfile(joinpath(outdir, "00_filter", "fit_quality.png"))
-        end
+    cfg = FilterConfig(photons = (-Inf, Inf))
+    @test _quality_figure_saves(smld_of(varied), cfg)
+    plain, _ = analyze(smld_of(varied), cfg; verbose = Verbosity.SILENT)
+    mktempdir() do outdir
+        drawn, _ = analyze(smld_of(varied), cfg; outdir = outdir, checkpoint = Checkpoint.NONE)
+        @test drawn.emitters == plain.emitters
+        @test isfile(joinpath(outdir, "00_filter", "fit_quality.png"))
     end
     e3 = [
         SMLMAnalysis.Emitter3DFit{Float64}(
@@ -110,13 +103,9 @@ end
 
     # p-values equal to 1: the 2nd percentile of log10(p) is 0.
     @test _quality_figure_saves(smld_of([_sigma_emitter(pvalue = 1.0, frame = i) for i in 1:5]), FilterConfig())
-    @test _quality_figure_saves(smld_of([_sigma_emitter(pvalue = 1.0)]), FilterConfig(pvalue = (1.0e-3, 1.0)))
 
     # Every precision above the 1 μm display cutoff leaves nothing to take a quantile of.
-    far = smld_of([_sigma_emitter(prec = 2.0)])
-    for cfg in (FilterConfig(), FilterConfig(precision = (0, 0.02)))
-        @test _quality_figure_saves(far, cfg)
-    end
+    @test _quality_figure_saves(smld_of([_sigma_emitter(prec = 2.0)]), FilterConfig())
 end
 
 @testset "Box overlay with non-finite pixels" begin
@@ -318,8 +307,6 @@ end
     note = SMLMAnalysis._panel_note(p)
     @test occursin("1 σ_x and 1 σ_y values rejected beyond the axis", note) && !occursin("2 rejected", note)
     @test 100 - length(SMLMAnalysis._filter_smld(smld_of(pr), FilterConfig(precision = (0, 0.02))).emitters) == 1
-    # A photon count too large for an Int does not stop the figure.
-    @test _quality_figure_saves(smld_of([_fit2d(photons = 1.0e20)]), FilterConfig())
 
     # 3D, all z in 0.2-0.3 µm. Positive bounds below the data stay inside the view (the old
     # 1.1x widening moved them toward zero). z = (0.1, 0.4) rejects nothing and lies more than

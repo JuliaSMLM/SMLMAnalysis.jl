@@ -144,3 +144,38 @@ end
         @test _quality_figure_saves(smld_of(es), cfg)
     end
 end
+
+# The degenerate data of colorrange.jl under its other bound settings (Core saves one figure
+# of each kind of data).
+@testset "Filter figures on degenerate data: other bound settings" begin
+    cam = IdealCamera(16, 16, 0.1)
+    smld_of(es) = SMLMAnalysis.BasicSMLD(es, cam, 20, 1, Dict{String, Any}())
+    varied = [
+        _sigma_emitter(σ = 0.12 + 0.002i, bg = 5.0 + i, prec = 0.005 + 0.0005i, pvalue = i / 21, frame = i, photons = 500.0 + 50i)
+            for i in 1:20
+    ]
+    one = smld_of([_sigma_emitter()])
+    for cfg in (FilterConfig(), FilterConfig(psf_sigma = (0.1, 0.2)), FilterConfig(psf_sigma = (-Inf, Inf)))
+        @test _quality_figure_saves(one, cfg)
+    end
+    xy = GaussMLE.Emitter2DFitSigmaXY{Float64}(
+        0.8, 0.8, 1000.0, 5.0, 0.13, 0.14, 0.01, 0.01, 0.0, 30.0, 0.5, 0.002, 0.002, 0.4, 1, 1, 0, 1
+    )
+    for cfg in (FilterConfig(), FilterConfig(psf_sigma = (-Inf, Inf)))
+        @test _quality_figure_saves(smld_of([xy]), cfg)
+    end
+    # Open filter bounds give infinite limits; drawing the figure changes no result.
+    for cfg in (FilterConfig(precision = (0, Inf)), FilterConfig(psf_sigma = (0, Inf)), FilterConfig(pvalue = (0, 1)))
+        @test _quality_figure_saves(smld_of(varied), cfg)
+        plain, _ = analyze(smld_of(varied), cfg; verbose = Verbosity.SILENT)
+        mktempdir() do outdir
+            drawn, _ = analyze(smld_of(varied), cfg; outdir = outdir, checkpoint = Checkpoint.NONE)
+            @test drawn.emitters == plain.emitters
+            @test isfile(joinpath(outdir, "00_filter", "fit_quality.png"))
+        end
+    end
+    @test _quality_figure_saves(smld_of([_sigma_emitter(pvalue = 1.0)]), FilterConfig(pvalue = (1.0e-3, 1.0)))
+    @test _quality_figure_saves(smld_of([_sigma_emitter(prec = 2.0)]), FilterConfig(precision = (0, 0.02)))
+    # A photon count too large for an Int does not stop the figure.
+    @test _quality_figure_saves(smld_of([_fit2d(photons = 1.0e20)]), FilterConfig())
+end
