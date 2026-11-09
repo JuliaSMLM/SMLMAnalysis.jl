@@ -15,8 +15,8 @@ using Logging
     cfg = FilterConfig(z = (-0.2, 0.2), sigma_z = (0.0, 0.03))
     @test SMLMAnalysis._fit_box_color(e3, cfg, nothing) === :blue
     title = SMLMAnalysis._fit_overlay_title(cfg, [e3])
-    @test occursin("blue=z outside", title)
-    @test occursin("magenta=σ_z outside", title)
+    @test occursin("blue=z not in [", title)
+    @test occursin("magenta=σ_z not in [", title)
     cam = IdealCamera(16, 16, 0.1)
     smld = SMLMAnalysis.BasicSMLD([e3], cam, 1, 1, Dict{String, Any}())
     @test isempty(SMLMAnalysis._filter_smld(smld, cfg).emitters)

@@ -127,7 +127,49 @@ renderer; see the `roi_batch` convenience method below.
 """
 function _save_box_overlay(
         dir, filename, images, x_corners, y_corners, frame_indices, box_size,
-        box_colors; title_prefix = "Frame", frame_labels = nothing, suptitle = nothing
+        box_colors; kwargs...
+    )
+    r = _box_overlay_figure(images, x_corners, y_corners, frame_indices, box_size, box_colors; kwargs...)
+    return save(joinpath(dir, filename), r.fig)
+end
+
+"""
+    _wrap_title(s, max_chars) -> String
+
+Break a one-line legend into lines of at most `max_chars` characters, at its spaces: whole
+criteria (separated by two spaces) where they fit, and a criterion longer than a line broken
+between its words.
+"""
+function _wrap_title(s::AbstractString, max_chars::Integer)
+    lines = String[]
+    cur = ""
+    for part in split(s, "  "; keepempty = false)
+        words = length(part) <= max_chars ? [part] : split(part, ' '; keepempty = false)
+        for (k, w) in enumerate(words)
+            sep = k == 1 ? "  " : " "
+            if isempty(cur)
+                cur = String(w)
+            elseif length(cur) + length(sep) + length(w) <= max_chars
+                cur = cur * sep * w
+            else
+                push!(lines, cur)
+                cur = String(w)
+            end
+        end
+    end
+    isempty(cur) || push!(lines, cur)
+    return join(lines, "\n")
+end
+
+"""
+    _box_overlay_figure(images, x_corners, y_corners, frame_indices, box_size, box_colors; ...) -> (; fig, label)
+
+Build the box-overlay figure (see `_save_box_overlay`). A `suptitle` is wrapped to the figure's
+width, so a long legend is never cut off; `label` is its Label block (or `nothing`).
+"""
+function _box_overlay_figure(
+        images, x_corners, y_corners, frame_indices, box_size, box_colors;
+        title_prefix = "Frame", frame_labels = nothing, suptitle = nothing
     )
     n_frames = size(images, 3)
     sample = [round(Int, x) for x in range(1, n_frames, length = min(12, n_frames))]
@@ -140,9 +182,13 @@ function _save_box_overlay(
     pmin = isempty(sample_data) ? NaN : Float64(quantile(sample_data, 0.25))    # Below background -> solid black
     pmax = isempty(sample_data) ? NaN : Float64(quantile(sample_data, 0.9995))  # Above most spot peaks -> preserve core detail
 
-    fig = Figure(size = _grid_figure_size(images))
+    fig_size = _grid_figure_size(images)
+    fig = Figure(size = fig_size)
+    label = nothing
     if suptitle !== nothing
-        Label(fig[0, 1:4], suptitle, fontsize = 11)
+        # At 11 pt a character is about 5 px wide; 6.6 px per character leaves a margin.
+        max_chars = max(20, floor(Int, (fig_size[1] - 40) / (0.6 * 11)))
+        label = Label(fig[0, 1:4], _wrap_title(suptitle, max_chars), fontsize = 11)
     end
 
     for (idx, frame_num) in enumerate(sample)
@@ -165,7 +211,7 @@ function _save_box_overlay(
         hidedecorations!(ax)
     end
 
-    return save(joinpath(dir, filename), fig)
+    return (; fig, label)
 end
 
 """

@@ -1011,10 +1011,10 @@ function _fit_overlay_title(cfg::FilterConfig, emitters)
         push!(parts, "purple=pval not in [$(cfg.pvalue[1]), $(cfg.pvalue[2])]")
     end
     if cfg.z !== nothing && !isempty(emitters) && hasproperty(first(emitters), :z)
-        push!(parts, "blue=z outside $(cfg.z)μm")
+        push!(parts, "blue=z not in $(rng(cfg.z...))μm")
     end
     if cfg.sigma_z !== nothing && !isempty(emitters) && hasproperty(first(emitters), :σ_z)
-        push!(parts, "magenta=σ_z outside $(cfg.sigma_z)μm")
+        push!(parts, "magenta=σ_z not in $(rng(cfg.sigma_z...))μm")
     end
     # The PSF bounds the filter applies (none when :auto finds no mode and the filter skips it).
     psf = _resolve_psf_bounds(emitters, cfg)
