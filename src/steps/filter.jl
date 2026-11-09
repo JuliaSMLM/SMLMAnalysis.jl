@@ -463,15 +463,19 @@ end
 # (in the end bar), rejected fits with no value to place, passing fits at coincident bounds,
 # and rejecting limits too large to draw.
 function _panel_note(p)
-    beyond = sum(s.beyond for s in p.series)
-    invalid = sum(s.invalid for s in p.series)
-    unplaced = sum(s.unplaced for s in p.series)
-    lost = sum(s.lost for s in p.series)
+    # One series counts fits. Overlaid series (σ_x and σ_y, PSF σx and σy) count component
+    # values per series, since one fit can put a value in each.
+    one = length(p.series) == 1
+    function count_text(f)
+        one && return string(f(p.series[1]))
+        return join(["$(f(s)) $(s.name)" for s in p.series if f(s) > 0], " and ") * " values"
+    end
+    any_of(f) = any(s -> f(s) > 0, p.series)
     parts = String[]
-    beyond > 0 && push!(parts, "$beyond rejected beyond the axis, in the end bar")
-    invalid > 0 && push!(parts, "$invalid with NaN rejected, not drawn")
-    lost > 0 && push!(parts, "$lost rejected with no place on the axis, not drawn")
-    unplaced > 0 && push!(parts, "$unplaced passing at the bound, not drawn")
+    any_of(s -> s.beyond) && push!(parts, count_text(s -> s.beyond) * " rejected beyond the axis, in the end bar")
+    any_of(s -> s.invalid) && push!(parts, count_text(s -> s.invalid) * " with NaN rejected, not drawn")
+    any_of(s -> s.lost) && push!(parts, count_text(s -> s.lost) * " rejected with no place on the axis, not drawn")
+    any_of(s -> s.unplaced) && push!(parts, count_text(s -> s.unplaced) * " passing at the bound, not drawn")
     append!(parts, unique(reduce(vcat, [s.notes for s in p.series]; init = String[])))
     return isempty(parts) ? "" : " (" * join(parts, "; ") * ")"
 end

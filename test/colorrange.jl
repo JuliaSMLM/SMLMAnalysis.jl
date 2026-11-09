@@ -360,10 +360,19 @@ function _check_quality_figure(emitters, cfg)
         note = SMLMAnalysis._panel_note(p)
         @test endswith(ax.title[], note)
         tot(f) = sum(f(s) for s in p.series)
-        tot(s -> s.beyond) > 0 && @test occursin("$(tot(s -> s.beyond)) rejected beyond the axis", note)
-        tot(s -> s.invalid) > 0 && @test occursin("$(tot(s -> s.invalid)) with NaN rejected", note)
-        tot(s -> s.lost) > 0 && @test occursin("$(tot(s -> s.lost)) rejected with no place", note)
-        tot(s -> s.unplaced) > 0 && @test occursin("$(tot(s -> s.unplaced)) passing at the bound", note)
+        # One series counts fits; overlaid series count each series' values by name.
+        for (f, phrase) in (
+                (s -> s.beyond, "rejected beyond the axis"), (s -> s.invalid, "with NaN rejected"),
+                (s -> s.lost, "rejected with no place"), (s -> s.unplaced, "passing at the bound"),
+            )
+            tot(f) > 0 || continue
+            if length(p.series) == 1
+                @test occursin("$(tot(f)) $phrase", note)
+            else
+                @test all(s -> f(s) == 0 || occursin("$(f(s)) $(s.name)", note), p.series)
+                @test occursin("values $phrase", note)
+            end
+        end
         @test all(n -> occursin(n, note), reduce(vcat, [s.notes for s in p.series]; init = String[]))
         plots = ax.scene.plots
         kind(pl) = nameof(Mk.plotfunc(pl))
@@ -493,6 +502,14 @@ _fit2d(; photons = 1000.0, bg = 5.0, σ = 0.13, px = 0.01, py = 0.01, pvalue = 0
         @test occursin("lower limit $(lo) on max(σ_x, σ_y) not drawn", note) && !occursin("all shaded", note)
         @test all(s -> s.spans == (; lo = nothing, hi = nothing), p.series)
     end
+    # One fit with both precision components beyond the axis is one rejected fit: the title
+    # counts values per component, not two fits.
+    pr = vcat([_fit2d(px = 0.01, py = 0.01, i = i) for i in 1:99], [_fit2d(px = 0.5, py = 0.5, i = 100)])
+    p = _check_quality_panels(pr, FilterConfig(precision = (0, 0.02)))[:precision]
+    note = SMLMAnalysis._panel_note(p)
+    @test occursin("1 σ_x and 1 σ_y values rejected beyond the axis", note) && !occursin("2 rejected", note)
+    @test 100 - length(SMLMAnalysis._filter_smld(smld_of(pr), FilterConfig(precision = (0, 0.02))).emitters) == 1
+    _check_quality_figure(pr, FilterConfig(precision = (0, 0.02)))
     # A photon count too large for an Int does not stop the figure.
     @test _quality_figure_saves(smld_of([_fit2d(photons = 1.0e20)]), FilterConfig())
 
