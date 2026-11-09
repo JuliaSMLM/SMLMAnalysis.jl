@@ -64,6 +64,18 @@ function save_smld(
     # would otherwise mislabel the file and silently drop fields on reload. `:z`
     # detection also covers Emitter3DFitGaussMLE, which is not <: Emitter3DFit.
     ET = n > 0 ? typeof(smld.emitters[1]) : E
+    # BasicSMLD's T comes from the camera, which can differ from the fits' precision.
+    # A custom emitter's first type parameter may be an unrelated numeric tag.
+    element_type = T
+    if isconcretetype(ET)
+        parameter = isempty(ET.parameters) ? nothing : ET.parameters[1]
+        coordinate_type = hasfield(ET, :x) ? fieldtype(ET, :x) : nothing
+        if coordinate_type isa Type && coordinate_type <: Number && isconcretetype(coordinate_type)
+            element_type = coordinate_type
+        elseif parameter isa Type && parameter <: Number && isconcretetype(parameter)
+            element_type = parameter
+        end
+    end
     is_3d = n > 0 ? hasproperty(smld.emitters[1], :z) : (E <: Emitter3DFit)
     emitter_type_name = string(nameof(ET))
 
@@ -83,7 +95,7 @@ function save_smld(
             meta["package_name"] = "SMLMAnalysis"
             meta["package_version"] = _get_package_version()
             meta["emitter_type"] = emitter_type_name
-            meta["element_type"] = string(T)
+            meta["element_type"] = string(element_type)
             meta["is_3d"] = is_3d
             meta["has_psf_sigma"] = has_sigma
             meta["has_psf_sigma_xy"] = has_sigma_xy

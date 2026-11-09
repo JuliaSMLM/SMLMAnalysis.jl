@@ -678,7 +678,7 @@ function _save_intensityfilter_figures(dir, xs, ys, photons, pvals, keep, field_
     end
     sc = scatter!(
         ax1a, xs[idx], ys[idx], color = photons[idx], colormap = :viridis,
-        colorrange = (p01, p99_scatter), markersize = 2
+        colorrange = _plot_colorrange(p01, p99_scatter), markersize = 2
     )
     Colorbar(fig1[1, 2], sc, label = "Photons")
 
@@ -692,7 +692,7 @@ function _save_intensityfilter_figures(dir, xs, ys, photons, pvals, keep, field_
     if !isempty(valid_rates)
         hm1 = heatmap!(
             ax1b, x_centers, y_centers, bin_result.rate_grid, colormap = :viridis,
-            colorrange = (minimum(valid_rates), maximum(valid_rates)), nan_color = :gray20
+            colorrange = _plot_colorrange(minimum(valid_rates), maximum(valid_rates)), nan_color = :gray20
         )
         Colorbar(fig1[1, 4], hm1, label = "λ (photons)")
     end
@@ -705,7 +705,12 @@ function _save_intensityfilter_figures(dir, xs, ys, photons, pvals, keep, field_
     x_range = range(minimum(xs), maximum(xs), length = 50)
     y_range = range(minimum(ys), maximum(ys), length = 50)
     field_grid = [field_model(x, y) for x in x_range, y in y_range]
-    hm2 = heatmap!(ax1c, collect(x_range), collect(y_range), field_grid, colormap = :viridis)
+    field_finite = filter(isfinite, vec(field_grid))
+    field_lo, field_hi = isempty(field_finite) ? (NaN, NaN) : extrema(field_finite)
+    hm2 = heatmap!(
+        ax1c, collect(x_range), collect(y_range), field_grid, colormap = :viridis,
+        colorrange = _plot_colorrange(field_lo, field_hi)
+    )
     Colorbar(fig1[1, 6], hm2, label = "λ (photons)")
 
     save(joinpath(dir, "excitation_field.png"), fig1)
@@ -794,7 +799,7 @@ function _save_intensityfilter_figures(dir, xs, ys, photons, pvals, keep, field_
             )
         end
     end
-    xlims!(ax4a, 0, p99)
+    xlims!(ax4a, _plot_limits(0, p99)...)
     axislegend(ax4a, position = :rt, framevisible = false)
 
     # Right: field-normalized photon distribution (photons / λ(x,y))
@@ -823,7 +828,7 @@ function _save_intensityfilter_figures(dir, xs, ys, photons, pvals, keep, field_
             label = "reject ≈$(round(n_thresh / λ_g, digits = 2))×λ"
         )
     end
-    xlims!(ax4b, 0, norm_p99)
+    xlims!(ax4b, _plot_limits(0, norm_p99)...)
     axislegend(ax4b, position = :rt, framevisible = false)
 
     save(joinpath(dir, "photon_distribution.png"), fig4)
@@ -897,7 +902,7 @@ function _save_mixture_decomposition_figure(dir, xs, ys, photons, field_model, c
         ax5a, [τ], color = :orange, linewidth = 2, linestyle = :dash,
         label = "τ = $(τ)"
     )
-    xlims!(ax5a, 0, min(upper, 3.0))
+    xlims!(ax5a, _plot_limits(0, min(upper, 3.0))...)
     axislegend(ax5a, position = :rt, framevisible = false)
     text!(
         ax5a, 0.03, 0.85,

@@ -56,6 +56,14 @@ Two operations run back to back:
 The detailed detection and fitting algorithms live in the SMLMBoxer and GaussMLE
 documentation; this step composes them and handles datasets, files, and cameras.
 
+After fitting, localizations with x or y outside the camera's first and last pixel
+edges are removed, because edge ROIs can fit positions beyond the imaged field;
+`DetectFitInfo.n_out_of_field` reports the total removed (including for ROI crops).
+
+A dataset with no detected ROIs is skipped with a warning; its dataset index and
+zero-fit info entry are retained. If no fits are produced across any dataset, the step
+raises an error with suggestions for checking detection and camera settings.
+
 ## Configuration
 
 `DetectFitConfig` embeds the two upstream configs and adds the data-source and
@@ -63,7 +71,7 @@ camera options:
 
 | field | default | meaning |
 |---|---|---|
-| `boxer` | `BoxerConfig(boxsize=11, psf_sigma=0.135)` | detection config (ROI size, expected PSF σ in µm) |
+| `boxer` | `BoxerConfig(boxsize=9, psf_sigma=0.135)` | detection config (ROI size, expected PSF σ in µm) |
 | `fitter` | `GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20)` | PSF-fit config (model, iterations) |
 | `camera` | `nothing` | the camera; injected by `AnalysisConfig`, or set for standalone use |
 | `path` / `paths` | `nothing` | file-based sources (single file / one file per dataset) |
@@ -71,6 +79,9 @@ camera options:
 | `datasets` | `nothing` | subset of source slots to include |
 | `h5_format` | `:auto` | `:auto`, `:smart`, or `:mic` (see [I/O & Resume](@ref)) |
 | `pixel_size`, `qe` | `nothing`, `1.0` | build an SCMOS camera from MIC H5 calibration when `camera` is unset |
+
+Choose either `path` or `paths`. `dataset_frames` requires `path` to split one
+file. These conflicting combinations raise `ArgumentError` at construction.
 
 PSF models (from GaussMLE) include `GaussianXYNB`, `GaussianXYNBS` (free width),
 `GaussianXYNBSXSY` (elliptical), and `AstigmaticXYZNB` (3D).
@@ -96,13 +107,21 @@ stepinfo(info, :detectfit).info    # the DetectFitInfo
 | field | meaning |
 |---|---|
 | `n_rois` | candidate ROIs found by detection |
-| `n_fits` | localizations surviving the fit |
+| `n_fits` | raw fits returned by GaussMLE, one per fitted ROI, before cleanup |
+| `n_nonfinite` | fits removed because a fitted value was NaN or Inf |
+| `n_out_of_field` | fits removed because x or y lies outside the camera |
 | `n_datasets`, `n_frames_per_dataset` | dataset/frame structure of the result |
 
-Sanity checks: `n_fits` close to `n_rois` means most detections fit cleanly; a
-large gap suggests `boxsize`/`psf_sigma` are mismatched to the data or the
-detection threshold is too low. The overlay figure should show boxes centered on
-real spots, not noise.
+The step returns `n_fits - n_nonfinite - n_out_of_field` localizations.
+
+Sanity checks: `n_fits` equals `n_rois` (every ROI is fitted), so it says nothing
+about fit quality by itself. Compare the retained count with `n_fits`: a large
+share removed as `n_nonfinite` points to fits that diverged, often a
+`boxsize`/`psf_sigma` mismatch or noise detections from a low detection threshold;
+a large share removed as `n_out_of_field` points to many detections on the camera
+edge or a camera whose pixel edges do not match the images. When cleanup removes
+every fit the step warns with both counts. The overlay figure should show boxes
+centered on real spots, not noise.
 
 ## Notes & caveats
 

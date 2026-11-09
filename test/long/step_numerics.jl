@@ -7,6 +7,14 @@ using Random
 using TOML
 using Statistics
 
+include(joinpath(dirname(@__DIR__), "filter_checks.jl"))
+
+# The STANDARD half of step_numerics.jl's "Filter diagnostics without p-values" (Core runs
+# DEBUG).
+@testset "Filter diagnostics without p-values at STANDARD" begin
+    _check_filter_diagnostics_without_pvalues(Verbosity.STANDARD)
+end
+
 @testset "intensity-filter p₂ mixture estimator" begin
     # Regression for the unbiased double-emitter fraction estimator.
     # The mixture model must (a) recover a small KNOWN p₂ and, critically,
