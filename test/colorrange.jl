@@ -391,16 +391,24 @@ end
     ]
     tutorial = FilterConfig(photons = (500.0, Inf), precision = (0.0, 0.007), pvalue = (1.0e-3, 1.0), psf_sigma = :auto)
     aniso = FilterConfig(photons = (200.0, 5000.0), precision = (0.0, 0.007), pvalue = (1.0e-3, 1.0), psf_sigma = :auto)
-    for (es, cfg, (h, w)) in ((iso, tutorial, (128, 128)), (xy, aniso, (128, 128)), (xy, aniso, (256, 64)))
-        title = SMLMAnalysis._fit_overlay_title(cfg, es)
-        @test length(title) > 150
+    # Very narrow frames (a 124 px figure) widen the figure; so does a word wider than it.
+    cases = (
+        (SMLMAnalysis._fit_overlay_title(tutorial, iso), (128, 128)),
+        (SMLMAnalysis._fit_overlay_title(aniso, xy), (128, 128)),
+        (SMLMAnalysis._fit_overlay_title(aniso, xy), (256, 64)),
+        (SMLMAnalysis._fit_overlay_title(aniso, xy), (512, 16)),
+        ("Fit: " * repeat("W", 100), (128, 128)),
+    )
+    for (title, (h, w)) in cases
         r = SMLMAnalysis._box_overlay_figure(
             zeros(Float32, h, w, 12), Float64[], Float64[], Int[], 7, Symbol[]; suptitle = title
         )
-        width = SMLMAnalysis._grid_figure_size(zeros(h, w, 1))[1]
+        width = r.fig.scene.viewport[].widths[1]
+        @test width >= SMLMAnalysis._grid_figure_size(zeros(h, w, 1))[1]
         @test r.label.layoutobservables.autosize[][1] <= width - 20
         @test split(r.label.text[]) == split(title)
     end
+    @test all(t -> length(t[1]) > 100, cases)
 end
 
 @testset "Filter figures save for each side of a range" begin

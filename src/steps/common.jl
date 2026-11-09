@@ -165,7 +165,8 @@ end
     _box_overlay_figure(images, x_corners, y_corners, frame_indices, box_size, box_colors; ...) -> (; fig, label)
 
 Build the box-overlay figure (see `_save_box_overlay`). A `suptitle` is wrapped to the figure's
-width, so a long legend is never cut off; `label` is its Label block (or `nothing`).
+width, and the figure is widened when a line is still wider than it, so the legend is never cut
+off; `label` is its Label block (or `nothing`).
 """
 function _box_overlay_figure(
         images, x_corners, y_corners, frame_indices, box_size, box_colors;
@@ -189,6 +190,10 @@ function _box_overlay_figure(
         # At 11 pt a character is about 5 px wide; 6.6 px per character leaves a margin.
         max_chars = max(20, floor(Int, (fig_size[1] - 40) / (0.6 * 11)))
         label = Label(fig[0, 1:4], _wrap_title(suptitle, max_chars), fontsize = 11)
+        # A frame so narrow that a wrapped line (or one long word) is still wider than the
+        # figure widens the figure to the measured legend.
+        need = ceil(Int, label.layoutobservables.autosize[][1]) + 40
+        need > fig_size[1] && resize!(fig.scene, need, fig_size[2])
     end
 
     for (idx, frame_num) in enumerate(sample)
