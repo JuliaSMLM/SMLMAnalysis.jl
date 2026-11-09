@@ -63,7 +63,7 @@ camera options:
 
 | field | default | meaning |
 |---|---|---|
-| `boxer` | `BoxerConfig(boxsize=11, psf_sigma=0.135)` | detection config (ROI size, expected PSF σ in µm) |
+| `boxer` | `BoxerConfig(boxsize=9, psf_sigma=0.135)` | detection config (ROI size, expected PSF σ in µm) |
 | `fitter` | `GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20)` | PSF-fit config (model, iterations) |
 | `camera` | `nothing` | the camera; injected by `AnalysisConfig`, or set for standalone use |
 | `path` / `paths` | `nothing` | file-based sources (single file / one file per dataset) |

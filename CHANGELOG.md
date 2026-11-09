@@ -7,6 +7,12 @@ the last number (0.1.Z) is non-breaking; one that raises the middle number
 
 ## [Unreleased]
 
+### Changed
+
+- The `DetectFitConfig` default detection box is now 9 pixels (was 11). This changes
+  results for callers that rely on the default; pass `BoxerConfig(boxsize = 11, ...)` to
+  keep the old behavior.
+
 ## [0.2.0] - 2026-10-21
 
 ### Breaking
