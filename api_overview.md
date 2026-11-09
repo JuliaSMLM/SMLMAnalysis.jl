@@ -375,7 +375,7 @@ upstream docstring for types and meaning.
 
 ### Native to SMLMAnalysis
 
-- `SMLMAnalysis.DetectFitInfo`: `boxes_info`, `fit_info` (per-dataset upstream infos), `n_datasets`, `n_rois`, `n_fits`, `n_frames_per_dataset`, `elapsed_s`, `selected_source_indices`
+- `SMLMAnalysis.DetectFitInfo`: `boxes_info`, `fit_info` (per-dataset upstream infos), `n_datasets`, `n_rois`, `n_fits`, `n_frames_per_dataset`, `elapsed_s`, `selected_source_indices`, `n_nonfinite`, `n_out_of_field`
 - `SMLMAnalysis.FilterInfo`: `n_before`, `n_after`, `elapsed_s`
 - `SMLMAnalysis.IntensityFilterInfo`: `n_before`, `n_after`, `field_mode`, `lambda_max_global`, `field_params`, `field_fit_r2`, `elapsed_s`, `p2_estimate` (or `nothing`), `p2_tail_threshold`, `p2_tail_obs`, `p2_tail_f2`
 - `SMLMAnalysis.DensityFilterInfo`: `n_before`, `n_after`, `threshold`, `elapsed_s`

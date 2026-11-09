@@ -1,5 +1,6 @@
 using SMLMAnalysis
 using GaussMLE
+using Random
 using Test
 
 # Makie's interpolated colormaps throw on a colorrange with equal ends (CairoMakie 0.15.6 /
@@ -196,73 +197,226 @@ end
     end
 end
 
-@testset "P-value panel with values on a bin edge" begin
-    # log10 p-values -2, -1.8 and -1.79 with edges from -2 in steps of 0.04: -1.8 and -1.79
-    # share a bin by exact edges but not by floating-point division. The bars and the y
-    # limit now come from one count, so the panel saves and its peak is not clipped.
-    cam = IdealCamera(16, 16, 0.1)
-    ps = vcat(fill(0.01, 10), fill(10^-1.8, 50), fill(10^-1.79, 50))
-    es = [_sigma_emitter(pvalue = p, frame = i) for (i, p) in enumerate(ps)]
-    @test _quality_figure_saves(SMLMAnalysis.BasicSMLD(es, cam, length(es), 1, Dict{String, Any}()), FilterConfig())
-end
-
-@testset "Fit overlay title with open photon and precision bounds" begin
-    t = SMLMAnalysis._fit_overlay_title
-    es = [_sigma_emitter()]
-    @test occursin("red=photons<500/>5000", t(FilterConfig(photons = (500, 5000)), es))
-    @test occursin("red=photons<500  ", t(FilterConfig(photons = (500, Inf)), es))
-    # Open bounds reject nothing: no label, and no round(Int, ±Inf).
-    @test !occursin("photons", t(FilterConfig(photons = (-Inf, Inf)), es))
-    @test occursin("red=photons>5000", t(FilterConfig(photons = (-Inf, 5000)), es))
-    @test !occursin("prec", t(FilterConfig(precision = (0, Inf)), es))
-    @test occursin("orange=prec>20.0nm", t(FilterConfig(precision = (0, 0.02)), es))
-    # An active lower precision bound is labeled too.
-    @test occursin("orange=prec<20.0nm", t(FilterConfig(precision = (0.02, Inf)), es))
-    @test occursin("orange=prec<5.0nm/>20.0nm", t(FilterConfig(precision = (0.005, 0.02)), es))
-end
-
-@testset "P-value panel counts and pass percentage" begin
-    # Values on an edge go in the bin that starts there: log10 p = -1.8 and -1.79 both
-    # belong in [-1.8, -1.76) for edges from -2 in steps of 0.04. Dividing by the bin
-    # width put -1.8 in the bin below.
+@testset "Panel bar counts and pass percentage" begin
     edges = collect(range(-2.0, 0.0, length = 51))
+    none = Tuple{Float64, Float64}[]
+    # A value on an edge goes in the bar that starts there: -1.8 and -1.79 both belong in
+    # [-1.8, -1.76). Dividing by the bin width put -1.8 in the bar below.
     vals = vcat(fill(log10(0.01), 10), fill(log10(10^-1.8), 50), fill(log10(10^-1.79), 50))
-    c = SMLMAnalysis._bin_counts(vals, edges)
-    @test c[1] == 10 && c[6] == 100 && sum(c) == 110
-    # p = 1 (the top edge) goes in the last bin; values outside the edges are not counted.
-    @test SMLMAnalysis._bin_counts([0.0, 0.5, -3.0], edges) == [zeros(Int, 49); 1]
+    c = SMLMAnalysis._panel_counts(vals, edges, nothing, none)
+    @test c.counts[1] == 10 && c.counts[6] == 100 && sum(c.counts) == 110 && c.beyond == 0
+    # The top edge goes in the last bar; values beyond the view on an unshaded side are not drawn.
+    c = SMLMAnalysis._panel_counts([0.0, 0.5, -3.0, NaN], edges, nothing, none)
+    @test c.counts == [zeros(Int, 49); 1] && c.beyond == 0
+    # A value on an upper bound passes the filter, so it goes in the bar below the bound.
+    e = [0.0, 1.0, 2.0, 3.0]
+    c = SMLMAnalysis._panel_counts([2.0], e, (-Inf, 2.0), [(2.0, 3.0)])
+    @test c.counts == [0, 1, 0]
+    # A value on a lower bound passes and goes in the bar that starts at the bound.
+    c = SMLMAnalysis._panel_counts([1.0], e, (1.0, Inf), [(0.0, 1.0)])
+    @test c.counts == [0, 1, 0]
+    # Beyond the view on a shaded side: rejected, drawn in that end's bar.
+    c = SMLMAnalysis._panel_counts([-5.0, -Inf, 9.0], e, (1.0, 2.0), [(0.0, 1.0), (2.0, 3.0)])
+    @test c.counts == [2, 0, 1] && c.beyond == 3
     # The pass percentage uses the filter's own test: inclusive ends and the upper bound.
     pp = SMLMAnalysis._pass_percent
     @test pp([0.4, 0.4, 0.4], (0.4, 1.0)) == 100.0
     @test pp([0.1, 0.5, 0.9], (0.2, 0.8)) == round(100 / 3, digits = 1)
 end
 
-@testset "Filter figures show both sides of a filter range" begin
-    rs = SMLMAnalysis._rejected_spans
-    # Lower bound only, upper only, both, open, and a bound at the window edge.
-    @test rs(500, Inf, 0, 1000) == (spans = [(0.0, 500.0)], thresholds = [500.0])
-    @test rs(-Inf, 800, 0, 840) == (spans = [(800.0, 840.0)], thresholds = [800.0])
-    @test rs(5, 20, 0, 24) == (spans = [(0.0, 5.0), (20.0, 24.0)], thresholds = [5.0, 20.0])
-    @test rs(-Inf, Inf, 0, 10) == (spans = Tuple{Float64, Float64}[], thresholds = Float64[])
-    @test rs(0, Inf, 0, 10).spans == Tuple{Float64, Float64}[]
-    # log10 p window: p from 0.2 to 0.8 rejects on both sides.
-    r = rs(log10(0.2), log10(0.8), -4.0, 0.0)
-    @test r.thresholds ≈ [log10(0.2), log10(0.8)]
+@testset "Panel geometry" begin
+    g = SMLMAnalysis._panel_geometry
+    # A bound beyond the window that rejects values extends the view, with margin, and is an edge.
+    r = g((0.0, 4463.0), (10.0, 9000.0), [(-Inf, 6000.0)])
+    @test r.view[1] == 0.0 && 6000 < r.view[2] && r.lines == [6000.0] && 6000.0 in r.edges
+    # Sign-safe margin: a positive lower z bound below the data stays inside the view.
+    r = g((200.0, 300.0), (200.0, 300.0), [(100.0, 400.0)])
+    @test r.view[1] < 100 && r.view[2] > 400 && r.lines == [100.0, 400.0]
+    # A bound that rejects nothing and lies far from the data is left off.
+    r = g((0.0, 4000.0), (10.0, 5000.0), [(200.0, 1.0e20)])
+    @test r.lines == [200.0] && r.view[2] == 4000.0
+    # A bound on the window edge gets margin, so it is strictly inside.
+    r = g((0.0, 10.0), (0.0, 10.0), [(0.0, Inf)])
+    @test r.view[1] < 0.0 && r.lines == [0.0]
+    # ...unless it rejects nothing and sits at the panel's floor (photons or precision of 0).
+    r = g((0.0, 10.0), (0.5, 10.0), [(0.0, Inf)]; floor = 0.0)
+    @test r.view == (0.0, 10.0) && isempty(r.lines)
+    # Edges increase strictly and no bar straddles a bound.
+    r = g((0.0, 1.0), (0.0, 1.0), [(0.3001, 0.7)])
+    @test issorted(r.edges) && allunique(r.edges) && 0.3001 in r.edges && 0.7 in r.edges
+    # Spans: whole view for a range that rejects everything; only the shaded sides.
+    s = SMLMAnalysis._panel_spans
+    @test s((0.0, 10.0), (Inf, Inf), (:lo, :hi)) == [(0.0, 10.0)]
+    @test s((0.0, 10.0), (-Inf, -Inf), (:lo, :hi)) == [(0.0, 10.0)]
+    @test s((0.0, 10.0), (2.0, 8.0), (:hi,)) == [(8.0, 10.0)]
+    @test s((0.0, 10.0), (-Inf, Inf), (:lo, :hi)) == Tuple{Float64, Float64}[]
+end
 
-    # The overlay legend names an active upper p-value bound.
+# What each fit_quality.png panel draws, checked against the filter. Every bound that rejects a
+# value lies strictly inside the view, on a bar edge. In each shaded span the bars hold exactly
+# the values that side of the range rejects, those beyond the view on that side included. Every
+# value inside the view is drawn once.
+function _check_quality_panels(emitters, cfg)
+    panels = SMLMAnalysis._quality_panels(emitters, cfg)
+    for (key, p) in panels
+        vlo, vhi = p.view
+        @test vlo < vhi
+        @test issorted(p.edges) && allunique(p.edges) && first(p.edges) == vlo && last(p.edges) == vhi
+        for s in p.series
+            vals = filter(!isnan, s.values)
+            @test sum(s.counts) == count(v -> vlo <= v <= vhi, vals) + s.beyond
+            s.bounds === nothing && continue
+            lo, hi = s.bounds
+            for (b, rejects) in ((lo, any(<(lo), vals)), (hi, any(>(hi), vals)))
+                if isfinite(b) && rejects && abs(b) < 1.0e30
+                    @test vlo < b < vhi
+                    @test b in p.edges
+                    @test b in s.lines || b in s.dashed
+                end
+            end
+            expected = Tuple{Float64, Float64}[]
+            rejected = Int[]
+            # A NaN end rejects everything (it fails every comparison).
+            if :lo in s.sides && (isnan(lo) || lo > vlo)
+                push!(expected, (vlo, isnan(lo) ? vhi : min(lo, vhi)))
+                push!(rejected, isnan(lo) ? length(vals) : count(<(lo), vals))
+            end
+            if :hi in s.sides && (isnan(hi) || hi < vhi)
+                push!(expected, (isnan(hi) ? vlo : max(hi, vlo), vhi))
+                push!(rejected, isnan(hi) ? length(vals) : count(>(hi), vals))
+            end
+            @test s.spans == expected
+            for ((a, b), n) in zip(s.spans, rejected)
+                drawn = sum((s.counts[i] for i in eachindex(s.counts) if p.edges[i] >= a && p.edges[i + 1] <= b); init = 0)
+                @test drawn == n
+            end
+        end
+    end
+    return panels
+end
+
+_fit2d(; photons, bg = 5.0, σ = 0.13, px = 0.01, py = 0.01, pvalue = 0.5, i = 1) =
+    GaussMLE.Emitter2DFitSigma{Float64}(0.8, 0.8, photons, bg, σ, px, py, 0.0, 30.0, 0.5, 0.002, pvalue, i, 1, 0, i)
+
+@testset "Filter figures draw what the filter rejects" begin
+    cam = IdealCamera(16, 16, 0.1)
+    smld_of(es) = SMLMAnalysis.BasicSMLD(es, cam, length(es), 1, Dict{String, Any}())
+    rng = Random.Xoshiro(7)
+    n = 2000
+    # Mostly ordinary fits; a bright tail above the 98th percentile, a few wide PSFs, poor
+    # precisions and p-values far below every view.
+    es = [
+        _fit2d(
+            photons = i <= 60 ? 6000 + 3000 * rand(rng) : 1000 + 3000 * rand(rng),
+            σ = i % 50 == 0 ? 0.25 : 0.12 + 0.03 * rand(rng),
+            px = i % 97 == 0 ? 0.5 : 0.005 + 0.02 * rand(rng),
+            py = 0.005 + 0.02 * rand(rng),
+            pvalue = i % 40 == 0 ? 1.0e-12 : (i % 333 == 0 ? 0.0 : rand(rng)),
+            i = i
+        ) for i in 1:n
+    ]
+    smld = smld_of(es)
+    removed(cfg) = n - length(SMLMAnalysis._filter_smld(smld, cfg).emitters)
+    spans_total(s, edges) = sum(
+        (s.counts[i] for i in eachindex(s.counts) if any(sp -> edges[i] >= sp[1] && edges[i + 1] <= sp[2], s.spans));
+        init = 0
+    )
+
+    # Review case: an upper photon bound above the 98th percentile. Every fit it rejects is
+    # drawn in the shaded band, and the passing fits between the percentile and the bound show.
+    cfg = FilterConfig(photons = (-Inf, 6000))
+    p = _check_quality_panels(es, cfg)[:photons]
+    @test spans_total(p.series[1], p.edges) == removed(cfg) == 60
+    @test sum(p.series[1].counts) == n
+    # Review case: a lower p-value bound far below the data's 2% quantile; p = 0 included.
+    cfg = FilterConfig(pvalue = (1.0e-9, 1))
+    p = _check_quality_panels(es, cfg)[:pvalue]
+    @test spans_total(p.series[1], p.edges) == removed(cfg) == 50 + 6
+    for cfg in (
+            FilterConfig(photons = (2000, Inf)), FilterConfig(photons = (1500, 3500)),
+            FilterConfig(photons = (1.0e6, Inf)), FilterConfig(photons = (-Inf, -1)),
+            FilterConfig(photons = (200, 1.0e20)), FilterConfig(photons = (0, Inf)),
+            FilterConfig(photons = (3000, 2000)),
+            FilterConfig(pvalue = (0.2, 0.8)), FilterConfig(pvalue = (0, 0)), FilterConfig(pvalue = (-Inf, -0.1)),
+            FilterConfig(pvalue = (1.0e-3, 1)), FilterConfig(pvalue = (1.0, 1.0)),
+            FilterConfig(psf_sigma = :auto), FilterConfig(psf_sigma = (0.13, 0.14)),
+            FilterConfig(psf_sigma = (0.3, Inf)),
+        )
+        p = _check_quality_panels(es, cfg)
+        key = cfg.photons !== nothing ? :photons : cfg.pvalue !== nothing ? :pvalue : :psf
+        lo, hi = p[key].series[1].bounds === nothing ? (-Inf, Inf) : p[key].series[1].bounds
+        lo <= hi && @test spans_total(p[key].series[1], p[key].edges) == removed(cfg)
+        @test _quality_figure_saves(smld, cfg)
+    end
+    # Precision: the upper bound is shaded and its rejected components drawn there; the lower
+    # bound (on max(σx, σy)) is a dashed line.
+    for cfg in (FilterConfig(precision = (0.01, 0.02)), FilterConfig(precision = (0.02, Inf)), FilterConfig(precision = (0, 0.015)))
+        p = _check_quality_panels(es, cfg)[:precision]
+        lo = cfg.precision[1] * 1000
+        @test all(s -> (lo > 0) == (lo in s.dashed), p.series)
+        @test _quality_figure_saves(smld, cfg)
+    end
+
+    # Anisotropic PSF: per-axis :auto bounds differ, explicit bounds are shared.
+    xy = [
+        GaussMLE.Emitter2DFitSigmaXY{Float64}(
+            0.8, 0.8, 1000.0, 5.0, 0.12 + 0.02 * rand(rng) + (i % 30 == 0 ? 0.1 : 0.0),
+            0.15 + 0.02 * rand(rng), 0.01, 0.01, 0.0, 30.0, 0.5, 0.002, 0.002, rand(rng), i, 1, 0, i
+        ) for i in 1:500
+    ]
+    for cfg in (FilterConfig(psf_sigma = :auto), FilterConfig(psf_sigma = (0.13, 0.16)), FilterConfig(psf_sigma = (0.2, 0.4)))
+        p = _check_quality_panels(xy, cfg)[:psf]
+        @test all(s -> s.bounds !== nothing, p.series)
+        @test _quality_figure_saves(smld_of(xy), cfg)
+    end
+
+    # 3D, all z in 0.2-0.3 µm. Positive bounds below the data stay inside the view (the old
+    # 1.1x widening moved them toward zero). z = (0.1, 0.4) rejects nothing and lies more than
+    # a window width away, so it is not drawn and nothing is shaded.
+    e3 = [
+        SMLMAnalysis.Emitter3DFit{Float64}(
+            0.8, 0.8, 0.2 + 0.1 * rand(rng), 1000.0, 10.0, 0.01, 0.01, 0.02 + 0.03 * rand(rng), 30.0, 1.0; frame = i
+        ) for i in 1:500
+    ]
+    p = _check_quality_panels(e3, FilterConfig(z = (0.15, 0.35)))[:z]
+    @test p.view[1] < 150 && p.view[2] > 350 && p.series[1].lines ≈ [150.0, 350.0]
+    p = _check_quality_panels(e3, FilterConfig(z = (0.1, 0.4)))[:z]
+    @test isempty(p.series[1].lines) && isempty(p.series[1].spans)
+    for cfg in (FilterConfig(z = (0.22, 0.28)), FilterConfig(z = (-0.4, -0.1)), FilterConfig(sigma_z = (0.03, 0.04)), FilterConfig(sigma_z = (0, 0.03)))
+        _check_quality_panels(e3, cfg)
+        @test _quality_figure_saves(smld_of(e3), cfg)
+    end
+end
+
+@testset "Fit overlay title" begin
     t = SMLMAnalysis._fit_overlay_title
     es = [_sigma_emitter()]
+    @test occursin("red=photons<500/>5000", t(FilterConfig(photons = (500, 5000)), es))
+    @test occursin("red=photons<500  ", t(FilterConfig(photons = (500, Inf)), es))
+    # Open bounds reject nothing: no label.
+    @test !occursin("photons", t(FilterConfig(photons = (-Inf, Inf)), es))
+    @test occursin("red=photons>5000", t(FilterConfig(photons = (-Inf, 5000)), es))
+    # A finite bound too large for an Int is labeled, not an InexactError.
+    @test occursin("red=photons<200/>1.0e20", t(FilterConfig(photons = (200, 1.0e20)), es))
+    @test !occursin("prec", t(FilterConfig(precision = (0, Inf)), es))
+    @test occursin("orange=prec>20.0nm", t(FilterConfig(precision = (0, 0.02)), es))
+    @test occursin("orange=prec<20.0nm", t(FilterConfig(precision = (0.02, Inf)), es))
+    @test occursin("orange=prec<5.0nm/>20.0nm", t(FilterConfig(precision = (0.005, 0.02)), es))
+    # The p-value label names the range, which a NaN p-value also fails.
     @test occursin("purple=pval not in [0.2, 0.8]", t(FilterConfig(pvalue = (0.2, 0.8)), es))
-    @test occursin("purple=pval not in [0.001, 1.0]", t(FilterConfig(pvalue = (0.001, 1.0)), es))
-    # A NaN p-value fails the range test, so the filter rejects it (drawn purple); the label
-    # names the range rather than an inequality NaN does not satisfy.
     nan_p = _sigma_emitter(pvalue = NaN)
     cfg = FilterConfig(pvalue = (0.001, 1.0))
     @test !SMLMAnalysis._in_range(nan_p.pvalue, cfg.pvalue)
     @test occursin("purple=pval not in [0.001, 1.0]", t(cfg, [nan_p]))
-    @test !occursin("pval<", t(cfg, [nan_p]))
+    # PSF bounds are named as the filter applies them; a skipped degenerate :auto has no label.
+    @test occursin("cyan=psf_σ not in [100.0, 200.0]nm", t(FilterConfig(psf_sigma = (0.1, 0.2)), es))
+    @test occursin("cyan=psf_σ not in [117.0, 143.0]nm", t(FilterConfig(psf_sigma = :auto), es))
+    @test !occursin("cyan", t(FilterConfig(psf_sigma = :auto), [_sigma_emitter(σ = 0.0)]))
+    xy = GaussMLE.Emitter2DFitSigmaXY{Float64}(0.8, 0.8, 1000.0, 5.0, 0.13, 0.14, 0.01, 0.01, 0.0, 30.0, 0.5, 0.002, 0.002, 0.4, 1, 1, 0, 1)
+    @test occursin("cyan=psf_σx not in [100.0, 200.0]nm or σy not in [100.0, 200.0]nm", t(FilterConfig(psf_sigma = (0.1, 0.2)), [xy]))
+end
 
-    # Each input the filter rejects on the side that was not drawn before saves its figure.
+@testset "Filter figures save for each side of a range" begin
     cam = IdealCamera(16, 16, 0.1)
     smld_of(es) = SMLMAnalysis.BasicSMLD(es, cam, 20, 1, Dict{String, Any}())
     @test _quality_figure_saves(smld_of([_sigma_emitter(photons = 1000.0)]), FilterConfig(photons = (-Inf, 800)))
@@ -274,36 +428,11 @@ end
         ),
     ]
     @test _quality_figure_saves(smld_of(e3), FilterConfig(sigma_z = (0.02, Inf)))
-
     # Unequal axes: the filter tests max(σx, σy) = 30 nm, so a 20 nm lower bound keeps this fit.
     unequal = GaussMLE.Emitter2DFitSigma{Float64}(0.8, 0.8, 1000.0, 5.0, 0.13, 0.01, 0.03, 0.0, 30.0, 0.5, 0.002, 0.4, 1, 1, 0, 1)
     @test _quality_figure_saves(smld_of([unequal]), FilterConfig(precision = (0.02, Inf)))
-end
-
-@testset "P-value panel window and bounds" begin
-    pw = SMLMAnalysis._pvalue_window
-    rs = SMLMAnalysis._rejected_spans
-    # Both thresholds of (0.2, 0.8) lie inside the window even when the data sit near p = 1.
-    w = pw(-0.0457575, (0.2, 0.8))
-    @test w.lo_log ≈ log10(0.2) && w.hi_log ≈ log10(0.8)
-    @test w.x_lo <= w.lo_log < w.hi_log < 0
-    @test all(t -> w.x_lo <= t <= 0, rs(w.lo_log, w.hi_log, w.x_lo, 0.0).thresholds)
-    # An ordinary lower bound inside the data window leaves the window as it was.
-    w = pw(-5.0, (0.001, 1.0))
-    @test w.x_lo == -5.0 && w.lo_log ≈ -3.0 && w.hi_log == Inf
-    # Upper bounds at or below 0 pass no positive p-value: the whole window is rejected and
-    # no logarithm of a non-positive number is taken.
-    for b in ((-Inf, -0.1), (0.0, 0.0))
-        w = pw(-2.0, b)
-        @test w.hi_log == w.x_lo == -2.0
-        @test rs(w.lo_log, w.hi_log, w.x_lo, 0.0).spans == [(-2.0, 0.0)]
-    end
-    @test pw(-2.0, nothing) == (x_lo = -2.0, lo_log = -Inf, hi_log = Inf)
-
-    cam = IdealCamera(16, 16, 0.1)
     es = [_sigma_emitter(pvalue = p, frame = i) for (i, p) in enumerate((0.1, 0.5, 0.9))]
-    smld = SMLMAnalysis.BasicSMLD(es, cam, 3, 1, Dict{String, Any}())
     for cfg in (FilterConfig(pvalue = (-Inf, -0.1)), FilterConfig(pvalue = (0, 0)), FilterConfig(pvalue = (0.2, 0.8)))
-        @test _quality_figure_saves(smld, cfg)
+        @test _quality_figure_saves(smld_of(es), cfg)
     end
 end

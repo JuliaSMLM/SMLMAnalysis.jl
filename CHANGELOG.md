@@ -43,7 +43,8 @@ the last number (0.1.Z) is non-breaking; one that raises the middle number
 - The filter precision panel no longer throws when every precision is above its 1 µm display cutoff.
 - The detection and fit overlays no longer throw on sample frames that contain NaN pixels; the contrast stretch uses the finite pixels.
 - The fit overlay applies an explicit `FilterConfig(psf_sigma = (0, hi))`: fits the filter rejects for PSF width are drawn cyan, not green. Only `:auto` is skipped when no PSF-width mode can be found.
-- The filter figures draw every bound the filter applies, and the fit overlay legend names them: an upper photon bound, a lower `sigma_z` bound and an upper p-value bound were applied but not shown. A lower precision bound is a dashed line, not a shaded region, because the filter tests the larger of σ_x and σ_y. The legend gives the whole p-value range, which a NaN p-value also fails.
+- The filter figures draw every bound that rejects a fit, and the fits it rejects: an upper photon bound, a lower `sigma_z` bound, an upper p-value bound and the anisotropic PSF bounds were applied but not shown, and a shaded region could hold none of its rejected fits because the histogram stopped at the data's 2-98% range. Each panel's bars now cover its whole view, every bound is a bar edge, and rejected fits beyond the axis are counted in the end bar (the panel title says how many). A positive lower `z` bound or negative upper one no longer falls outside the view. A lower precision bound is a dashed line, not a shaded region, because the filter tests the larger of σ_x and σ_y.
+- The fit overlay legend names the p-value range (which a NaN p-value also fails) and the PSF-width bounds the filter applies, and no longer throws on a photon bound too large for an integer, such as `FilterConfig(photons = (200, 1e20))`.
 
 ## [0.2.0] - 2026-10-21
 

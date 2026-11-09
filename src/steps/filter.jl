@@ -113,80 +113,295 @@ end
 # (_fit_box_color) uses the same predicate to colour exactly what the filter rejects.
 _in_range(v, (lo, hi)) = lo <= v <= hi
 
-"""
-    _rejected_spans(lo, hi, view_lo, view_hi) -> (; spans, thresholds)
-
-What a filter range `(lo, hi)` rejects inside a figure's x window `[view_lo, view_hi]`:
-`[view_lo, lo]` when `lo` is finite and above `view_lo`, and `[hi, view_hi]` when `hi` is
-finite and below `view_hi`, with a threshold line at each such bound. An open (infinite)
-bound, or one at the window's edge, rejects nothing shown and gets neither.
-"""
-function _rejected_spans(lo, hi, view_lo, view_hi)
-    spans = Tuple{Float64, Float64}[]
-    thresholds = Float64[]
-    if isfinite(lo) && lo > view_lo
-        push!(spans, (Float64(view_lo), Float64(lo)))
-        push!(thresholds, Float64(lo))
-    end
-    if isfinite(hi) && hi < view_hi
-        push!(spans, (Float64(hi), Float64(view_hi)))
-        push!(thresholds, Float64(hi))
-    end
-    return (; spans, thresholds)
-end
-
-function _draw_rejected!(ax, r, region_color, line_color; spans = true, lines = true)
-    if spans
-        for (a, b) in r.spans
-            vspan!(ax, a, b, color = region_color)
-        end
-    end
-    lines && !isempty(r.thresholds) && vlines!(ax, r.thresholds, color = line_color, linestyle = :dot, linewidth = 2)
-    return nothing
-end
-
-"""
-    _pvalue_window(pval_lo, bounds) -> (; x_lo, lo_log, hi_log)
-
-The p-value panel's log10 x window `[x_lo, 0]` and the filter bounds in log10 space.
-`x_lo` starts at the data's `pval_lo` and widens to show every active bound inside (0, 1).
-Bounds of 0 and 1 reject nothing (`-Inf`, `Inf`). An upper bound at or below 0 passes no
-positive p-value, so `hi_log = x_lo` and the whole window is rejected; a lower bound at or
-above 1 likewise puts `lo_log` at or past the window's right end. No logarithm is taken of a
-non-positive bound.
-"""
-function _pvalue_window(pval_lo, bounds)
-    x_lo = Float64(pval_lo)
-    bounds === nothing && return (; x_lo, lo_log = -Inf, hi_log = Inf)
-    p_lo, p_hi = bounds
-    lo_log = p_lo > 0 ? log10(p_lo) : -Inf
-    hi_log = 0 < p_hi < 1 ? log10(p_hi) : Inf
-    for t in (lo_log, hi_log)
-        isfinite(t) && t < 0 && (x_lo = min(x_lo, 1.05 * t))
-    end
-    p_hi <= 0 && (hi_log = x_lo)
-    return (; x_lo, lo_log, hi_log)
-end
-
 # Percentage of `values` the filter keeps for `range`, by the same test the filter uses.
 _pass_percent(values, range) = round(100 * count(v -> _in_range(v, range), values) / length(values), digits = 1)
 
-"""
-    _bin_counts(values, edges) -> Vector{Int}
+# Smallest and largest non-NaN value (either may be infinite), or (NaN, NaN) if there is none.
+function _value_extent(values)
+    lo, hi = Inf, -Inf
+    for v in values
+        isnan(v) && continue
+        lo = min(lo, v)
+        hi = max(hi, v)
+    end
+    return lo <= hi ? (Float64(lo), Float64(hi)) : (NaN, NaN)
+end
 
-Count `values` into the bins `[edges[i], edges[i+1])` by comparing with the stored edge values
-(dividing by the bin width can put a value that sits on an edge into the bin below). The top
-edge belongs to the last bin; values outside `[first(edges), last(edges)]` are not counted.
+# Bounds whose magnitude cannot be drawn on a Float32 axis do not set the view.
+const _PANEL_MAX_BOUND = Float64(floatmax(Float32)) / 4
+
 """
-function _bin_counts(values, edges::AbstractVector)
+    _panel_geometry(window, extent, bounds; nbins = 50) -> (; view, edges, lines)
+
+The x view, bin edges and threshold lines of one fit_quality.png histogram panel.
+
+- `window = (lo, hi)`: what the panel shows without a filter (data quantiles).
+- `extent = (min, max)`: the data's full range, to tell whether a bound rejects any value.
+- `bounds`: the filter ranges `(lo, hi)` drawn on this panel, in the panel's units.
+
+A finite bound is drawn when it rejects a value (`lo > min` or `hi < max`) or lies within one
+window width of the window; a bound beyond that rejects nothing and is left off, as is one at or
+below `floor` that rejects nothing (a lower bound of 0 on photons or a precision). The view
+covers the window and every drawn bound; a side that a bound extends (or touches) gets 5% of the
+view's width as margin, so each drawn bound lies strictly inside the view. `edges` are about
+`nbins` equal bins over the view with every drawn bound inserted as an edge, so no bar straddles
+a threshold. `lines` are the drawn bounds.
+"""
+function _panel_geometry(window, extent, bounds; nbins::Int = 50, floor = -Inf)
+    dlo, dhi = _plot_limits(Float64(window[1]), Float64(window[2]))
+    dmin, dmax = extent
+    reach = dhi - dlo
+    lines = Float64[]
+    for (lo, hi) in bounds, (b, rejects) in ((lo, lo > dmin), (hi, hi < dmax))
+        (isfinite(b) && abs(b) <= _PANEL_MAX_BOUND) || continue
+        (rejects || (b > floor && dlo - reach <= b <= dhi + reach)) && push!(lines, Float64(b))
+    end
+    lo_ext = minimum(lines; init = dlo)
+    hi_ext = maximum(lines; init = dhi)
+    pad = 0.05 * (hi_ext - lo_ext)
+    vlo = any(<=(dlo), lines) ? lo_ext - pad : dlo
+    vhi = any(>=(dhi), lines) ? hi_ext + pad : dhi
+    view = _plot_limits(vlo, vhi)
+    lines = sort!(unique!(filter(t -> view[1] < t < view[2], lines)))
+    w = (view[2] - view[1]) / nbins
+    uniform = range(view[1], view[2], length = nbins + 1)
+    interior = filter(e -> all(t -> abs(e - t) >= w / 4, lines), uniform[2:(end - 1)])
+    edges = sort!(unique!(vcat(view[1], interior, lines, view[2])))
+    return (; view, edges, lines)
+end
+
+"""
+    _panel_spans(view, bounds, sides) -> Vector{Tuple{Float64, Float64}}
+
+The parts of `view` that the filter range `bounds = (lo, hi)` rejects, on the `sides` it shades:
+`(view_lo, lo)` below a lower bound and `(hi, view_hi)` above an upper bound, clipped to the view.
+A range that rejects everything (`lo = Inf`, `hi = -Inf`, a NaN end) shades the whole view.
+"""
+function _panel_spans(view, bounds, sides)
+    vlo, vhi = view
+    lo, hi = bounds
+    spans = Tuple{Float64, Float64}[]
+    if :lo in sides && (isnan(lo) || lo > vlo)
+        push!(spans, (vlo, isnan(lo) ? vhi : min(Float64(lo), vhi)))
+    end
+    if :hi in sides && (isnan(hi) || hi < vhi)
+        push!(spans, (isnan(hi) ? vlo : max(Float64(hi), vlo), vhi))
+    end
+    return spans
+end
+
+"""
+    _panel_counts(values, edges, bounds, spans) -> (; counts, beyond)
+
+Bar counts over `edges` (bins `[edges[i], edges[i+1])`, the top edge in the last bin), compared
+with the stored edges rather than divided by the bin width. A value on an upper bound passes the
+filter, so it goes in the bar below that bound, outside the shaded span. Values beyond the view on
+a side whose shaded span reaches the view's end are rejected, so they are drawn in that end's bar
+(`beyond` counts them); on any other side they are not drawn, as the window clips them.
+"""
+function _panel_counts(values, edges, bounds, spans)
     nb = length(edges) - 1
     counts = zeros(Int, nb)
+    vlo, vhi = first(edges), last(edges)
+    pile_lo = any(s -> s[1] == vlo, spans)
+    pile_hi = any(s -> s[2] == vhi, spans)
+    hi = bounds === nothing ? NaN : Float64(bounds[2])
+    rejected(v) = bounds !== nothing && !_in_range(v, bounds)
+    beyond = 0
     for v in values
-        first(edges) <= v <= last(edges) || continue
-        counts[min(searchsortedlast(edges, v), nb)] += 1
+        isnan(v) && continue
+        if v < vlo
+            pile_lo && rejected(v) && (counts[1] += 1; beyond += 1)
+        elseif v > vhi
+            pile_hi && rejected(v) && (counts[nb] += 1; beyond += 1)
+        else
+            i = min(searchsortedlast(edges, v), nb)
+            v == hi && i > 1 && edges[i] == v && (i -= 1)
+            counts[i] += 1
+        end
     end
-    return counts
+    return (; counts, beyond)
 end
+
+"""
+    _histogram_panel(window, series; density = false)
+
+Everything one fit_quality.png histogram panel draws, as data. `series` holds one
+`(; name, values, bounds, sides)` per overlaid histogram: values in the panel's units, the
+filter range applied to them (or `nothing`) and the sides of it that reject on their own
+(`(:lo, :hi)`; the precision panel shades only `(:hi,)`, since the filter tests max(σx, σy)).
+Returns `(; view, edges, density, series)`, each series with its `spans`, `lines` (bounds on
+shaded sides), `dashed` (bounds on unshaded sides), `counts` and `beyond`.
+"""
+function _histogram_panel(window, series; density::Bool = false, floor = -Inf)
+    extent = _value_extent(reduce(vcat, [s.values for s in series]; init = Float64[]))
+    g = _panel_geometry(window, extent, [s.bounds for s in series if s.bounds !== nothing]; floor)
+    out = map(series) do s
+        if s.bounds === nothing
+            c = _panel_counts(s.values, g.edges, nothing, Tuple{Float64, Float64}[])
+            return (;
+                s.name, s.values, s.bounds, s.sides, spans = Tuple{Float64, Float64}[],
+                lines = Float64[], dashed = Float64[], c.counts, c.beyond,
+            )
+        end
+        spans = _panel_spans(g.view, s.bounds, s.sides)
+        on_line(b) = any(==(b), g.lines)
+        lo, hi = s.bounds
+        lines = Float64[b for (b, side) in ((lo, :lo), (hi, :hi)) if side in s.sides && on_line(b)]
+        dashed = Float64[b for (b, side) in ((lo, :lo), (hi, :hi)) if !(side in s.sides) && on_line(b)]
+        c = _panel_counts(s.values, g.edges, s.bounds, spans)
+        return (; s.name, s.values, s.bounds, s.sides, spans, lines, dashed, c.counts, c.beyond)
+    end
+    return (; g.view, g.edges, density, series = out)
+end
+
+_um_to_nm(b) = b === nothing ? nothing : (b[1] * 1000, b[2] * 1000)
+
+# p-value bounds in log10 space, where p = 0 is -Inf: a lower bound at or below 0 and an upper
+# bound at or above 1 reject nothing; an upper bound of 0 keeps only p = 0 (-Inf); a negative
+# upper bound keeps nothing (NaN fails every comparison). No logarithm of a non-positive number.
+function _log10_pvalue_bounds(bounds)
+    bounds === nothing && return nothing
+    p_lo, p_hi = bounds
+    lo = p_lo > 0 ? log10(p_lo) : -Inf
+    hi = p_hi >= 1 ? Inf : (p_hi > 0 ? log10(p_hi) : (p_hi == 0 ? -Inf : NaN))
+    return (lo, hi)
+end
+
+"""
+    _quality_panels(emitters, cfg) -> Dict{Symbol, NamedTuple}
+
+The histogram panels of fit_quality.png as data (see `_histogram_panel`), keyed `:photons`,
+`:precision`, `:pvalue`, `:psf`, `:z` and `:sigma_z` (each only when the emitters have the
+field). Bounds are the ones `_filter_smld` applies: PSF widths come from `_resolve_psf_bounds`,
+so a degenerate `:auto` that the filter skips draws nothing. The figure draws exactly these
+spans, lines and counts, so a test of this function tests what the figure shows.
+"""
+function _quality_panels(emitters, cfg::FilterConfig)
+    panels = Dict{Symbol, Any}()
+    isempty(emitters) && return panels
+    e1 = first(emitters)
+    both = (:lo, :hi)
+
+    photons = Float64[e.photons for e in emitters]
+    panels[:photons] = _histogram_panel(
+        (0.0, quantile(photons, 0.98)),
+        [(; name = "photons", values = photons, bounds = cfg.photons, sides = both)];
+        floor = 0.0
+    )
+
+    σ_x = Float64[e.σ_x for e in emitters] .* 1000
+    σ_y = Float64[e.σ_y for e in emitters] .* 1000
+    # Truncate at 1 μm before taking the window's quantile; with nothing below it, show 0-1 μm.
+    prec_data = filter(<=(1000.0), vcat(σ_x, σ_y))
+    prec98 = isempty(prec_data) ? 1000.0 : quantile(prec_data, 0.98)
+    pb = _um_to_nm(cfg.precision)
+    panels[:precision] = _histogram_panel(
+        (0.0, prec98),
+        [
+            (; name = "σ_x", values = σ_x, bounds = pb, sides = (:hi,)),
+            (; name = "σ_y", values = σ_y, bounds = pb, sides = (:hi,)),
+        ];
+        floor = 0.0
+    )
+
+    if _has_pvalue(emitters)
+        p = Float64[e.pvalue for e in emitters]
+        logp = log10.(filter(>=(0), p))  # p = 0 gives -Inf, below every view
+        finite_logp = filter(isfinite, logp)
+        pval_lo = isempty(finite_logp) ? -1.0 : quantile(finite_logp, 0.02)
+        # p-values at (or rounding to) 1 put the 2nd percentile at 0; span one decade instead.
+        pval_lo >= -1.0e-3 && (pval_lo = -1.0)
+        panels[:pvalue] = _histogram_panel(
+            (pval_lo, 0.0),
+            [(; name = "log10(p)", values = logp, bounds = _log10_pvalue_bounds(cfg.pvalue), sides = both)];
+            density = true
+        )
+    end
+
+    psf = _resolve_psf_bounds(emitters, cfg)
+    if hasproperty(e1, :σx) && hasproperty(e1, :σy)
+        psf_σx = Float64[e.σx for e in emitters] .* 1000
+        psf_σy = Float64[e.σy for e in emitters] .* 1000
+        pooled = vcat(psf_σx, psf_σy)
+        bx = psf === nothing ? nothing : (psf.lo_x * 1000, psf.hi_x * 1000)
+        by = psf === nothing ? nothing : (psf.lo_y * 1000, psf.hi_y * 1000)
+        panels[:psf] = _histogram_panel(
+            (quantile(pooled, 0.02), quantile(pooled, 0.98)),
+            [
+                (; name = "σx", values = psf_σx, bounds = bx, sides = both),
+                (; name = "σy", values = psf_σy, bounds = by, sides = both),
+            ];
+            floor = 0.0
+        )
+    elseif hasproperty(e1, :σ)
+        psf_σ = Float64[e.σ for e in emitters] .* 1000
+        b = psf === nothing ? nothing : (psf.lo * 1000, psf.hi * 1000)
+        panels[:psf] = _histogram_panel(
+            (quantile(psf_σ, 0.02), quantile(psf_σ, 0.98)),
+            [(; name = "σ", values = psf_σ, bounds = b, sides = both)];
+            floor = 0.0
+        )
+    end
+
+    if hasproperty(e1, :z) && hasproperty(e1, :σ_z)
+        z_nm = Float64[e.z for e in emitters] .* 1000
+        # Keep the full grid extent (quantiles, not tight) so a spike at the z-grid edge shows.
+        panels[:z] = _histogram_panel(
+            (quantile(z_nm, 0.002), quantile(z_nm, 0.998)),
+            [(; name = "z", values = z_nm, bounds = _um_to_nm(cfg.z), sides = both)]
+        )
+        σz_nm = Float64[e.σ_z for e in emitters] .* 1000
+        panels[:sigma_z] = _histogram_panel(
+            (0.0, quantile(σz_nm, 0.98)),
+            [(; name = "σ_z", values = σz_nm, bounds = _um_to_nm(cfg.sigma_z), sides = both)];
+            floor = 0.0
+        )
+    end
+    return panels
+end
+
+"""
+    _draw_histogram_panel!(ax, p, colors, alpha; rejected_color, threshold_color) -> (; plotted, beyond, ymax)
+
+Draw a `_histogram_panel` on `ax`: shaded spans under the bars (gray for one series or when all
+series share the same spans, else each series' own color, faint), bars from the panel's counts
+(density for the p-value panel) in `colors[k]` at `alpha`, threshold lines on top (dotted; dashed
+for a bound on an unshaded side), and the view as the x limits. `plotted` says whether any bar
+was drawn, `beyond` how many values sit in end bars from beyond the view, `ymax` the tallest bar.
+"""
+function _draw_histogram_panel!(ax, p, colors, alpha; rejected_color, threshold_color)
+    shared = length(p.series) == 1 || allequal([(s.spans, s.lines, s.dashed) for s in p.series])
+    for (k, s) in enumerate(p.series)
+        shared && k > 1 && break
+        c = shared ? rejected_color : (colors[k], 0.2)
+        for (a, b) in s.spans
+            vspan!(ax, a, b, color = c)
+        end
+    end
+    widths = diff(p.edges)
+    centers = p.edges[1:(end - 1)] .+ widths ./ 2
+    plotted = false
+    ymax = 0.0
+    for (k, s) in enumerate(p.series)
+        n = sum(s.counts)
+        n == 0 && continue
+        y = p.density ? s.counts ./ (n .* widths) : Float64.(s.counts)
+        barplot!(ax, centers, y, width = widths, gap = 0, color = (colors[k], alpha), label = s.name)
+        plotted = true
+        ymax = max(ymax, maximum(y))
+    end
+    for (k, s) in enumerate(p.series)
+        shared && k > 1 && break
+        lc = shared ? threshold_color : colors[k]
+        isempty(s.lines) || vlines!(ax, s.lines, color = lc, linestyle = :dot, linewidth = 2)
+        isempty(s.dashed) || vlines!(ax, s.dashed, color = lc, linestyle = :dash, linewidth = 2)
+    end
+    xlims!(ax, p.view...)
+    return (; plotted, beyond = sum(s.beyond for s in p.series), ymax)
+end
+
+_beyond_note(n) = n == 0 ? "" : " ($n rejected beyond the axis, in the end bar)"
 
 # P-values are optional on post-fit output; empty populations have no panel or criterion.
 _has_pvalue(emitters::AbstractVector) = !isempty(emitters) && _has_pvalue(first(emitters))
@@ -380,225 +595,110 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
     emitters = smld_raw.emitters
     isempty(emitters) && return
 
-    photons = [e.photons for e in emitters]
-    bg = [e.bg for e in emitters]
-    σ_x = [e.σ_x for e in emitters] .* 1000  # precision in nm
-    σ_y = [e.σ_y for e in emitters] .* 1000
+    # Every histogram panel is drawn from _quality_panels: its view, shaded spans, threshold
+    # lines and bar counts, which the tests check against the filter.
+    panels = _quality_panels(emitters, cfg)
+    is_3d = haskey(panels, :z)
 
-    # Check PSF model type
-    has_psf_iso = hasproperty(emitters[1], :σ)
-    has_psf_aniso = hasproperty(emitters[1], :σx)
-    # 3D fits get an extra row of z-position + axial-precision panels.
-    is_3d = hasproperty(emitters[1], :z) && hasproperty(emitters[1], :σ_z)
-
-    # Colors for consistent styling
     REJECTED_COLOR = (:gray30, 0.5)
     MEAN_COLOR = :blue
     MEDIAN_COLOR = :red
     THRESHOLD_COLOR = :black
+    draw!(ax, p, colors, alpha) = _draw_histogram_panel!(
+        ax, p, colors, alpha; rejected_color = REJECTED_COLOR, threshold_color = THRESHOLD_COLOR
+    )
+    center_lines!(ax, v) = (
+        vlines!(ax, [mean(v)], color = MEAN_COLOR, linestyle = :solid, linewidth = 2);
+        vlines!(ax, [median(v)], color = MEDIAN_COLOR, linestyle = :dash, linewidth = 2)
+    )
 
     fig = Figure(size = (1200, is_3d ? 1200 : 900))
 
     # Row 1: Photons and Background
-    p98 = quantile(photons, 0.98)
-    photons_xlim = p98
-    ax1 = Axis(fig[1, 1], xlabel = "Photons", ylabel = "Count", title = "Photon Distribution")
-    if cfg.photons !== nothing
-        photons_lo, photons_hi = cfg.photons
-        # A finite upper bound widens the view so its rejected region shows; open
-        # (infinite) bounds reject nothing and draw nothing.
-        isfinite(photons_hi) && (photons_xlim = max(p98, photons_hi * 1.05))
-        _draw_rejected!(ax1, _rejected_spans(photons_lo, photons_hi, 0, photons_xlim), REJECTED_COLOR, THRESHOLD_COLOR)
-    end
-    hist!(ax1, photons[photons .<= p98], bins = 50)
-    vlines!(ax1, [mean(photons)], color = MEAN_COLOR, linestyle = :solid, linewidth = 2)
-    vlines!(ax1, [median(photons)], color = MEDIAN_COLOR, linestyle = :dash, linewidth = 2)
-    xlims!(ax1, _plot_limits(0, photons_xlim)...)
+    photons = [e.photons for e in emitters]
+    ax1 = Axis(fig[1, 1], xlabel = "Photons", ylabel = "Count")
+    d = draw!(ax1, panels[:photons], [:steelblue], 0.8)
+    ax1.title = "Photon Distribution" * _beyond_note(d.beyond)
+    center_lines!(ax1, photons)
     text!(
         ax1, 0.97, 0.95, text = "mean: $(round(Int, mean(photons)))\nmedian: $(round(Int, median(photons)))",
         align = (:right, :top), space = :relative, fontsize = 10
     )
 
+    # The filter has no background criterion: a plain 0-98% histogram.
+    bg = [e.bg for e in emitters]
     bg98 = quantile(bg, 0.98)
     ax2 = Axis(fig[1, 2], xlabel = "Background", ylabel = "Count", title = "Background Distribution")
     hist!(ax2, bg[bg .<= bg98], bins = 50)
-    vlines!(ax2, [mean(bg)], color = MEAN_COLOR, linestyle = :solid, linewidth = 2)
-    vlines!(ax2, [median(bg)], color = MEDIAN_COLOR, linestyle = :dash, linewidth = 2)
+    center_lines!(ax2, bg)
     xlims!(ax2, _plot_limits(0, bg98)...)
     text!(
         ax2, 0.97, 0.95, text = "mean: $(round(mean(bg), digits = 1))\nmedian: $(round(median(bg), digits = 1))",
         align = (:right, :top), space = :relative, fontsize = 10
     )
 
-    # Row 2: Precision and P-value
-    prec_data = vcat(σ_x, σ_y)
-    prec_data = prec_data[prec_data .<= 1000.0]  # truncate at 1 μm before percentile stretch
-    # Every precision above the cutoff leaves nothing to stretch: show the empty 0-1 μm window.
-    prec98 = isempty(prec_data) ? 1000.0 : quantile(prec_data, 0.98)
-    prec_xlim = prec98
-
-    ax3 = Axis(fig[2, 1], xlabel = "Localization Precision (nm)", ylabel = "Count", title = "Precision Distribution")
-    if cfg.precision !== nothing
-        prec_lo, prec_hi = cfg.precision .* 1000  # convert um to nm
-        # Finite bounds widen the view so their rejected regions show; open bounds draw nothing.
-        isfinite(prec_hi) && (prec_xlim = max(prec98, prec_hi * 1.2))
-        isfinite(prec_lo) && prec_lo > 0 && (prec_xlim = max(prec_xlim, prec_lo * 1.2))
-        # The filter tests max(σx, σy). Any component above the upper bound is rejected, so
-        # that region is shaded; a component below the lower bound may still pass (the other
-        # axis decides), so the lower bound gets a dashed line and a note, not a region.
-        _draw_rejected!(ax3, _rejected_spans(-Inf, prec_hi, 0, prec_xlim), REJECTED_COLOR, THRESHOLD_COLOR)
-        if isfinite(prec_lo) && prec_lo > 0
-            vlines!(ax3, [prec_lo], color = THRESHOLD_COLOR, linestyle = :dash, linewidth = 2)
-        end
-    end
-    prec_note = (cfg.precision !== nothing && isfinite(cfg.precision[1]) && cfg.precision[1] > 0) ?
-        "\nlower bound on max(σ_x, σ_y)" : ""
-    σx_view = σ_x[σ_x .<= prec_xlim]
-    σy_view = σ_y[σ_y .<= prec_xlim]
-    !isempty(σx_view) && hist!(ax3, σx_view, bins = 50, color = (:blue, 0.5), label = "σ_x")
-    !isempty(σy_view) && hist!(ax3, σy_view, bins = 50, color = (:red, 0.5), label = "σ_y")
-    xlims!(ax3, _plot_limits(0, prec_xlim)...)
-    (isempty(σx_view) && isempty(σy_view)) || axislegend(ax3, position = :rt, framevisible = false, labelsize = 9)
+    # Row 2: Precision and P-value. The filter tests max(σx, σy): a component above the upper
+    # bound is rejected, so that region is shaded; a component below the lower bound may still
+    # pass (the other axis decides), so the lower bound is a dashed line with a note.
+    σ_x = [e.σ_x for e in emitters] .* 1000
+    σ_y = [e.σ_y for e in emitters] .* 1000
+    ax3 = Axis(fig[2, 1], xlabel = "Localization Precision (nm)", ylabel = "Count")
+    d = draw!(ax3, panels[:precision], [:blue, :red], 0.5)
+    ax3.title = "Precision Distribution" * _beyond_note(d.beyond)
+    d.plotted && axislegend(ax3, position = :rt, framevisible = false, labelsize = 9)
+    prec_note = isempty(panels[:precision].series[1].dashed) ? "" : "\nlower bound on max(σ_x, σ_y)"
     text!(
         ax3, 0.97, 0.7, text = "σ_x: $(round(median(σ_x), digits = 1)) nm\nσ_y: $(round(median(σ_y), digits = 1)) nm$(prec_note)",
         align = (:right, :top), space = :relative, fontsize = 10
     )
 
-    if _has_pvalue(emitters)
+    if haskey(panels, :pvalue)
+        p = panels[:pvalue]
         pvalue = [e.pvalue for e in emitters]
-        ax4 = Axis(fig[2, 2], xlabel = "log10(p-value)", ylabel = "Density", title = "P-value Distribution")
-        pval_nonzero = pvalue[pvalue .> 0]
-        pval_thresh = cfg.pvalue !== nothing ? cfg.pvalue[1] : nothing
-
-        if !isempty(pval_nonzero)
-            log_pval = log10.(pval_nonzero)
-            pval_lo = quantile(log_pval, 0.02)
-            # p-values at (or rounding to) 1 put pval_lo at 0, which would collapse every
-            # edge to 0; span one decade instead. The same edges draw the histogram, size the
-            # y axis and set the x limits.
-            if pval_lo >= -1.0e-3
-                pval_lo = -1.0
-            end
-            log_pval_filtered = log_pval[pval_lo .<= log_pval .<= 0]
-            nbins = 50
-            bin_edges = range(pval_lo, 0, length = nbins + 1)
-            bin_width = step(bin_edges)
-            # The x window covers the data and every active p-value bound; shading goes under
-            # the bars, threshold lines on top, as before.
-            pw = _pvalue_window(pval_lo, cfg.pvalue)
-            p_rej = _rejected_spans(pw.lo_log, pw.hi_log, pw.x_lo, 0.0)
-            _draw_rejected!(ax4, p_rej, REJECTED_COLOR, THRESHOLD_COLOR; lines = false)
-            # Count once and draw the bars from these counts, so the bars and the y limit
-            # come from the same numbers (a separate hist! can bin a value on an edge
-            # differently and clip its peak). p = 1 (log 0, the top edge) goes in the last bin.
-            edges = collect(bin_edges)
-            counts = _bin_counts(log_pval_filtered, edges)
-            density = counts ./ (length(log_pval_filtered) * bin_width)
-            bin_centers = (edges[1:nbins] .+ edges[2:end]) ./ 2
-            barplot!(ax4, bin_centers, density, width = bin_width, gap = 0, color = (:steelblue, 0.7))
-            max_density = maximum(density)
-            # Theory curve (uniform p-values -> exponential in log space)
-            u_range = range(0, -pval_lo, length = 100)
-            theory_pdf = log(10) .* (10.0 .^ (-u_range))
-            lines!(ax4, -u_range, theory_pdf, color = :red, linewidth = 2, label = "Uniform theory")
-            vlines!(ax4, [mean(log_pval)], color = MEAN_COLOR, linestyle = :solid, linewidth = 1.5)
-            vlines!(ax4, [median(log_pval)], color = MEDIAN_COLOR, linestyle = :dash, linewidth = 1.5)
-            _draw_rejected!(ax4, p_rej, REJECTED_COLOR, THRESHOLD_COLOR; spans = false)
-            if pval_thresh !== nothing
-                pval_pass_pct = _pass_percent(pvalue, cfg.pvalue)
-                bound_txt = cfg.pvalue[2] < 1 ? "range: $(cfg.pvalue)" : "threshold: $(pval_thresh)"
-                text!(
-                    ax4, 0.03, 0.95, text = "pass: $(pval_pass_pct)%\n$(bound_txt)",
-                    align = (:left, :top), space = :relative, fontsize = 10
-                )
-            end
-            xlims!(ax4, _plot_limits(pw.x_lo, 0)...)
-            ylims!(ax4, _plot_limits(0, max_density * 1.1)...)
+        ax4 = Axis(fig[2, 2], xlabel = "log10(p-value)", ylabel = "Density")
+        d = draw!(ax4, p, [:steelblue], 0.7)
+        ax4.title = "P-value Distribution" * _beyond_note(d.beyond)
+        # Uniform p-values are exponential in log10 space.
+        u_hi = min(p.view[2], 0.0)
+        if p.view[1] < u_hi
+            u = range(p.view[1], u_hi, length = 100)
+            lines!(ax4, u, log(10) .* (10.0 .^ u), color = :red, linewidth = 2, label = "Uniform theory")
         end
+        logp = filter(isfinite, p.series[1].values)
+        if !isempty(logp)
+            vlines!(ax4, [mean(logp)], color = MEAN_COLOR, linestyle = :solid, linewidth = 1.5)
+            vlines!(ax4, [median(logp)], color = MEDIAN_COLOR, linestyle = :dash, linewidth = 1.5)
+        end
+        if cfg.pvalue !== nothing
+            bound_txt = cfg.pvalue[2] < 1 ? "range: $(cfg.pvalue)" : "threshold: $(cfg.pvalue[1])"
+            text!(
+                ax4, 0.03, 0.95, text = "pass: $(_pass_percent(pvalue, cfg.pvalue))%\n$(bound_txt)",
+                align = (:left, :top), space = :relative, fontsize = 10
+            )
+        end
+        ylims!(ax4, _plot_limits(0, d.ymax * 1.1)...)
     end
 
     # Row 3: PSF Sigma
-    if has_psf_aniso
-        psf_σx = [e.σx for e in emitters] .* 1000
-        psf_σy = [e.σy for e in emitters] .* 1000
-        psf_data = vcat(psf_σx, psf_σy)
-        psf98 = quantile(psf_data, 0.98)
-        psf02 = quantile(psf_data, 0.02)
-        mode_x = _calculate_mode([e.σx for e in emitters]) * 1000
-        mode_y = _calculate_mode([e.σy for e in emitters]) * 1000
-
-        # Compute per-axis bounds matching _filter_smld logic
-        if cfg.psf_sigma !== nothing
-            if cfg.psf_sigma === :auto
-                tol = 0.1
-                lo_x_nm, hi_x_nm = mode_x * (1 - tol), mode_x * (1 + tol)
-                lo_y_nm, hi_y_nm = mode_y * (1 - tol), mode_y * (1 + tol)
-            else
-                lo_x_nm, hi_x_nm = cfg.psf_sigma[1] * 1000, cfg.psf_sigma[2] * 1000
-                lo_y_nm, hi_y_nm = lo_x_nm, hi_x_nm
-            end
-        end
-
-        ax5 = Axis(fig[3, 1], xlabel = "Fitted PSF σ (nm)", ylabel = "Count", title = "PSF Width Distribution")
-        # Show per-axis filter bounds (matching actual filter behavior)
-        if cfg.psf_sigma !== nothing
-            # Open (infinite) bounds reject nothing and have no line to draw; Makie
-            # cannot take limits from an empty vlines!.
-            bounds_x = filter(isfinite, [lo_x_nm, hi_x_nm])
-            bounds_y = filter(isfinite, [lo_y_nm, hi_y_nm])
-            isempty(bounds_x) || vlines!(ax5, bounds_x, color = :blue, linestyle = :dot, linewidth = 2, label = "σx bounds")
-            isempty(bounds_y) || vlines!(ax5, bounds_y, color = :red, linestyle = :dot, linewidth = 2, label = "σy bounds")
-        end
-        # The 2-98% window is pooled over both axes, so one axis (or both, for a few
-        # emitters) can fall entirely outside it; Makie before 0.24.17 throws on an empty hist!.
-        psf_σx_view = psf_σx[(psf_σx .>= psf02) .& (psf_σx .<= psf98)]
-        psf_σy_view = psf_σy[(psf_σy .>= psf02) .& (psf_σy .<= psf98)]
-        isempty(psf_σx_view) || hist!(ax5, psf_σx_view, bins = 50, color = (:blue, 0.5), label = "σx")
-        isempty(psf_σy_view) || hist!(ax5, psf_σy_view, bins = 50, color = (:red, 0.5), label = "σy")
-        xlims!(ax5, _plot_limits(psf02, psf98)...)
-        (isempty(psf_σx_view) && isempty(psf_σy_view)) || axislegend(ax5, position = :rt, framevisible = false, labelsize = 9)
-        text!(
-            ax5, 0.97, 0.7, text = "mode σx: $(round(mode_x, digits = 1)) nm\nmode σy: $(round(mode_y, digits = 1)) nm",
-            align = (:right, :top), space = :relative, fontsize = 10
-        )
-
-    elseif has_psf_iso
-        psf_σ = [e.σ for e in emitters] .* 1000
-        psf98 = quantile(psf_σ, 0.98)
-        psf02 = quantile(psf_σ, 0.02)
-        mode_σ = _calculate_mode([e.σ for e in emitters]) * 1000
-
-        ax5 = Axis(fig[3, 1], xlabel = "Fitted PSF σ (nm)", ylabel = "Count", title = "PSF Width Distribution")
-        if cfg.psf_sigma !== nothing
-            if cfg.psf_sigma === :auto
-                tol = 0.1
-                lo_bound = mode_σ * (1 - tol)
-                hi_bound = mode_σ * (1 + tol)
-            else
-                lo_bound = cfg.psf_sigma[1] * 1000
-                hi_bound = cfg.psf_sigma[2] * 1000
-            end
-            # The view extends to finite bounds only; an open bound rejects nothing on its side.
-            psf_xmin = isfinite(lo_bound) ? min(psf02, lo_bound * 0.95) : psf02
-            psf_xmax = isfinite(hi_bound) ? max(psf98, hi_bound * 1.05) : psf98
-            isfinite(lo_bound) && vspan!(ax5, psf_xmin, lo_bound, color = REJECTED_COLOR)
-            isfinite(hi_bound) && vspan!(ax5, hi_bound, psf_xmax, color = REJECTED_COLOR)
-            bounds = filter(isfinite, [lo_bound, hi_bound])
-            isempty(bounds) || vlines!(ax5, bounds, color = THRESHOLD_COLOR, linestyle = :dot, linewidth = 2)
+    if haskey(panels, :psf)
+        p = panels[:psf]
+        ax5 = Axis(fig[3, 1], xlabel = "Fitted PSF σ (nm)", ylabel = "Count")
+        if length(p.series) == 2
+            d = draw!(ax5, p, [:blue, :red], 0.5)
+            d.plotted && axislegend(ax5, position = :rt, framevisible = false, labelsize = 9)
+            mode_x = _calculate_mode([e.σx for e in emitters]) * 1000
+            mode_y = _calculate_mode([e.σy for e in emitters]) * 1000
+            txt = "mode σx: $(round(mode_x, digits = 1)) nm\nmode σy: $(round(mode_y, digits = 1)) nm"
+            text!(ax5, 0.97, 0.7, text = txt, align = (:right, :top), space = :relative, fontsize = 10)
         else
-            psf_xmin = psf02
-            psf_xmax = psf98
+            d = draw!(ax5, p, [:steelblue], 0.8)
+            psf_σ = p.series[1].values
+            center_lines!(ax5, psf_σ)
+            mode_σ = _calculate_mode([e.σ for e in emitters]) * 1000
+            txt = "mode: $(round(mode_σ, digits = 1)) nm\nmean: $(round(mean(psf_σ), digits = 1)) nm"
+            text!(ax5, 0.97, 0.95, text = txt, align = (:right, :top), space = :relative, fontsize = 10)
         end
-        # Two distinct values both fall outside their own 2-98% window.
-        psf_σ_view = psf_σ[(psf_σ .>= psf02) .& (psf_σ .<= psf98)]
-        isempty(psf_σ_view) || hist!(ax5, psf_σ_view, bins = 50)
-        vlines!(ax5, [mean(psf_σ)], color = MEAN_COLOR, linestyle = :solid, linewidth = 2)
-        vlines!(ax5, [median(psf_σ)], color = MEDIAN_COLOR, linestyle = :dash, linewidth = 2)
-        xlims!(ax5, _plot_limits(psf_xmin, psf_xmax)...)
-        text!(
-            ax5, 0.97, 0.95, text = "mode: $(round(mode_σ, digits = 1)) nm\nmean: $(round(mean(psf_σ), digits = 1)) nm",
-            align = (:right, :top), space = :relative, fontsize = 10
-        )
+        ax5.title = "PSF Width Distribution" * _beyond_note(d.beyond)
     else
         ax5 = Axis(fig[3, 1], xlabel = "PSF σ (nm)", ylabel = "", title = "PSF Width (Fixed)")
         text!(
@@ -626,51 +726,21 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
     # Row 4 (3D only): axial position z and axial precision σ_z. The z panel makes
     # z-grid-edge-railed degenerate localizations obvious as a spike at the boundary.
     if is_3d
-        z_nm = [e.z for e in emitters] .* 1000      # axial position in nm
-        σz_nm = [e.σ_z for e in emitters] .* 1000   # axial precision in nm
-
-        # --- z position panel ---
-        # Keep the full grid extent visible (quantiles, not tight) so a boundary
-        # spike is not clipped; extend to include any filter bounds.
-        z_lo_view = quantile(z_nm, 0.002)
-        z_hi_view = quantile(z_nm, 0.998)
-        ax7 = Axis(fig[4, 1], xlabel = "Axial position z (nm)", ylabel = "Count", title = "z Distribution")
-        if cfg.z !== nothing
-            z_lo, z_hi = cfg.z[1] * 1000, cfg.z[2] * 1000
-            # Only finite bounds widen the view or draw a rejected region.
-            isfinite(z_lo) && (z_lo_view = min(z_lo_view, z_lo * 1.1))
-            isfinite(z_hi) && (z_hi_view = max(z_hi_view, z_hi * 1.1))
-            isfinite(z_lo) && vspan!(ax7, z_lo_view, z_lo, color = REJECTED_COLOR)
-            isfinite(z_hi) && vspan!(ax7, z_hi, z_hi_view, color = REJECTED_COLOR)
-            z_bounds = filter(isfinite, [z_lo, z_hi])
-            isempty(z_bounds) || vlines!(ax7, z_bounds, color = THRESHOLD_COLOR, linestyle = :dot, linewidth = 2)
-        end
-        z_view = z_nm[(z_nm .>= z_lo_view) .& (z_nm .<= z_hi_view)]
-        !isempty(z_view) && hist!(ax7, z_view, bins = 50, color = (:purple, 0.6))
-        vlines!(ax7, [mean(z_nm)], color = MEAN_COLOR, linestyle = :solid, linewidth = 2)
-        vlines!(ax7, [median(z_nm)], color = MEDIAN_COLOR, linestyle = :dash, linewidth = 2)
-        xlims!(ax7, _plot_limits(z_lo_view, z_hi_view)...)
+        z_nm = panels[:z].series[1].values
+        ax7 = Axis(fig[4, 1], xlabel = "Axial position z (nm)", ylabel = "Count")
+        d = draw!(ax7, panels[:z], [:purple], 0.6)
+        ax7.title = "z Distribution" * _beyond_note(d.beyond)
+        center_lines!(ax7, z_nm)
         text!(
             ax7, 0.97, 0.95, text = "median: $(round(median(z_nm), digits = 1)) nm\nrange: [$(round(minimum(z_nm), digits = 0)), $(round(maximum(z_nm), digits = 0))] nm",
             align = (:right, :top), space = :relative, fontsize = 10
         )
 
-        # --- σ_z (axial precision) panel ---
-        σz98 = quantile(σz_nm, 0.98)
-        σz_xlim = σz98
-        ax8 = Axis(fig[4, 2], xlabel = "Axial precision σ_z (nm)", ylabel = "Count", title = "Axial Precision Distribution")
-        if cfg.sigma_z !== nothing
-            σz_lo, σz_hi = cfg.sigma_z .* 1000  # convert μm to nm
-            # Finite bounds widen the view so their rejected regions show; open bounds draw nothing.
-            isfinite(σz_hi) && (σz_xlim = max(σz98, σz_hi * 1.2))
-            isfinite(σz_lo) && σz_lo > 0 && (σz_xlim = max(σz_xlim, σz_lo * 1.2))
-            _draw_rejected!(ax8, _rejected_spans(σz_lo, σz_hi, 0, σz_xlim), REJECTED_COLOR, THRESHOLD_COLOR)
-        end
-        σz_view = σz_nm[σz_nm .<= σz_xlim]
-        !isempty(σz_view) && hist!(ax8, σz_view, bins = 50, color = (:green, 0.5))
-        vlines!(ax8, [mean(σz_nm)], color = MEAN_COLOR, linestyle = :solid, linewidth = 2)
-        vlines!(ax8, [median(σz_nm)], color = MEDIAN_COLOR, linestyle = :dash, linewidth = 2)
-        xlims!(ax8, _plot_limits(0, σz_xlim)...)
+        σz_nm = panels[:sigma_z].series[1].values
+        ax8 = Axis(fig[4, 2], xlabel = "Axial precision σ_z (nm)", ylabel = "Count")
+        d = draw!(ax8, panels[:sigma_z], [:green], 0.5)
+        ax8.title = "Axial Precision Distribution" * _beyond_note(d.beyond)
+        center_lines!(ax8, σz_nm)
         text!(
             ax8, 0.97, 0.95, text = "median: $(round(median(σz_nm), digits = 1)) nm\nmean: $(round(mean(σz_nm), digits = 1)) nm",
             align = (:right, :top), space = :relative, fontsize = 10
@@ -679,6 +749,7 @@ function _save_filter_quality_figures(dir, smld_raw, cfg::FilterConfig)
 
     return save(joinpath(dir, "fit_quality.png"), fig)
 end
+
 
 # ============================================================
 # Fit overlay from detectfit cache (colored by FilterConfig thresholds)
@@ -825,15 +896,19 @@ function _fit_box_color(e, cfg::FilterConfig, psf_bounds)
     return :green
 end
 
+# A photon bound as a label: whole photons when it fits in an Int, else 3 significant digits
+# (round(Int, 1e20) would throw, failing the filter step while it writes figures).
+_photon_label(x) = abs(x) < 1.0e15 ? string(round(Int, x)) : string(round(x, sigdigits = 3))
+
 """Build title string from actual FilterConfig thresholds."""
 function _fit_overlay_title(cfg::FilterConfig, emitters)
     parts = String["green=pass"]
-    # Open (infinite) bounds reject nothing and get no label; round(Int, ±Inf) would throw.
+    # Open (infinite) bounds reject nothing and get no label.
     if cfg.photons !== nothing
         lo, hi = cfg.photons
         conds = String[]
-        isfinite(lo) && push!(conds, "<$(round(Int, lo))")
-        isfinite(hi) && push!(conds, ">$(round(Int, hi))")
+        isfinite(lo) && push!(conds, "<$(_photon_label(lo))")
+        isfinite(hi) && push!(conds, ">$(_photon_label(hi))")
         isempty(conds) || push!(parts, "red=photons" * join(conds, "/"))
     end
     if cfg.precision !== nothing
@@ -855,8 +930,13 @@ function _fit_overlay_title(cfg::FilterConfig, emitters)
     if cfg.sigma_z !== nothing && !isempty(emitters) && hasproperty(first(emitters), :σ_z)
         push!(parts, "magenta=σ_z outside $(cfg.sigma_z)μm")
     end
-    if cfg.psf_sigma !== nothing
-        push!(parts, "cyan=psf_σ fail")
+    # The PSF bounds the filter applies (none when :auto finds no mode and the filter skips it).
+    psf = _resolve_psf_bounds(emitters, cfg)
+    nm(lo, hi) = "[$(round(lo * 1000, digits = 1)), $(round(hi * 1000, digits = 1))]nm"
+    if psf !== nothing && psf.kind === :iso
+        push!(parts, "cyan=psf_σ not in $(nm(psf.lo, psf.hi))")
+    elseif psf !== nothing
+        push!(parts, "cyan=psf_σx not in $(nm(psf.lo_x, psf.hi_x)) or σy not in $(nm(psf.lo_y, psf.hi_y))")
     end
     push!(parts, "gray=no match")
     return "Fit: " * join(parts, "  ")

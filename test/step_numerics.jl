@@ -161,7 +161,8 @@ end
     Random.seed!(42)
 
     # Flat data: constant ~30 locs/frame with Poisson-like noise, 19k frames.
-    # Reproduces a real-data case that produced a=-42873, k≈0 with unbounded NelderMead.
+    # A flat count series like this drove the unbounded NelderMead fit to a large negative
+    # amplitude with k≈0.
     # Expected: reject as degenerate, return nothing.
     flat = [max(0, round(Int, 30 + randn() * sqrt(30))) for _ in 1:19_000]
     @test SMLMAnalysis._estimate_bleaching_rate(flat) === nothing
