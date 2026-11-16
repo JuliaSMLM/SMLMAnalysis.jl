@@ -29,6 +29,7 @@ TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
 [weakdeps]
 FFTA = "b86e33f2-c0db-4aa1-a6e0-ab43e668529e"
+ImageMagick_jll = "c73af94c-d91f-53ed-93a7-00f77d67a9d7"
 
 [compat]
 Aqua = "0.8"
@@ -39,6 +40,7 @@ ExplicitImports = "1"
 FFTA = "< 0.3.2, 0.3.3"
 GaussMLE = "0.4"
 HDF5 = "0.17.2"
+ImageMagick_jll = "7.1.2002 - 7"
 JLD2 = "0.5.12, 0.6"
 Logging = "1"
 MicroscopePSFs = "0.5"
