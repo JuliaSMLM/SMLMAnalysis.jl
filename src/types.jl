@@ -40,7 +40,9 @@ the level means for itself by inlining `if checkpoint >= Checkpoint.X` checks
 
 # Levels
 - `NONE = 0`: no SMLD checkpoints written
-- `END = 1`: orchestrator writes only the final SMLD-producing step's output
+- `END = 1`: orchestrator writes only the final SMLD-producing step's output; if that
+  step saves nothing into the run's `outdir` itself, the orchestrator saves its output
+  as `smld.h5` in the step's directory
 - `EXPENSIVE = 2` (default): expensive steps (DetectFit, FrameConnect, Drift, BaGoL)
   write their output SMLD; cheap filters do not
 - `ALL = 3`: every SMLD-producing step writes its output

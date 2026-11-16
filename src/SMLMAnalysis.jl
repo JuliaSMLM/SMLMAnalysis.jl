@@ -54,6 +54,7 @@ Result/info structs (e.g. `AnalysisResult`, `DetectFitInfo`) and upstream verbs
 """
 module SMLMAnalysis
 
+using Base.ScopedValues: ScopedValue, with
 using Dates: Dates, DateTime, now
 using Logging: Logging
 using Random: Random

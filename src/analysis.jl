@@ -278,7 +278,9 @@ write an SMLD checkpoint. Returns 0 if none is found. The built-in pass-through
 steps (rendering, cluster statistics, multi-target steps) write none, so the
 last writer before them keeps the checkpoint. Any other config counts as a
 writer, including a user-defined step: under `Checkpoint.END` it receives
-`Checkpoint.ALL` when it is the last such step (see Extending the Pipeline).
+`Checkpoint.ALL` when it is the last such step (see Extending the Pipeline). If
+it saves nothing into the run's `outdir`, `_run_pipeline` saves its output as
+`smld.h5` in its step directory (`_save_final_checkpoint`).
 
 Used by `_run_pipeline` to translate `Checkpoint.END` into a per-step
 "this is the final, save it" decision.
@@ -293,6 +295,25 @@ function _find_final_smld_step(steps::Vector{SMLMData.AbstractSMLMConfig})
         _produces_smld(steps[i]) && return i
     end
     return 0
+end
+
+"""
+    _save_final_checkpoint(smld, dir, step_number, cfg, verbose) -> Union{String, Nothing}
+
+Under `Checkpoint.END`, save the output of the final checkpoint-writing step as
+`smld.h5` in its step directory, for a step that saved nothing into the run's folder
+itself. A failed save warns and returns `nothing` rather than failing a run whose
+steps all completed. Returns the path written otherwise.
+"""
+function _save_final_checkpoint(smld::SMLMData.BasicSMLD, dir::String, step_number::Int, cfg, v::Int)
+    path = try
+        _save_step_smld(dir, smld)
+    catch err
+        @warn "Checkpoint.END: step $step_number ($(step_name(cfg))) saved no checkpoint, and saving its output failed" dir exception = err
+        return nothing
+    end
+    v >= Verbosity.PROGRESS && @info "Checkpoint.END: step $step_number ($(step_name(cfg))) saved no checkpoint; the pipeline saved its output to $path"
+    return path
 end
 
 # ============================================================
@@ -375,10 +396,24 @@ function _run_pipeline(
                 cp_level
             end
 
-            (state, step_info) = analyze(
+            run_step() = analyze(
                 state, cfg;
                 outdir = outdir, step_number = i, verbose = v, checkpoint = cp
             )
+
+            # END-mode guarantee: if the final writer saves nothing into the run's
+            # folder (a user-defined step that never calls save_smld there), the
+            # pipeline saves that step's output itself, as smld.h5 in its folder.
+            watch = cp_level == Checkpoint.END && i == final_smld_idx && outdir !== nothing
+            if watch
+                recorder = _CheckpointRecorder(outdir)
+                (state, step_info) = with(run_step, _CHECKPOINT_RECORDER => recorder)
+                if !recorder.saved[] && state isa SMLMData.BasicSMLD
+                    _save_final_checkpoint(state, step_outdir(outdir, i, cfg), i, cfg, v)
+                end
+            else
+                (state, step_info) = run_step()
+            end
 
             push!(step_infos, step_info)
 

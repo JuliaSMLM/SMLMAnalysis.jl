@@ -9,6 +9,27 @@
 
 const SMLD_FORMAT_VERSION = "1.3"  # v1.3: polygon / CellPolygon user metadata (edge-classify geometry); v1.2: Added σ_xy position covariance (round-trips Emitter2DFit/Sigma/SigmaXY); v1.1: PSF width fields
 
+# Under Checkpoint.END the pipeline watches the last checkpoint-writing step: if that
+# step saves nothing into the run's output folder, the pipeline saves its output itself
+# (see _run_pipeline). save_smld reports each file it writes to the recorder in scope.
+struct _CheckpointRecorder
+    root::String                  # the run's outdir, as a real path
+    saved::Threads.Atomic{Bool}   # set when a save lands inside root
+end
+_CheckpointRecorder(outdir::String) = _CheckpointRecorder(realpath(outdir), Threads.Atomic{Bool}(false))
+
+const _CHECKPOINT_RECORDER = ScopedValue{Union{Nothing, _CheckpointRecorder}}(nothing)
+
+function _note_checkpoint_saved(filepath::String)
+    rec = _CHECKPOINT_RECORDER[]
+    rec === nothing && return nothing
+    path = realpath(filepath)
+    if startswith(path, joinpath(rec.root, ""))
+        rec.saved[] = true
+    end
+    return nothing
+end
+
 # Version stamped into saved files ("unknown" if the module has no project version)
 function _get_package_version()
     v = pkgversion(@__MODULE__)
@@ -257,6 +278,7 @@ function save_smld(
             end
         end
     end
+    _note_checkpoint_saved(filepath)
     return filepath
 end
 

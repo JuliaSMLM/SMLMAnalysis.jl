@@ -27,6 +27,7 @@ the last number (0.1.Z) is non-breaking; one that raises the middle number
 - Quality filtering and diagnostics support emitters without p-values; requesting `pvalue` filtering warns and skips that criterion.
 - DetectFitConfig rejects conflicting data-source keywords (`path` with `paths`, or `dataset_frames` without `path`) instead of silently ignoring them.
 - `Checkpoint.END` saves the last localization checkpoint when rendering or statistics steps follow it. A user-defined step still counts as a checkpoint writer, as documented in Extending the Pipeline.
+- Under `Checkpoint.END`, a run whose last checkpoint-writing step is a user-defined step that saves nothing into `outdir` no longer ends with no checkpoint: the pipeline saves that step's output as `smld.h5` in its step directory. If that save fails, the run warns and still completes.
 - FFTA 0.3.2 is excluded. That release, loaded through Makie, conflicts with FFTW and breaks drift's cross-correlation: `method = :fft` alignment crashes, and drift silently loses its cross-correlation start. FFTA 0.3.3 fixes the conflict (JuliaMath/FFTA.jl#146) and is allowed, as are versions before 0.3.2.
 - `save_smld` records the emitters' own number type, taken from the coordinate field, instead of the camera's, so a result reloads as it was saved.
 - `FilterConfig.psf_sigma`, `CompositeRenderConfig.clip_percentile` and `DensityFilterConfig.min_neighbors` accept whole-number input, as the other ranges already did.

@@ -160,7 +160,9 @@ into its step directory when `outdir` is set and the level is high enough. Under
 `Checkpoint.END` the pipeline passes `Checkpoint.ALL` to the last step that is not
 a built-in rendering, cluster-statistics or multi-target step, and
 `Checkpoint.NONE` to every other step, so a custom step that ends the pipeline is
-the one that writes the final checkpoint (or none, if it never saves).
+the one that writes the final checkpoint. If it saves nothing into the run's
+`outdir`, the pipeline saves the step's output as `smld.h5` in the step's
+directory, so a run under `Checkpoint.END` always ends with a checkpoint on disk.
 
 ## Wrapping an upstream package
 
