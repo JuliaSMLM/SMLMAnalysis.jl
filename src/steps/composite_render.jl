@@ -33,6 +33,14 @@ Configuration for a composite multi-channel render in the multi-target pipeline.
     scalebar_length::Union{Float64, Nothing} = nothing
     scalebar_position::Symbol = :br
     scalebar_color::Symbol = :white
+
+    function CompositeRenderConfig(
+            strategy, zoom, colors, clip_percentile, normalize_each,
+            scalebar, scalebar_length, scalebar_position, scalebar_color
+        )
+        clip = clip_percentile isa Real ? Float64(clip_percentile) : clip_percentile
+        return new(strategy, zoom, colors, clip, normalize_each, scalebar, scalebar_length, scalebar_position, scalebar_color)
+    end
 end
 
 """

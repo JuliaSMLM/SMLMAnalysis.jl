@@ -174,7 +174,7 @@ After `DetectFitConfig` (which produces localizations from images), steps can be
 
 ```julia
 # Minimal: detect and render
-steps = [DetectFitConfig(boxer=BoxerConfig(boxsize=9)), RenderConfig(zoom=20)]
+steps = [DetectFitConfig(boxer=BoxerConfig(boxsize = 9, psf_sigma = 0.135)), RenderConfig(zoom=20)]
 
 # Multiple renders at different scales
 steps = [DetectFitConfig(...), DriftConfig(degree=2),
@@ -215,7 +215,7 @@ Each channel runs its own `AnalysisConfig` pipeline, then cross-channel steps (a
 
 ```julia
 mt = MultiTargetConfig(
-    labels = [:IgG, :C1q],
+    labels = [:actin, :tubulin],
     colors = [:cyan, :magenta],
     steps = [
         CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
@@ -230,7 +230,7 @@ mt = MultiTargetConfig(
     (images_568, config_568),
 ], mt)
 
-result[:IgG].smld    # Per-channel access
+result[:actin].smld    # Per-channel access
 result.smlds         # All SMLDs
 ```
 

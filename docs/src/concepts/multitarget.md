@@ -4,8 +4,8 @@ CurrentModule = SMLMAnalysis
 
 # The Multi-Target Model
 
-A multi-color experiment images two or more targets — say an IgG variant and
-complement C1q — each in its own channel. SMLMAnalysis handles these by
+A multi-color experiment images two or more targets — say actin and
+tubulin — each in its own channel. SMLMAnalysis handles these by
 **generalizing the single-channel pipeline**, not by bolting on a separate system.
 If you understand [The Pipeline Model](@ref), you already understand most of this.
 
@@ -64,8 +64,8 @@ the merged channel vector and each channel's complete single-channel records:
 
 ```julia
 result.smlds         # Vector{BasicSMLD} (aligned if Cross-Alignment ran)
-result[:IgG]         # the channel's full AnalysisResult
-info.channels[:IgG]  # the channel's full AnalysisInfo
+result[:actin]         # the channel's full AnalysisResult
+info.channels[:actin]  # the channel's full AnalysisInfo
 ```
 
 Because every channel keeps its own [`AnalysisResult`](@ref) and

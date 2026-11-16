@@ -93,7 +93,7 @@ fields that matter most:
 ```julia
 # Two-color overlay, colors inherited from the MultiTargetConfig
 mt = MultiTargetConfig(
-    labels = [:IgG, :C1q],          # colors default to cyan / magenta
+    labels = [:actin, :tubulin],          # colors default to cyan / magenta
     steps  = [CompositeRenderConfig(zoom = 20.0, strategy = GaussianRender())],
     outdir = "output/cell1/",
 )

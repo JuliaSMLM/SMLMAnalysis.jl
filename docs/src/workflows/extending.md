@@ -151,6 +151,17 @@ The trailing `kwargs...` is required: the orchestrator passes context keywords
 (`outdir`, `step_number`, `verbose`, `checkpoint`, and occasionally others) to
 every step, and yours must accept the ones it does not use.
 
+### 5. Checkpoints (optional)
+
+The `checkpoint` keyword is the run's `Checkpoint` level, and each step decides
+what it means for itself, as the built-in steps do with `if checkpoint >=
+Checkpoint.ALL`. To make your step's output resumable, save it with `save_smld`
+into its step directory when `outdir` is set and the level is high enough. Under
+`Checkpoint.END` the pipeline passes `Checkpoint.ALL` to the last step that is not
+a built-in rendering, cluster-statistics or multi-target step, and
+`Checkpoint.NONE` to every other step, so a custom step that ends the pipeline is
+the one that writes the final checkpoint (or none, if it never saves).
+
 ## Wrapping an upstream package
 
 A step that wraps an existing `(result, info)`-returning function is even

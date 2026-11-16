@@ -145,7 +145,7 @@ automatically.
 config = AnalysisConfig(
     camera = cam,
     steps  = [DetectFitConfig(path = "experiment.h5", h5_format = :mic,
-                              boxer = BoxerConfig(boxsize = 9)), RenderConfig(zoom = 20)],
+                              boxer = BoxerConfig(boxsize = 9, psf_sigma = 0.135)), RenderConfig(zoom = 20)],
 )
 (result, info) = analyze(config)   # no in-memory data argument needed
 ```

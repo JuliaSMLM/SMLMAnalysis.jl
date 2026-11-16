@@ -68,6 +68,10 @@ pay only for the criteria you set.
   the axial analogs of `photons`-window and `precision`. The `z` window is
   handy to drop localizations railed to the z-grid edge.
 
+When emitters have no p-value (for example, frame-connected, BaGoL, or loaded
+`Emitter2DFit`/`Emitter3DFit` output), `pvalue` warns and has no effect. Other
+criteria still apply, and diagnostics omit the p-value panel and overlay label.
+
 ## Configuration
 
 All fields are `(min, max)` tuples (microns where a length), `nothing` to

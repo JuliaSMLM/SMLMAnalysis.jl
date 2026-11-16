@@ -28,8 +28,15 @@ localizations via GaussMLE in a single step, with per-dataset processing.
 # Data Source Keywords (for file-based workflows)
 - `path`: Single H5 file path
 - `paths`: Vector of H5 file paths (one per dataset)
-- `dataset_frames`: Explicit frame ranges per dataset
+- `dataset_frames`: Explicit frame ranges per dataset; requires `path`
 - `h5_format`: `:auto`, `:smart`, or `:mic`
+
+Choose either `path` or `paths`. Conflicting source keywords raise `ArgumentError`
+at construction.
+
+Datasets with no detected ROIs are skipped with a warning, retaining their dataset
+indices and zero-fit info entries. If no dataset yields localizations, an error
+suggests detection and camera settings to check.
 
 Files load as `[y, x]` then frame (lab image layout, decision 0040; SMLMDocs `pixels.md`,
 <https://JuliaSMLM.github.io/SMLMDocs.jl/dev/pixels/>). A dataset's `dimension_order`
@@ -47,7 +54,7 @@ attribute decides the stored layout; legacy untagged SMART and MATLAB MIC files 
 """
 @kwdef struct DetectFitConfig <: SMLMData.AbstractSMLMConfig
     # Embedded upstream configs
-    boxer::SMLMBoxer.BoxerConfig = SMLMBoxer.BoxerConfig(boxsize = 11, psf_sigma = 0.135)
+    boxer::SMLMBoxer.BoxerConfig = SMLMBoxer.BoxerConfig(boxsize = 9, psf_sigma = 0.135)
     fitter::GaussMLEConfig = GaussMLEConfig(psf_model = GaussianXYNBS(), iterations = 20)
 
     # Camera (optional - injected by AnalysisConfig pipeline, required for standalone analyze())
@@ -80,6 +87,22 @@ attribute decides the stored layout; legacy untagged SMART and MATLAB MIC files 
             boxer, fitter, camera, path, paths, dataset_frames,
             datasets, h5_format, pixel_size, qe, movie_fps
         )
+        path !== nothing && paths !== nothing && throw(
+            ArgumentError(
+                "DetectFitConfig: path and paths cannot both be set; use path for one file or paths for multiple files."
+            )
+        )
+        dataset_frames !== nothing && path === nothing && throw(
+            ArgumentError(
+                "DetectFitConfig.dataset_frames requires path; use path with frame ranges to split one file, or omit dataset_frames with paths."
+            )
+        )
+        camera !== nothing && (pixel_size !== nothing || qe != 1.0) && throw(
+            ArgumentError(
+                "DetectFitConfig: the camera carries its own pixel size and QE; " *
+                    "build it with build_camera_from_mic_h5(path; pixel_size, qe) instead."
+            )
+        )
         new(
             boxer, fitter, camera, path, paths, dataset_frames,
             datasets === nothing ? nothing : collect(Int, datasets),
@@ -87,6 +110,9 @@ attribute decides the stored layout; legacy untagged SMART and MATLAB MIC files 
         )
     end
 end
+
+# Remove this empty-batch guard once GaussMLE returns an empty result for an empty batch.
+_empty_gaussmle_fit_info() = GaussMLE.GaussMLEFitInfo(0.0, :cpu, -1, 0, 0, 0, 0, 0)  # -1: GaussMLE's CPU device id
 
 # BasicSMLD stores a single scalar `n_frames` (= max over datasets), but downstream
 # absolute-frame indexing `(dataset-1)*n_frames + frame` and LegendrePoly drift
@@ -134,6 +160,19 @@ function _drop_nonfinite_emitters(emitters::AbstractVector)
     end
     kept = filter(isfinite_emitter, emitters)
     return kept, length(emitters) - length(kept)
+end
+
+# GaussMLE includes the camera edge origin in its physical emitter coordinates.
+# crop_camera preserves that origin, so these bounds also apply to ROI crops.
+function _drop_out_of_field_emitters!(emitters::AbstractVector, camera::SMLMData.AbstractCamera)
+    xmin, xmax = first(camera.pixel_edges_x), last(camera.pixel_edges_x)
+    ymin, ymax = first(camera.pixel_edges_y), last(camera.pixel_edges_y)
+    n_before = length(emitters)
+    filter!(emitters) do e
+        # Leave non-finite positions to the existing non-finite check/count.
+        !isfinite(e.x) || !isfinite(e.y) || (xmin <= e.x <= xmax && ymin <= e.y <= ymax)
+    end
+    return n_before - length(emitters)
 end
 
 """
@@ -199,6 +238,7 @@ function _detectfit_core(
     frames_per_dataset = Int[]   # actual per-dataset frame counts (equal-length check)
     total_rois = 0
     total_fits = 0
+    total_out_of_field = 0
 
     # Collect info from each dataset (tuple-pattern)
     all_boxes_info = []
@@ -232,12 +272,23 @@ function _detectfit_core(
             total_rois += n_rois
 
             # Fit (tuple-pattern: returns (BasicSMLD, FitInfo))
-            (smld_ds, fit_info) = GaussMLE.fit(roi_batch, cfg.fitter)
+            if n_rois == 0
+                v >= Verbosity.PROGRESS && @warn "detectfit: Dataset $ds has no detected ROIs; skipping fitting"
+                smld_ds = nothing
+                fit_info = _empty_gaussmle_fit_info()
+                n_fits = 0
+                n_out_of_field = 0
+            else
+                (smld_ds, fit_info) = GaussMLE.fit(roi_batch, cfg.fitter)
+                n_fits = length(smld_ds.emitters)
+                n_out_of_field = _drop_out_of_field_emitters!(smld_ds.emitters, smld_ds.camera)
+            end
             push!(all_fit_info, fit_info)
-            n_fits = length(smld_ds.emitters)
             total_fits += n_fits
+            total_out_of_field += n_out_of_field
 
-            v >= Verbosity.PROGRESS && @info "    $n_rois ROIs -> $n_fits fits (detect: $(round(boxes_info.elapsed_s, digits = 2))s/$(boxes_info.backend), fit: $(round(fit_info.elapsed_s, digits = 2))s/$(fit_info.backend))"
+            removed = n_out_of_field == 0 ? "" : ", $n_out_of_field out-of-field fits removed"
+            v >= Verbosity.PROGRESS && @info "    $n_rois ROIs -> $n_fits fits (detect: $(round(boxes_info.elapsed_s, digits = 2))s/$(boxes_info.backend), fit: $(round(fit_info.elapsed_s, digits = 2))s/$(fit_info.backend)$removed)"
 
             # Capture sample data spread across all datasets for overlay plots
             if dir !== nothing && samples_collected < n_sample_frames
@@ -273,10 +324,12 @@ function _detectfit_core(
 
             # Set dataset field in place (all emitter types are mutable) and
             # accumulate this dataset's already-concretely-typed vector.
-            for e in smld_ds.emitters
-                e.dataset = ds
+            if smld_ds !== nothing
+                for e in smld_ds.emitters
+                    e.dataset = ds
+                end
+                push!(emitter_batches, smld_ds.emitters)
             end
-            push!(emitter_batches, smld_ds.emitters)
         end
 
         # Assemble sample data for overlay plots
@@ -303,10 +356,9 @@ function _detectfit_core(
     # a reload degrades to base Emitter2DFit (dropping the PSF-width σ).
     all_emitters = isempty(emitter_batches) ? AbstractEmitter[] : reduce(vcat, emitter_batches)
 
-    # Zero fits across every dataset is treated as a hard error (rather than an
-    # empty SMLD) because it almost always signals a misconfiguration that would
-    # silently poison every downstream step.
-    if isempty(all_emitters)
+    # No fits at all signals a misconfiguration. Fits removed during cleanup can
+    # legitimately leave an empty SMLD; return their removal counts in that case.
+    if total_fits == 0
         error(
             "detectfit: no localizations found across all $n_datasets_val dataset(s) " *
                 "($total_rois ROIs detected, 0 fits). Common causes: detection threshold too " *
@@ -321,12 +373,19 @@ function _detectfit_core(
     n_nonfinite > 0 && @warn "detectfit: dropped $n_nonfinite emitter(s) with a non-finite " *
         "fit result (NaN/Inf in x, y, photons, bg, or σ); check BoxerConfig/GaussMLEConfig " *
         "or an ill-conditioned ROI."
+    if isempty(emitters)
+        @warn "detectfit: every fit was removed during cleanup ($n_nonfinite non-finite, " *
+            "$total_out_of_field outside the camera); returning an empty result."
+    end
 
     smld = BasicSMLD(emitters, camera, n_frames_per_dataset, n_datasets_val, Dict{String, Any}())
 
     detect_info = DetectFitInfo(
-        all_boxes_info, all_fit_info,
-        n_datasets_val, total_rois, total_fits, n_frames_per_dataset, t, selected_indices, n_nonfinite
+        boxes_info = all_boxes_info, fit_info = all_fit_info,
+        n_datasets = n_datasets_val, n_rois = total_rois, n_fits = total_fits,
+        n_frames_per_dataset = n_frames_per_dataset, elapsed_s = t,
+        selected_source_indices = selected_indices, n_nonfinite = n_nonfinite,
+        n_out_of_field = total_out_of_field
     )
 
     if dir !== nothing
@@ -334,7 +393,7 @@ function _detectfit_core(
             dir, outdir, smld, camera, cfg, v, t, total_rois, total_fits,
             n_datasets_val, n_frames_per_dataset,
             sample_images, sample_roi_batch, sample_original_frames,
-            all_boxes_info, all_fit_info
+            detect_info
         )
 
         if v >= Verbosity.DEBUG && !isempty(sample_movie_stacks)
@@ -458,7 +517,8 @@ _step_summary(info::DetectFitInfo) = Dict{Symbol, Any}(
     :n_rois => info.n_rois,
     :n_fits => info.n_fits,
     :n_frames_per_dataset => info.n_frames_per_dataset,
-    :n_nonfinite => info.n_nonfinite
+    :n_nonfinite => info.n_nonfinite,
+    :n_out_of_field => info.n_out_of_field
 )
 
 """
@@ -600,9 +660,8 @@ function _load_source(source, v)
             images, _ = load_mic_h5(source.path)
             return images
         else
-            # Load specific frame range (less efficient, but needed for custom ranges)
-            images, _ = load_mic_h5(source.path; max_frames = last(source.frame_range))
-            return images[:, :, source.frame_range]
+            images, _ = load_mic_h5(source.path; frame_range = source.frame_range)
+            return images
         end
     else
         throw(ArgumentError("Unknown H5 format: $(source.format)"))
@@ -676,16 +735,14 @@ function _save_detectfit_outputs!(
         dir, outdir, smld, camera, cfg, v, t, n_rois, n_fits,
         n_datasets, n_frames_per_dataset,
         sample_images, sample_roi_batch, sample_original_frames,
-        all_boxes_info, all_fit_info
+        detect_info
     )
     mkpath(dir)
     _save_config!(dir, cfg)
 
-    # Write upstream info structs to info.toml
-    # Write header first, then append sections
-    open(joinpath(dir, "info.toml"), "w") do io
-        println(io, "# Upstream package info")
-    end
+    # Write DetectFit totals, then append upstream per-dataset info sections.
+    _save_info!(dir, detect_info)
+    all_boxes_info, all_fit_info = detect_info.boxes_info, detect_info.fit_info
     n_ds = length(all_boxes_info)
     if n_ds == 1
         _save_info!(dir, all_boxes_info[1]; section = "boxes_info")
@@ -698,7 +755,7 @@ function _save_detectfit_outputs!(
     end
 
     return if v >= Verbosity.STANDARD
-        _write_detectfit_stats(dir, smld, cfg, t, n_rois, n_fits, n_datasets, n_frames_per_dataset)
+        _write_detectfit_stats(dir, smld, cfg, t, n_rois, n_fits, n_datasets, n_frames_per_dataset; n_out_of_field = detect_info.n_out_of_field)
 
         # Generate detection overlay and save sample cache for filter step
         if sample_images !== nothing && sample_roi_batch !== nothing
@@ -715,7 +772,7 @@ function _save_detectfit_outputs!(
     end
 end
 
-function _write_detectfit_stats(dir, smld, cfg, t, n_rois, n_fits, n_datasets, n_frames_per_dataset)
+function _write_detectfit_stats(dir, smld, cfg, t, n_rois, n_fits, n_datasets, n_frames_per_dataset; n_out_of_field = 0)
     emitters = smld.emitters
     n = length(emitters)
 
@@ -745,6 +802,7 @@ function _write_detectfit_stats(dir, smld, cfg, t, n_rois, n_fits, n_datasets, n
         println(io, "- **Frames/dataset**: $n_frames_per_dataset")
         println(io, "- **ROIs detected**: $n_rois")
         println(io, "- **Fits**: $n_fits")
+        println(io, "- **Out-of-field fits removed**: $n_out_of_field")
         println(io, "- **Time**: $(round(t, digits = 2))s ($(round(n_fits / t / 1000, digits = 1))k fits/s)")
 
         # Photobleaching rate (observed)
@@ -770,6 +828,10 @@ function _write_detectfit_stats(dir, smld, cfg, t, n_rois, n_fits, n_datasets, n
         println(io, "## Fit Parameters")
         println(io, "- psf_model: $(typeof(cfg.fitter.psf_model))")
         println(io, "- iterations: $(cfg.fitter.iterations)")
+        if isempty(emitters)
+            println(io, "\nNo localizations remain after fit cleanup.")
+            return
+        end
         println(io, "")
         println(io, "## Distributions\n")
         println(io, "| Parameter | Median | 5% | 95% |")

@@ -47,12 +47,15 @@ directly on it rather than through a pipeline that starts from images.
 ## Too many or too few detections
 
 **Symptom.** The detection/fit overlay boxes noise instead of real spots, or
-misses obvious molecules; `DetectFitInfo.n_fits` is far below `n_rois`.
+misses obvious molecules; many fits come back unusable, or the filter step rejects most
+of them.
 
 **Cause.** `BoxerConfig.boxsize` and `psf_sigma` are mismatched to your optics:
 a wrong `psf_sigma` (expected PSF width, in microns) mis-thresholds detection,
-and a `boxsize` too small for the PSF (or too large, merging neighbors) makes the
-fit reject candidates. A large `n_rois`–`n_fits` gap is the tell.
+and a `boxsize` too small for the PSF (or too large, merging neighbors) gives bad
+fits. Every ROI is fitted (`DetectFitInfo.n_fits` equals `n_rois`), so the tell is
+what happens to the fits: large `n_nonfinite` or `n_out_of_field` against `n_fits`,
+or a filter step whose `FilterInfo.n_after` is far below `n_before`.
 
 **Fix.** Tune `boxsize` and `psf_sigma` to your pixel size and PSF, and choose a
 `fitter` PSF model that matches (`GaussianXYNBS` for free width, `AstigmaticXYZNB`
@@ -108,7 +111,7 @@ passing all images in memory:
 ```julia
 # MIC blocks auto-detected as datasets, loaded block by block
 DetectFitConfig(path = "data.h5", h5_format = :mic,
-                boxer = BoxerConfig(boxsize = 9))
+                boxer = BoxerConfig(boxsize = 9, psf_sigma = 0.135))
 ```
 
 See [Multi-Dataset](@ref "Multi-Dataset Acquisitions").

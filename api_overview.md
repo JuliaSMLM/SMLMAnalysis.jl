@@ -150,7 +150,7 @@ SMLMAnalysis.StepInfo(number, cfg, elapsed_s, summary_dict; info=typed_info)
 Configuration for multi-channel analysis.
 
 **Fields:**
-- `labels::Vector{Symbol}` - Channel labels (e.g., `[:IgG, :C1q]`)
+- `labels::Vector{Symbol}` - Channel labels (e.g., `[:actin, :tubulin]`)
 - `colors::Vector{Symbol}` - Colors per channel (default: cyan/magenta for 2, CMY for 3)
 - `steps::Vector{SMLMAnalysis.AbstractMultiTargetStep}` - Multi-target steps run after the
   per-channel pipelines (`CompositeRenderConfig`, `CrossAlignConfig`, `CrossCorrConfig`)
@@ -180,7 +180,7 @@ Combined detection + fitting step. Embeds native upstream configs (`BoxerConfig`
 
 ```julia
 DetectFitConfig(;
-    boxer=BoxerConfig(boxsize=11, psf_sigma=0.135),  # Detection config
+    boxer=BoxerConfig(boxsize=9, psf_sigma=0.135),  # Detection config
     fitter=GaussMLEConfig(psf_model=GaussianXYNBS(), iterations=20),  # Fitting config
     camera=nothing,           # Required for analyze() dispatch; injected by AnalysisConfig pipeline
     path=nothing,             # File-based loading
@@ -375,7 +375,7 @@ upstream docstring for types and meaning.
 
 ### Native to SMLMAnalysis
 
-- `SMLMAnalysis.DetectFitInfo`: `boxes_info`, `fit_info` (per-dataset upstream infos), `n_datasets`, `n_rois`, `n_fits`, `n_frames_per_dataset`, `elapsed_s`, `selected_source_indices`
+- `SMLMAnalysis.DetectFitInfo`: `boxes_info`, `fit_info` (per-dataset upstream infos), `n_datasets`, `n_rois`, `n_fits`, `n_frames_per_dataset`, `elapsed_s`, `selected_source_indices`, `n_nonfinite`, `n_out_of_field`
 - `SMLMAnalysis.FilterInfo`: `n_before`, `n_after`, `elapsed_s`
 - `SMLMAnalysis.IntensityFilterInfo`: `n_before`, `n_after`, `field_mode`, `lambda_max_global`, `field_params`, `field_fit_r2`, `elapsed_s`, `p2_estimate` (or `nothing`), `p2_tail_threshold`, `p2_tail_obs`, `p2_tail_f2`
 - `SMLMAnalysis.DensityFilterInfo`: `n_before`, `n_after`, `threshold`, `elapsed_s`

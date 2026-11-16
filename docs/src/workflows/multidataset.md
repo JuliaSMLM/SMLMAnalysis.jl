@@ -76,7 +76,7 @@ image_stacks = [stack1, stack2, stack3, stack4]   # 4 datasets
 
 # Step-by-step is the same input:
 (smld, info) = analyze(image_stacks,
-    DetectFitConfig(camera = cam, boxer = BoxerConfig(boxsize = 9)))
+    DetectFitConfig(camera = cam, boxer = BoxerConfig(boxsize = 9, psf_sigma = 0.135)))
 ```
 
 A single 3D array is wrapped automatically into a one-dataset set, so
@@ -92,7 +92,7 @@ formats, give explicit `dataset_frames` ranges:
 # MIC blocks become datasets automatically
 config = AnalysisConfig(camera = cam, steps = [
     DetectFitConfig(path = "data.h5", h5_format = :mic,
-                    boxer = BoxerConfig(boxsize = 9)),
+                    boxer = BoxerConfig(boxsize = 9, psf_sigma = 0.135)),
     RenderConfig(zoom = 20),
 ])
 (result, info) = analyze(config)          # no data argument — loaded from file
@@ -111,7 +111,7 @@ Give a `paths` vector to treat each file as its own dataset:
 
 ```julia
 DetectFitConfig(paths = ["d1.h5", "d2.h5", "d3.h5", "d4.h5"],
-                boxer = BoxerConfig(boxsize = 9))
+                boxer = BoxerConfig(boxsize = 9, psf_sigma = 0.135))
 ```
 
 ### Selecting a subset of datasets

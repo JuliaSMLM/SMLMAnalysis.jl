@@ -6,12 +6,112 @@ using Test
 using Random
 using TOML
 using Statistics
+using Logging
+
+include("filter_checks.jl")
+
+@testset "Fit overlay follows axial filters and criterion order" begin
+    e3 = SMLMAnalysis.Emitter3DFit{Float64}(
+        0.8, 0.8, 0.5, 1000.0, 10.0, 0.01, 0.01, 0.04, 30.0, 1.0
+    )
+    cfg = FilterConfig(z = (-0.2, 0.2), sigma_z = (0.0, 0.03))
+    @test SMLMAnalysis._fit_box_color(e3, cfg, nothing) === :blue
+    title = SMLMAnalysis._fit_overlay_title(cfg, [e3])
+    @test occursin("blue=z not in [", title)
+    @test occursin("magenta=σ_z not in [", title)
+    cam = IdealCamera(16, 16, 0.1)
+    smld = SMLMAnalysis.BasicSMLD([e3], cam, 1, 1, Dict{String, Any}())
+    @test isempty(SMLMAnalysis._filter_smld(smld, cfg).emitters)
+    e3.z = 0.1
+    @test SMLMAnalysis._fit_box_color(e3, cfg, nothing) === :magenta
+    @test isempty(SMLMAnalysis._filter_smld(smld, cfg).emitters)
+    e3.σ_z = 0.02
+    @test SMLMAnalysis._fit_box_color(e3, cfg, nothing) === :green
+    @test length(SMLMAnalysis._filter_smld(smld, cfg).emitters) == 1
+    # The earlier photons criterion takes precedence over z, which precedes PSF width.
+    e3.z = 0.5
+    @test SMLMAnalysis._fit_box_color(e3, FilterConfig(photons = (0, 500), z = cfg.z), nothing) === :red
+    @test SMLMAnalysis._fit_box_color(e3, cfg, (kind = :iso, lo = 0.1, hi = 0.2)) === :blue
+
+    e2 = SMLMAnalysis.Emitter2DFit{Float64}(0.8, 0.8, 1000.0, 10.0, 0.01, 0.01, 30.0, 1.0)
+    @test SMLMAnalysis._fit_box_color(e2, cfg, nothing) === :green
+    @test !occursin("blue=", SMLMAnalysis._fit_overlay_title(cfg, [e2]))
+    @test !occursin("magenta=", SMLMAnalysis._fit_overlay_title(cfg, [e2]))
+    @test !occursin("blue=", SMLMAnalysis._fit_overlay_title(cfg, typeof(e3)[]))
+end
+
+@testset "Fit overlay applies an explicit zero lower PSF bound" begin
+    # FilterConfig(psf_sigma = (0, 0.2)) rejects σ = 0.3; the overlay must color it cyan.
+    cam = IdealCamera(16, 16, 0.1)
+    cfg = FilterConfig(psf_sigma = (0, 0.2))
+    iso(σ) = GaussMLE.Emitter2DFitSigma{Float64}(
+        0.8, 0.8, 1000.0, 5.0, σ, 0.01, 0.01, 0.0, 30.0, 0.5, 0.002, 0.4, 1, 1, 0, 1
+    )
+    aniso(σx, σy) = GaussMLE.Emitter2DFitSigmaXY{Float64}(
+        0.8, 0.8, 1000.0, 5.0, σx, σy, 0.01, 0.01, 0.0, 30.0, 0.5, 0.002, 0.002, 0.4, 1, 1, 0, 1
+    )
+    for (wide, narrow) in ((iso(0.3), iso(0.13)), (aniso(0.13, 0.3), aniso(0.13, 0.14)))
+        emitters = [wide, narrow]
+        kept = SMLMAnalysis._filter_smld(SMLMAnalysis.BasicSMLD(emitters, cam, 1, 1, Dict{String, Any}()), cfg).emitters
+        @test kept == [narrow]
+        bounds = SMLMAnalysis._resolve_psf_bounds(emitters, cfg)
+        @test bounds !== nothing
+        @test SMLMAnalysis._fit_box_color(wide, cfg, bounds) === :cyan
+        @test SMLMAnalysis._fit_box_color(narrow, cfg, bounds) === :green
+    end
+    # :auto keeps its sentinel: no usable mode (all σ zero) disables the criterion in both.
+    zero_σ = [iso(0.0), iso(0.0)]
+    @test SMLMAnalysis._resolve_psf_bounds(zero_σ, FilterConfig(psf_sigma = :auto)) === nothing
+    @test length(SMLMAnalysis._filter_smld(SMLMAnalysis.BasicSMLD(zero_σ, cam, 1, 1, Dict{String, Any}()), FilterConfig(psf_sigma = :auto)).emitters) == 2
+end
+
+@testset "Density auto threshold preserves a sparse uniform population" begin
+    Random.seed!(42)
+    cam = IdealCamera(100, 100, 0.1)
+    # Same pair radius as DensityFilterConfig(): 2 * hypot(hypot(0.1, 0.1), ...).
+    radius = 0.4
+    n = round(Int, 3.0 * 100 / (π * radius^2))
+    emitters = [
+        SMLMAnalysis.Emitter2DFit{Float64}(
+            10 * rand(), 10 * rand(), 1000.0, 10.0, 0.1, 0.1, 30.0, 1.0
+        ) for _ in 1:n
+    ]
+    counts = [
+        count(j -> j != i && hypot(emitters[i].x - emitters[j].x, emitters[i].y - emitters[j].y) < radius, 1:n)
+            for i in 1:n
+    ]
+    mode_count = argmax([count(==(k), counts) for k in 0:maximum(counts)]) - 1
+    @test 2 <= mean(counts) <= 4
+    smld = SMLMAnalysis.BasicSMLD(emitters, cam, 1, 1, Dict{String, Any}())
+    filtered, info = analyze(smld, DensityFilterConfig(); verbose = Verbosity.SILENT)
+    @test length(filtered.emitters) / n > 0.9
+    @test info.info.threshold <= mode_count
+end
+
+@testset "Filter diagnostics without p-values" begin
+    # DEBUG writes every file STANDARD writes and the detailed stats; the STANDARD run is in
+    # long/step_numerics.jl.
+    _check_filter_diagnostics_without_pvalues(Verbosity.DEBUG)
+    cam = IdealCamera(16, 16, 0.1)
+    for E in (SMLMAnalysis.Emitter2DFit{Float64}, SMLMAnalysis.Emitter3DFit{Float64})
+        # Empty vectors must also pass every writer without inspecting emitters[1].
+        empty_smld = SMLMAnalysis.BasicSMLD(E[], cam, 12, 1, Dict{String, Any}())
+        mktempdir() do outdir
+            filtered, _ = analyze(
+                empty_smld, FilterConfig(pvalue = (0.001, 1.0));
+                outdir = outdir, verbose = Verbosity.DEBUG, checkpoint = Checkpoint.NONE
+            )
+            @test isempty(filtered.emitters)
+        end
+    end
+end
 
 @testset "Bleaching fit degeneracy guard" begin
     Random.seed!(42)
 
     # Flat data: constant ~30 locs/frame with Poisson-like noise, 19k frames.
-    # Reproduces a real-data case that produced a=-42873, k≈0 with unbounded NelderMead.
+    # A flat count series like this drove the unbounded NelderMead fit to a large negative
+    # amplitude with k≈0.
     # Expected: reject as degenerate, return nothing.
     flat = [max(0, round(Int, 30 + randn() * sqrt(30))) for _ in 1:19_000]
     @test SMLMAnalysis._estimate_bleaching_rate(flat) === nothing

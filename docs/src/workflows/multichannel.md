@@ -5,7 +5,7 @@ CurrentModule = SMLMAnalysis
 # Multi-Channel Analysis
 
 A multi-color experiment images two or more targets in separate channels — for
-example an IgG variant and complement C1q, each on its own dye. This page shows
+example actin and tubulin, each on its own dye. This page shows
 how to analyze every channel with its own pipeline and then run cross-channel
 steps (composite renders, alignment, cross-correlation) that operate on all
 channels together. The orchestrator is `MultiTargetConfig`; if you are new to the
@@ -26,7 +26,7 @@ Its fields in practical terms:
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `labels` | `Vector{Symbol}` | Channel names, e.g. `[:IgG, :C1q]`. Must be unique and match the number of channels. |
+| `labels` | `Vector{Symbol}` | Channel names, e.g. `[:actin, :tubulin]`. Must be unique and match the number of channels. |
 | `colors` | `Vector{Symbol}` | One color per channel. Defaults to cyan/magenta for 2 channels, CMY for 3 (up to 6; pass explicit colors beyond that). |
 | `steps` | `Vector{AbstractMultiTargetStep}` | Ordered cross-channel steps (composite renders, alignment, cross-correlation). |
 | `outdir` | `String` | Root output directory. |
@@ -34,7 +34,7 @@ Its fields in practical terms:
 
 ```julia
 mt = MultiTargetConfig(
-    labels = [:IgG, :C1q],
+    labels = [:actin, :tubulin],
     colors = [:cyan, :magenta],
     steps = [
         CompositeRenderConfig(zoom = 20.0, strategy = GaussianRender()),
@@ -90,9 +90,9 @@ result.smlds        # Vector{BasicSMLD}, one per channel (aligned if CrossAlign 
 result.channels     # Dict{Symbol, AnalysisResult}
 result.step_infos   # Vector{StepInfo} for the cross-channel steps
 result.outdir       # root output directory
-result[:IgG]        # AnalysisResult for one channel (indexing == result.channels[:IgG])
-result[:IgG].smld   # that channel's final SMLD (aligned; same data as result.smlds[1])
-result[:IgG].smld_connected  # the channel's pre-alignment connected SMLD
+result[:actin]        # AnalysisResult for one channel (indexing == result.channels[:actin])
+result[:actin].smld   # that channel's final SMLD (aligned; same data as result.smlds[1])
+result[:actin].smld_connected  # the channel's pre-alignment connected SMLD
 keys(result)        # the channel labels, in order
 ```
 
@@ -100,7 +100,7 @@ keys(result)        # the channel labels, in order
 
 ```julia
 info.elapsed_s      # total wall time, seconds
-info.channels[:IgG] # AnalysisInfo for one channel's pipeline
+info.channels[:actin] # AnalysisInfo for one channel's pipeline
 info.step_infos     # Vector{StepInfo} for the cross-channel steps
 stepinfo(info, :crossalign).info  # look up a cross-channel step by name (searches step_infos, not channels)
 ```
@@ -135,15 +135,15 @@ plus a serialized config at the root.
 
 ```
 output/cell1/
-├── IgG/                    # per-channel pipeline output (01_detectfit/, 02_filter/, ...)
-├── C1q/
+├── actin/                    # per-channel pipeline output (01_detectfit/, 02_filter/, ...)
+├── tubulin/
 ├── composite/              # cross-channel step outputs, numbered in step order
 │   ├── 01_compositerender/
 │   ├── 02_crossalign/
 │   ├── 03_compositerender/
 │   ├── 04_crosscorr/
 │   └── README.md           # color scheme, per-channel counts, step summary
-├── smld_IgG.h5             # per-channel final (aligned) SMLDs (with drift model)
-├── smld_C1q.h5
+├── smld_actin.h5             # per-channel final (aligned) SMLDs (with drift model)
+├── smld_tubulin.h5
 └── multi_target_config.toml
 ```

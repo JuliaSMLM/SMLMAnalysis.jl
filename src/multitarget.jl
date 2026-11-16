@@ -35,7 +35,7 @@ file path). The `config.labels` must match the number of channels.
 # Example
 ```julia
 mt = MultiTargetConfig(
-    labels = [:IgG, :C1q],
+    labels = [:actin, :tubulin],
     steps = [
         CompositeRenderConfig(zoom=20.0, strategy=GaussianRender()),
         CrossAlignConfig(),   # entropy alignment (upstream AlignConfig defaults)
@@ -50,8 +50,8 @@ mt = MultiTargetConfig(
 ], mt)
 
 result.smlds              # Vector{BasicSMLD}
-result[:IgG].smld         # Per-channel access
-info.channels[:IgG]       # Per-channel AnalysisInfo
+result[:actin].smld         # Per-channel access
+info.channels[:actin]       # Per-channel AnalysisInfo
 ```
 """
 function analyze(channels::Vector{<:Tuple}, config::MultiTargetConfig)

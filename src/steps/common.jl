@@ -81,6 +81,40 @@ function _grid_figure_size(data; n_cols = 4, n_rows = 3, panel_height = 200)
 end
 
 """
+    _plot_colorrange(lo, hi) -> (lo, hi)
+
+Color range for a data-derived `colorrange`. Returns `(lo, hi)` unchanged when both ends are
+finite and distinct as Float32 (Makie stores a colorrange as `Vec2f`). Otherwise (equal ends, or
+NaN/Inf from degenerate data) it returns a range centered on the end `c` that is finite as Float32,
+with half-width `1e-3 * max(|c|, 1)` clipped to the Float32 range, or `(0.0, 1.0)` when neither end
+is finite as Float32. Makie before 0.24.14 throws on a user-set `cmin == cmax`, which would abort a
+diagnostic save over a flat frame or constant photons.
+"""
+_plot_colorrange(lo, hi) = _finite_plot_range(lo, hi, 1.0e-3)
+
+"""
+    _plot_limits(lo, hi) -> (lo, hi)
+
+Axis limits for `xlims!`/`ylims!` from data or filter bounds. Same rule as
+`_plot_colorrange`, with a wider fallback half-width (`0.1 * max(|c|, 1)`) so a single
+value sits in a readable window. Makie throws on equal or non-finite axis limits ("Can't set x
+limits to the same value"), which one localization, a constant column or an open `(0, Inf)`
+filter bound would otherwise produce. Reversed finite ends are put in order first.
+"""
+_plot_limits(lo, hi) = lo > hi ? _finite_plot_range(hi, lo, 0.1) : _finite_plot_range(lo, hi, 0.1)
+
+function _finite_plot_range(lo, hi, rel)
+    l, h = Float32(lo), Float32(hi)
+    isfinite(l) && isfinite(h) && h > l && return (lo, hi)
+    c = isfinite(l) ? Float64(lo) : (isfinite(h) ? Float64(hi) : NaN)
+    isfinite(c) || return (0.0, 1.0)
+    w = max(abs(c), 1.0) * rel
+    # Clip to the Float32 range: near floatmax(Float32) the widened ends would round to Inf32.
+    m = Float64(floatmax(Float32))
+    return (max(c - w, -m), min(c + w, m))
+end
+
+"""
     _save_box_overlay(dir, filename, images, x_corners, y_corners, frame_indices, box_size, box_colors; ...)
 
 Core box-overlay renderer: a grid of sample frames (contrast-stretched grayscale) with a
@@ -93,7 +127,50 @@ renderer; see the `roi_batch` convenience method below.
 """
 function _save_box_overlay(
         dir, filename, images, x_corners, y_corners, frame_indices, box_size,
-        box_colors; title_prefix = "Frame", frame_labels = nothing, suptitle = nothing
+        box_colors; kwargs...
+    )
+    r = _box_overlay_figure(images, x_corners, y_corners, frame_indices, box_size, box_colors; kwargs...)
+    return save(joinpath(dir, filename), r.fig)
+end
+
+"""
+    _wrap_title(s, max_chars) -> String
+
+Break a one-line legend into lines of at most `max_chars` characters, at its spaces: whole
+criteria (separated by two spaces) where they fit, and a criterion longer than a line broken
+between its words.
+"""
+function _wrap_title(s::AbstractString, max_chars::Integer)
+    lines = String[]
+    cur = ""
+    for part in split(s, "  "; keepempty = false)
+        words = length(part) <= max_chars ? [part] : split(part, ' '; keepempty = false)
+        for (k, w) in enumerate(words)
+            sep = k == 1 ? "  " : " "
+            if isempty(cur)
+                cur = String(w)
+            elseif length(cur) + length(sep) + length(w) <= max_chars
+                cur = cur * sep * w
+            else
+                push!(lines, cur)
+                cur = String(w)
+            end
+        end
+    end
+    isempty(cur) || push!(lines, cur)
+    return join(lines, "\n")
+end
+
+"""
+    _box_overlay_figure(images, x_corners, y_corners, frame_indices, box_size, box_colors; ...) -> (; fig, label)
+
+Build the box-overlay figure (see `_save_box_overlay`). A `suptitle` is wrapped to the figure's
+width, and the figure is widened when a line is still wider than it, so the legend is never cut
+off; `label` is its Label block (or `nothing`).
+"""
+function _box_overlay_figure(
+        images, x_corners, y_corners, frame_indices, box_size, box_colors;
+        title_prefix = "Frame", frame_labels = nothing, suptitle = nothing
     )
     n_frames = size(images, 3)
     sample = [round(Int, x) for x in range(1, n_frames, length = min(12, n_frames))]
@@ -101,13 +178,25 @@ function _save_box_overlay(
 
     # Contrast stretch: dark background, spot cores retain structure
     sample_frames = sample[1:min(4, length(sample))]
-    sample_data = vec(images[:, :, sample_frames])
-    pmin = Float64(quantile(sample_data, 0.25))    # Below background -> solid black
-    pmax = Float64(quantile(sample_data, 0.9995))  # Above most spot peaks -> preserve core detail
+    # Finite pixels only: quantile throws on NaN; an all-NaN sample falls back in _plot_colorrange.
+    sample_data = filter(isfinite, vec(images[:, :, sample_frames]))
+    pmin = isempty(sample_data) ? NaN : Float64(quantile(sample_data, 0.25))    # Below background -> solid black
+    pmax = isempty(sample_data) ? NaN : Float64(quantile(sample_data, 0.9995))  # Above most spot peaks -> preserve core detail
 
-    fig = Figure(size = _grid_figure_size(images))
+    fig_size = _grid_figure_size(images)
+    fig = Figure(size = fig_size)
+    label = nothing
     if suptitle !== nothing
-        Label(fig[0, 1:4], suptitle, fontsize = 11)
+        # At 11 pt a character is about 5 px wide; 6.6 px per character leaves a margin.
+        max_chars = max(20, floor(Int, (fig_size[1] - 40) / (0.6 * 11)))
+        # _wrap_title does the wrapping, so Makie's own word wrap (which a theme can turn on)
+        # stays off and the Label keeps a measurable width.
+        label = Label(fig[0, 1:4], _wrap_title(suptitle, max_chars), fontsize = 11, word_wrap = false)
+        # A frame so narrow that a wrapped line (or one long word) is still wider than the
+        # figure widens the figure to the measured legend.
+        w = label.layoutobservables.autosize[][1]
+        need = w === nothing ? 0 : ceil(Int, w) + 40
+        need > fig_size[1] && resize!(fig.scene, need, fig_size[2])
     end
 
     for (idx, frame_num) in enumerate(sample)
@@ -115,7 +204,7 @@ function _save_box_overlay(
         col = mod(idx - 1, 4) + 1
 
         ax = Axis(fig[row, col], title = "$title_prefix $(display_labels[idx])", aspect = DataAspect(), yreversed = true)
-        heatmap!(ax, images[:, :, frame_num]', colormap = :grays, colorrange = (pmin, pmax))
+        heatmap!(ax, images[:, :, frame_num]', colormap = :grays, colorrange = _plot_colorrange(pmin, pmax))
 
         frame_mask = frame_indices .== frame_num
         if any(frame_mask)
@@ -130,7 +219,7 @@ function _save_box_overlay(
         hidedecorations!(ax)
     end
 
-    return save(joinpath(dir, filename), fig)
+    return (; fig, label)
 end
 
 """

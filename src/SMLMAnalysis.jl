@@ -79,7 +79,7 @@ using JLD2: JLD2
 # Makie's plotting names (and FileIO's save) come through CairoMakie; Makie itself is not a
 # direct dependency.
 using CairoMakie: CairoMakie, Axis, Colorbar, DataAspect, Figure, GridLayout, Label, Legend,
-    Point2f, axislegend, band!, barplot!, heatmap!, hidedecorations!, hidespines!,
+    Point2d, Point2f, axislegend, band!, barplot!, heatmap!, hidedecorations!, hidespines!,
     hideydecorations!, hist!, hlines!, lines!, poly!, save, scatter!, text, text!, vlines!,
     vspan!, xlims!, ylims!
 using NearestNeighbors: NearestNeighbors, KDTree, inrange

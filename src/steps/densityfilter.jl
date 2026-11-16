@@ -10,11 +10,17 @@ Density-based filtering that removes isolated localizations lacking nearby neigh
 # Keywords
 - `n_sigma`: Search radius in localization uncertainty units (default: 2.0)
 - `min_neighbors`: Minimum neighbor count. `:auto` uses valley detection between
-  isolated and clustered populations (default: `:auto`)
+  isolated and clustered populations (default: `:auto`). If the rightmost peak is
+  at four neighbors or fewer, warns and keeps emitters with at least one neighbor.
 """
 @kwdef struct DensityFilterConfig <: SMLMData.AbstractSMLMConfig
     n_sigma::Float64 = 2.0
     min_neighbors::Union{Int, Symbol} = :auto  # :auto uses valley detection (see _valley_threshold)
+
+    function DensityFilterConfig(n_sigma, min_neighbors)
+        threshold = min_neighbors isa Real ? Int(min_neighbors) : min_neighbors
+        return new(n_sigma, threshold)
+    end
 end
 
 """
@@ -181,11 +187,11 @@ function _valley_threshold(counts::Vector{Int})
     peak_threshold = 0.05 * maximum(smoothed)
     rightmost_peak_idx = _rightmost_significant_peak(smoothed, peak_threshold)
 
-    # If peak is at very low neighbor counts (< 5), distribution is mostly isolated
-    # Use conservative threshold or warn
+    # A peak at four neighbors or fewer gives no separate clustered population.
+    # Reject only zero-neighbor emitters rather than cutting through that population.
     if rightmost_peak_idx <= 5
-        @warn "Neighbor distribution peaks at low values - most emitters appear isolated"
-        return max(1, rightmost_peak_idx)
+        @warn "Neighbor distribution peaks at low values - no separate clustered population; keeping emitters with >= 1 neighbor"
+        return 1
     end
 
     # Find valley (local minimum) between origin and the peak
