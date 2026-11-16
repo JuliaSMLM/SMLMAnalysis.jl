@@ -11,21 +11,23 @@ const SMLD_FORMAT_VERSION = "1.3"  # v1.3: polygon / CellPolygon user metadata (
 
 # Under Checkpoint.END the pipeline watches the last checkpoint-writing step: if that
 # step saves nothing into the run's output folder, the pipeline saves its output itself
-# (see _run_pipeline). save_smld reports each file it writes to the recorder in scope.
+# (see _run_pipeline). save_smld reports each file it writes to every recorder in scope,
+# so a pipeline run nested inside a watched step still counts for the outer run.
 struct _CheckpointRecorder
     root::String                  # the run's outdir, as a real path
     saved::Threads.Atomic{Bool}   # set when a save lands inside root
 end
 _CheckpointRecorder(outdir::String) = _CheckpointRecorder(realpath(outdir), Threads.Atomic{Bool}(false))
 
-const _CHECKPOINT_RECORDER = ScopedValue{Union{Nothing, _CheckpointRecorder}}(nothing)
+# Active recorders, outermost first.
+const _CHECKPOINT_RECORDERS = ScopedValue{Tuple{Vararg{_CheckpointRecorder}}}(())
 
 function _note_checkpoint_saved(filepath::String)
-    rec = _CHECKPOINT_RECORDER[]
-    rec === nothing && return nothing
+    recorders = _CHECKPOINT_RECORDERS[]
+    isempty(recorders) && return nothing
     path = realpath(filepath)
-    if startswith(path, joinpath(rec.root, ""))
-        rec.saved[] = true
+    for rec in recorders
+        startswith(path, joinpath(rec.root, "")) && (rec.saved[] = true)
     end
     return nothing
 end

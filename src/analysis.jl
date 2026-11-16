@@ -407,7 +407,7 @@ function _run_pipeline(
             watch = cp_level == Checkpoint.END && i == final_smld_idx && outdir !== nothing
             if watch
                 recorder = _CheckpointRecorder(outdir)
-                (state, step_info) = with(run_step, _CHECKPOINT_RECORDER => recorder)
+                (state, step_info) = with(run_step, _CHECKPOINT_RECORDERS => (_CHECKPOINT_RECORDERS[]..., recorder))
                 if !recorder.saved[] && state isa SMLMData.BasicSMLD
                     _save_final_checkpoint(state, step_outdir(outdir, i, cfg), i, cfg, v)
                 end

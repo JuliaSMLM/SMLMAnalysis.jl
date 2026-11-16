@@ -287,6 +287,20 @@ function SMLMAnalysis.analyze(
     return (out, SMLMAnalysis.StepInfo(step_number, cfg, 0.0, Dict{Symbol, Any}()))
 end
 
+# A user-defined step that runs a nested pipeline under Checkpoint.END into `subdir`.
+struct _CustomNestedConfig <: SMLMAnalysis.AbstractSMLMConfig
+    subdir::String
+end
+function SMLMAnalysis.analyze(
+        smld::SMLMAnalysis.BasicSMLD, cfg::_CustomNestedConfig; outdir = nothing, step_number::Int = 0, kwargs...
+    )
+    inner = SMLMAnalysis.AbstractSMLMConfig[FilterConfig(photons = (0.0, Inf))]
+    result, _ = SMLMAnalysis._run_pipeline(
+        smld, inner, smld.camera, joinpath(outdir, cfg.subdir), Verbosity.SILENT, Checkpoint.END
+    )
+    return (result.smld, SMLMAnalysis.StepInfo(step_number, cfg, 0.0, Dict{Symbol, Any}()))
+end
+
 @testset "Checkpoint.END saves the output of a final step that saves nothing" begin
     cam = IdealCamera(16, 16, 0.1)
     emitters = [
@@ -326,6 +340,24 @@ end
             steps = SMLMAnalysis.AbstractSMLMConfig[_CustomElsewhereWriterConfig(4, mine)]
             run_steps(steps, outdir, Checkpoint.END)
             @test isfile(mine)
+            @test smld_files(outdir) == [joinpath(SMLMAnalysis.step_outdir(outdir, 1, steps[1]), "smld.h5")]
+        end
+    end
+
+    # A nested END run inside the step saves into the run's folder, so that counts: the
+    # inner filter's checkpoint is the only one.
+    mktempdir() do outdir
+        steps = SMLMAnalysis.AbstractSMLMConfig[_CustomNestedConfig("inner")]
+        result, _ = run_steps(steps, outdir, Checkpoint.END)
+        @test smld_files(outdir) == [joinpath(outdir, "inner", "01_filter", "smld_filtered.h5")]
+        @test length(result.smld.emitters) == 10
+    end
+    # Nested outside the run's folder, it does not count: the outer run saves smld.h5.
+    mktempdir() do elsewhere
+        mktempdir() do outdir
+            steps = SMLMAnalysis.AbstractSMLMConfig[_CustomNestedConfig(elsewhere)]
+            run_steps(steps, outdir, Checkpoint.END)
+            @test isfile(joinpath(elsewhere, "01_filter", "smld_filtered.h5"))
             @test smld_files(outdir) == [joinpath(SMLMAnalysis.step_outdir(outdir, 1, steps[1]), "smld.h5")]
         end
     end
