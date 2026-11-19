@@ -242,7 +242,8 @@ end
             for i in 1:10
     ]
     smld = SMLMAnalysis.BasicSMLD(emitters, cam, 10, 1, Dict{String, Any}())
-    smld_files(outdir) = sort([joinpath(d, f) for (d, _, fs) in walkdir(outdir) for f in fs if startswith(f, "smld_")])
+    # Every checkpoint name, including the pipeline's own smld.h5.
+    smld_files(outdir) = sort([joinpath(d, f) for (d, _, fs) in walkdir(outdir) for f in fs if startswith(f, "smld") && endswith(f, ".h5")])
     for steps in (
             SMLMAnalysis.AbstractSMLMConfig[_CustomWriterConfig(4)],
             SMLMAnalysis.AbstractSMLMConfig[FilterConfig(photons = (0.0, Inf)), _CustomWriterConfig(4)],
@@ -251,13 +252,136 @@ end
         mktempdir() do outdir
             result, _ = SMLMAnalysis._run_pipeline(smld, steps, cam, outdir, Verbosity.SILENT, Checkpoint.END)
             files = smld_files(outdir)
-            # Only the custom step's checkpoint, holding what the custom step kept.
+            # Only the custom step's checkpoint, holding what the custom step kept; the
+            # pipeline adds no smld.h5 for a step that saved.
             @test basename.(files) == ["smld_custom.h5"]
             if length(files) == 1
                 @test length(SMLMAnalysis.load_smld(only(files)).emitters) == 4
             end
             @test length(result.smld.emitters) == 4
         end
+    end
+end
+
+# A user-defined step that never saves: step 5 of workflows/extending.md is optional.
+struct _CustomNonWriterConfig <: SMLMAnalysis.AbstractSMLMConfig
+    keep::Int
+end
+function SMLMAnalysis.analyze(
+        smld::SMLMAnalysis.BasicSMLD, cfg::_CustomNonWriterConfig; step_number::Int = 0, kwargs...
+    )
+    out = SMLMAnalysis.BasicSMLD(smld.emitters[1:cfg.keep], smld.camera, smld.n_frames, smld.n_datasets, smld.metadata)
+    return (out, SMLMAnalysis.StepInfo(step_number, cfg, 0.0, Dict{Symbol, Any}()))
+end
+
+# A user-defined step that saves its output, but outside the run's folder.
+struct _CustomElsewhereWriterConfig <: SMLMAnalysis.AbstractSMLMConfig
+    keep::Int
+    path::String
+end
+function SMLMAnalysis.analyze(
+        smld::SMLMAnalysis.BasicSMLD, cfg::_CustomElsewhereWriterConfig; step_number::Int = 0, kwargs...
+    )
+    out = SMLMAnalysis.BasicSMLD(smld.emitters[1:cfg.keep], smld.camera, smld.n_frames, smld.n_datasets, smld.metadata)
+    save_smld(cfg.path, out)
+    return (out, SMLMAnalysis.StepInfo(step_number, cfg, 0.0, Dict{Symbol, Any}()))
+end
+
+# A user-defined step that runs a nested pipeline under Checkpoint.END into `subdir`.
+struct _CustomNestedConfig <: SMLMAnalysis.AbstractSMLMConfig
+    subdir::String
+end
+function SMLMAnalysis.analyze(
+        smld::SMLMAnalysis.BasicSMLD, cfg::_CustomNestedConfig; outdir = nothing, step_number::Int = 0, kwargs...
+    )
+    inner = SMLMAnalysis.AbstractSMLMConfig[FilterConfig(photons = (0.0, Inf))]
+    result, _ = SMLMAnalysis._run_pipeline(
+        smld, inner, smld.camera, joinpath(outdir, cfg.subdir), Verbosity.SILENT, Checkpoint.END
+    )
+    return (result.smld, SMLMAnalysis.StepInfo(step_number, cfg, 0.0, Dict{Symbol, Any}()))
+end
+
+@testset "Checkpoint.END saves the output of a final step that saves nothing" begin
+    cam = IdealCamera(16, 16, 0.1)
+    emitters = [
+        SMLMAnalysis.Emitter2DFit{Float64}(0.1i, 0.1i, 1000.0 + i, 10.0, 0.01, 0.01, 30.0, 1.0; frame = i)
+            for i in 1:10
+    ]
+    smld = SMLMAnalysis.BasicSMLD(emitters, cam, 10, 1, Dict{String, Any}())
+    smld_files(outdir) = sort([joinpath(d, f) for (d, _, fs) in walkdir(outdir) for f in fs if startswith(f, "smld") && endswith(f, ".h5")])
+    run_steps(steps, outdir, level) = SMLMAnalysis._run_pipeline(smld, steps, cam, outdir, Verbosity.SILENT, level)
+
+    # The pipeline saves the step's output as smld.h5 in that step's folder, also when
+    # statistics steps follow it, and nothing else is saved.
+    for steps in (
+            SMLMAnalysis.AbstractSMLMConfig[_CustomNonWriterConfig(4)],
+            SMLMAnalysis.AbstractSMLMConfig[FilterConfig(photons = (0.0, Inf)), _CustomNonWriterConfig(4)],
+            SMLMAnalysis.AbstractSMLMConfig[FilterConfig(photons = (0.0, Inf)), _CustomNonWriterConfig(4), HopkinsConfig()],
+        )
+        mktempdir() do outdir
+            result, _ = run_steps(steps, outdir, Checkpoint.END)
+            i = findfirst(s -> s isa _CustomNonWriterConfig, steps)
+            expected = joinpath(SMLMAnalysis.step_outdir(outdir, i, steps[i]), "smld.h5")
+            @test smld_files(outdir) == [expected]
+            if isfile(expected)
+                saved = SMLMAnalysis.load_smld(expected)
+                @test length(saved.emitters) == 4
+                @test getproperty.(saved.emitters, :x) == getproperty.(result.smld.emitters, :x)
+                @test getproperty.(saved.emitters, :frame) == getproperty.(result.smld.emitters, :frame)
+            end
+            @test length(result.smld.emitters) == 4
+        end
+    end
+
+    # A save outside the run's folder does not count: the run's folder still gets one.
+    mktempdir() do elsewhere
+        mktempdir() do outdir
+            mine = joinpath(elsewhere, "mine.h5")
+            steps = SMLMAnalysis.AbstractSMLMConfig[_CustomElsewhereWriterConfig(4, mine)]
+            run_steps(steps, outdir, Checkpoint.END)
+            @test isfile(mine)
+            @test smld_files(outdir) == [joinpath(SMLMAnalysis.step_outdir(outdir, 1, steps[1]), "smld.h5")]
+        end
+    end
+
+    # A nested END run inside the step saves into the run's folder, so that counts: the
+    # inner filter's checkpoint is the only one.
+    mktempdir() do outdir
+        steps = SMLMAnalysis.AbstractSMLMConfig[_CustomNestedConfig("inner")]
+        result, _ = run_steps(steps, outdir, Checkpoint.END)
+        @test smld_files(outdir) == [joinpath(outdir, "inner", "01_filter", "smld_filtered.h5")]
+        @test length(result.smld.emitters) == 10
+    end
+    # Nested outside the run's folder, it does not count: the outer run saves smld.h5.
+    mktempdir() do elsewhere
+        mktempdir() do outdir
+            steps = SMLMAnalysis.AbstractSMLMConfig[_CustomNestedConfig(elsewhere)]
+            run_steps(steps, outdir, Checkpoint.END)
+            @test isfile(joinpath(elsewhere, "01_filter", "smld_filtered.h5"))
+            @test smld_files(outdir) == [joinpath(SMLMAnalysis.step_outdir(outdir, 1, steps[1]), "smld.h5")]
+        end
+    end
+
+    # The other levels are unchanged: a step that never saves leaves no checkpoint.
+    for level in (Checkpoint.NONE, Checkpoint.EXPENSIVE, Checkpoint.ALL)
+        mktempdir() do outdir
+            run_steps(SMLMAnalysis.AbstractSMLMConfig[_CustomNonWriterConfig(4)], outdir, level)
+            @test isempty(smld_files(outdir))
+        end
+    end
+
+    # Without outdir there is nothing to save, and the run completes.
+    result, _ = run_steps(SMLMAnalysis.AbstractSMLMConfig[_CustomNonWriterConfig(4)], nothing, Checkpoint.END)
+    @test length(result.smld.emitters) == 4
+
+    # A failed save warns and the run still completes: a file stands where the step's
+    # folder would go, so the folder cannot be made.
+    mktempdir() do outdir
+        steps = SMLMAnalysis.AbstractSMLMConfig[_CustomNonWriterConfig(4)]
+        write(SMLMAnalysis.step_outdir(outdir, 1, steps[1]), "not a folder")
+        result, _ = @test_logs (:warn, r"saving its output failed") match_mode = :any run_steps(steps, outdir, Checkpoint.END)
+        @test length(result.smld.emitters) == 4
+        @test isempty(smld_files(outdir))
     end
 end
 

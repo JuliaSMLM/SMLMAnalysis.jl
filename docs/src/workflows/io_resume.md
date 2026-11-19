@@ -63,6 +63,7 @@ Each step uses a stable filename, so you always know where to look:
 | Density Filter | `smld_density.h5` | `ALL` |
 | Clustering | `smld_clustered.h5` | `ALL` |
 | Edge Classification | `smld_edgeclassified.h5` (cell-mask geometry in metadata) | `ALL` |
+| A user-defined step that saves nothing itself | `smld.h5`, written by the pipeline | `END`, when it is the last step that writes |
 
 Checkpoints are versioned HDF5 files written by `save_smld`, so reload one with
 `load_smld` and pick up the pipeline from there:

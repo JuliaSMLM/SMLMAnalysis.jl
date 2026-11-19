@@ -179,7 +179,9 @@ back.
 
 Rendering and statistics steps do not move the `END` checkpoint: the last step
 that writes an SMLD keeps its own filename and any accompanying drift model. A
-custom step counts as a writer (see [Extending the Pipeline](@ref)).
+custom step counts as a writer (see [Extending the Pipeline](@ref)); if it saves
+nothing into `outdir` itself, the pipeline saves its output as `smld.h5` in the
+step's directory.
 
 ```julia
 config = AnalysisConfig(camera = cam, steps = [...], outdir = "output/",
