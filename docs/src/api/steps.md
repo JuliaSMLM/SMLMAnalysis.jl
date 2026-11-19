@@ -33,7 +33,11 @@ BaGoLConfig
 !!! note "CalibrationConfig is a sub-config"
     `CalibrationConfig` configures uncertainty calibration *inside*
     `FrameConnectConfig` (via its `calibration=` field) — it is **not** a separate
-    pipeline step. `SMLMFrameConnection.CalibrationResult` holds its output.
+    pipeline step. [`SMLMFrameConnection.CalibrationResult`](@ref) holds its output.
+
+```@docs
+SMLMFrameConnection.CalibrationResult
+```
 
 ### Clustering (re-exported)
 
