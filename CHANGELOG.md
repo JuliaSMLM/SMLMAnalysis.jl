@@ -7,6 +7,8 @@ the last number (0.1.Z) is non-breaking; one that raises the middle number
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-19
+
 ### Changed
 
 - The `DetectFitConfig` default detection box is now 9 pixels (was 11). This changes
